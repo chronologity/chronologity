@@ -21,6 +21,8 @@ export interface AppConfig {
   readonly eventStore: EventStoreConfig;
   readonly messaging: MessagingConfig;
   readonly auth: AuthConfig;
+  /** Minimum age, in whole years, for creating an account. */
+  readonly minimumAgeYears: number;
   readonly email: EmailConfig;
 }
 
@@ -49,6 +51,7 @@ export function loadConfig(source: Record<string, string | undefined> = process.
     eventStore: toEventStoreConfig(env),
     messaging: toMessagingConfig(env),
     auth: toAuthConfig(env),
+    minimumAgeYears: env.USER_MINIMUM_AGE_YEARS,
     email: toEmailConfig(env),
   };
 }

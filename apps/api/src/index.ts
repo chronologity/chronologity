@@ -39,6 +39,11 @@ async function main(): Promise<void> {
       config: config.auth,
       email,
     },
+    users: {
+      client: eventStore.client,
+      pool: database.pool,
+      minimumAgeYears: config.minimumAgeYears,
+    },
   });
 
   await startServer({

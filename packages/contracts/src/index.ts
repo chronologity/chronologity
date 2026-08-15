@@ -63,6 +63,27 @@ export {
   type SessionSummary,
 } from "./auth.js";
 export {
+  calendarDateSchema,
+  createUserRequestSchema,
+  currentUserSchema,
+  displayNameSchema,
+  handleSchema,
+  preferencesSchema,
+  publicUserSchema,
+  updateHandleRequestSchema,
+  updatePreferencesRequestSchema,
+  updateProfileRequestSchema,
+  type CalendarDate,
+  type CreateUserRequest,
+  type CurrentUser,
+  type Handle,
+  type Preferences,
+  type PublicUser,
+  type UpdateHandleRequest,
+  type UpdatePreferencesRequest,
+  type UpdateProfileRequest,
+} from "./users.js";
+export {
   actorSchema,
   envelopeOf,
   eventEnvelopeSchema,

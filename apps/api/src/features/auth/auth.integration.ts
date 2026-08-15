@@ -54,6 +54,7 @@ const config: AppConfig = {
     passwordHashing: { memoryCostKib: 8_192, timeCost: 1, parallelism: 1 },
     passwordPolicy: { minimumLength: 12, maximumLength: 256 },
   },
+  minimumAgeYears: 13,
   email: {
     host: process.env.SMTP_HOST ?? "localhost",
     port: Number(process.env.SMTP_PORT ?? "1025"),

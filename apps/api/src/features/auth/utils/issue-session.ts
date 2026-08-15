@@ -14,6 +14,7 @@ import {
 import type { AuthDependencies } from "../dependencies.js";
 import { authEventMetadata } from "./event-metadata.js";
 import { toSessionCredentials } from "./issue-credentials.js";
+import { findUserIdForIdentity } from "../../users/utils/user-read-model.js";
 import { recordSessionCreated } from "./session-read-model.js";
 
 /**
@@ -69,9 +70,15 @@ export async function issueSessionFor(
     expectedRevision: "no_stream",
   });
 
+  // Resolved once, at issue time, rather than on every authenticated request.
+  // Someone who completes account creation mid-session obtains a token
+  // carrying it on their next refresh; until then the guard falls back to a
+  // lookup, so nothing is broken in the meantime.
+  const userId = await findUserIdForIdentity(deps.pool, input.identityId);
+
   const access = await issueAccessToken(
     deps.config,
-    { identityId: input.identityId, sessionId },
+    { identityId: input.identityId, sessionId, userId },
     input.at,
   );
 

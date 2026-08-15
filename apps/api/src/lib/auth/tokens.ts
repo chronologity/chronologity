@@ -17,9 +17,16 @@ import type { AuthConfig } from "../../config/auth-config.js";
 
 /** Claims carried by an access token. Deliberately minimal. */
 export interface AccessTokenClaims {
-  /** Subject: the Identity. The User claim arrives when Users exist, in 5B. */
+  /** Subject: the Identity, which exists from the moment someone signs in. */
   readonly identityId: string;
   readonly sessionId: string;
+  /**
+   * The User, once account creation is complete.
+   *
+   * Absent for someone authenticated who has not finished onboarding, which is
+   * an ordinary state rather than an error.
+   */
+  readonly userId?: string | undefined;
 }
 
 export interface IssuedAccessToken {
@@ -47,7 +54,10 @@ export async function issueAccessToken(
 ): Promise<IssuedAccessToken> {
   const expiresAt = new Date(now.getTime() + config.accessTokenTtlSeconds * 1000);
 
-  const token = await new SignJWT({ sid: claims.sessionId })
+  const token = await new SignJWT({
+    sid: claims.sessionId,
+    ...(claims.userId === undefined ? {} : { uid: claims.userId }),
+  })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(claims.identityId)
     .setIssuer(config.issuer)
@@ -83,12 +93,17 @@ export async function verifyAccessToken(
 
   const identityId = payload.sub;
   const sessionId = payload.sid;
+  const userId = payload.uid;
 
   if (typeof identityId !== "string" || typeof sessionId !== "string") {
     throw new Error("Access token is missing required claims");
   }
 
-  return { identityId, sessionId };
+  return {
+    identityId,
+    sessionId,
+    ...(typeof userId === "string" ? { userId } : {}),
+  };
 }
 
 export interface GeneratedRefreshToken {

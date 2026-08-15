@@ -31,6 +31,7 @@ const config: AppConfig = {
     passwordHashing: { memoryCostKib: 19_456, timeCost: 2, parallelism: 1 },
     passwordPolicy: { minimumLength: 12, maximumLength: 256 },
   },
+  minimumAgeYears: 13,
   email: { host: "unused", port: 1025, from: "no-reply@chronologity.local" },
 };
 

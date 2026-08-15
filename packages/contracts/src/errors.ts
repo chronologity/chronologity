@@ -18,6 +18,10 @@ export const errorCodeSchema = z.enum([
   "PROVIDER_UNAVAILABLE",
   // Transport level.
   "VALIDATION_FAILED",
+  // The caller is authenticated but has not finished account creation. A
+  // distinct code because the client's response is specific: send them to
+  // onboarding, not to sign in again.
+  "ONBOARDING_REQUIRED",
   "NOT_FOUND",
   "RATE_LIMITED",
   "INTERNAL_ERROR",

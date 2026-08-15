@@ -11,6 +11,7 @@ import { clockFor, type AuthDependencies } from "../dependencies.js";
 import { authEventMetadata } from "../utils/event-metadata.js";
 import { toSessionCredentials } from "../utils/issue-credentials.js";
 import { recordSessionRefreshed, recordSessionRevoked } from "../utils/session-read-model.js";
+import { findUserIdForIdentity } from "../../users/utils/user-read-model.js";
 import { loadSession } from "../utils/session-store.js";
 import type { RefreshSessionCommand } from "./refresh-session.command.js";
 
@@ -85,7 +86,10 @@ export async function handleRefreshSession(
     throw new UnauthenticatedError("Session could not be refreshed");
   }
 
-  const access = await issueAccessToken(deps.config, { identityId, sessionId }, at);
+  // Re-resolved on refresh, which is how a token catches up after account
+  // creation.
+  const userId = await findUserIdForIdentity(deps.pool, identityId);
+  const access = await issueAccessToken(deps.config, { identityId, sessionId, userId }, at);
 
   await withTransaction(deps.pool, async (tx) => {
     await recordSessionRefreshed(tx, sessionId, at);

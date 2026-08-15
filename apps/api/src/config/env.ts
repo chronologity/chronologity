@@ -51,6 +51,11 @@ export const envSchema = z.object({
   AUTH_PASSWORD_MIN_LENGTH: z.coerce.number().int().min(8).default(12),
   AUTH_PASSWORD_MAX_LENGTH: z.coerce.number().int().max(1_024).default(256),
 
+  // A legal question rather than a technical one, and it differs by
+  // jurisdiction. Thirteen matches COPPA; the European Union sets sixteen with
+  // member states free to lower it to thirteen.
+  USER_MINIMUM_AGE_YEARS: z.coerce.number().int().min(0).max(25).default(13),
+
   SMTP_HOST: z.string().min(1),
   SMTP_PORT: portSchema,
   SMTP_FROM: z.email(),

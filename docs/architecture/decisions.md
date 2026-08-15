@@ -1862,3 +1862,33 @@ When considering a future architectural change, ask:
 > **What established constraint or measured problem requires this change, which canonical decision would it alter, what simpler alternatives exist, and what new long-term obligation will the change create?**
 
 Chronologity should evolve deliberately. Architecture decisions should remain explainable long after the implementation details that motivated them have changed.
+
+---
+
+# ADR-072 — Enforce a Configurable Minimum Age and Store the Birthdate Outside Event History
+
+**Status:** Accepted
+
+## Decision
+
+Account creation requires a date of birth and refuses anyone below a configured minimum age, defaulting to thirteen. The birthdate is stored in `user_restricted_data` in PostgreSQL — a table separate from `users` — alongside the minimum in force when the account was admitted. It is never written to event history, never appears in a public profile, and is returned only to the person it belongs to.
+
+Refusals do not state the threshold, and being below it is reported identically to an implausible birthdate.
+
+## Alternatives Considered
+
+Storing only a derived flag — "old enough" — was considered, and rejected: it cannot answer a regulator asking whether a specific account was correctly admitted, and it cannot be re-evaluated if the threshold changes. Storing an attestation checkbox instead of a date was rejected for the same reason.
+
+Per-jurisdiction thresholds — thirteen under COPPA, sixteen under GDPR Article 8 where a member state has not lowered it — are the eventual correct answer, but they require a country signal, and `docs/domain/users.md` defers country to a separate legal decision. One global configurable minimum is the honest interim.
+
+## Rationale
+
+A minimum age cannot be enforced without a birthdate, and a birthdate is restricted personal data. Event history is permanent by design, so anything written there cannot be erased when someone asks for their data to be deleted; that alone disqualifies event history as the place to keep it. A separate table means no query written against the profile can return it by accident, and erasure is one targeted delete.
+
+The threshold is configuration because it is a legal question rather than a technical one. Recording the value in force at creation is what makes a changed threshold survivable: without it, nobody can say afterwards which rule an account was admitted under.
+
+Refusals stay silent about the number because an age gate that states its own answer only teaches people what to type instead.
+
+## Consequences
+
+Every account created from here carries a birthdate, and erasure work in Phase 5R must delete `user_restricted_data` explicitly rather than relying on a cascade from an event stream that never held it. Raising the minimum does not retroactively remove accounts admitted under a lower one; deciding what to do about them is a policy question this decision deliberately leaves open.

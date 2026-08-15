@@ -4,6 +4,7 @@ import { toErrorResponse } from "../lib/errors/to-error-response.js";
 import type { HealthCheckable } from "../lib/health.js";
 import { loggerOptions } from "../lib/logger/logger.js";
 import type { AuthDependencies } from "../features/auth/index.js";
+import type { UserDependencies } from "../features/users/index.js";
 import { registerPlugins } from "./register-plugins.js";
 import { registerRoutes } from "./register-routes.js";
 
@@ -32,6 +33,8 @@ export interface BuildAppOptions {
    * have to provide a database and an event store.
    */
   auth?: AuthDependencies | undefined;
+  /** User wiring. Mounted only alongside authentication. */
+  users?: UserDependencies | undefined;
 }
 
 /**
@@ -42,13 +45,14 @@ export interface BuildAppOptions {
  * port is a test suite that fails in parallel.
  *
  * @param options - Configuration, the infrastructure this instance depends on,
- *   and optional authentication wiring.
+ *   and optional authentication and User wiring.
  * @returns The application, ready to inject into or to bind to a port.
  */
 export async function buildApp({
   config,
   dependencies,
   auth,
+  users,
 }: BuildAppOptions): Promise<FastifyInstance> {
   // Typed explicitly: Fastify's overloads otherwise resolve a broadly-typed
   // `logger` to the HTTP/2 signature, and every later use of the instance
@@ -87,7 +91,7 @@ export async function buildApp({
   );
 
   await registerPlugins(app, auth);
-  await registerRoutes(app, auth);
+  await registerRoutes(app, auth, users);
 
   return app;
 }
