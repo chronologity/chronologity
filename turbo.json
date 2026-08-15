@@ -20,11 +20,10 @@
       "dependsOn": ["^typecheck"]
     },
     "test": {
-      "dependsOn": ["^build"],
-      "outputs": ["coverage/**"]
+      "dependsOn": ["build", "^build"]
     },
     "test:unit": {
-      "outputs": ["coverage/**"]
+      "dependsOn": ["build", "^build"]
     },
     "test:integration": {
       "cache": false

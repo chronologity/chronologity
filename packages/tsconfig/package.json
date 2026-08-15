@@ -5,9 +5,11 @@
   "description": "Shared TypeScript configuration presets for Chronologity.",
   "license": "UNLICENSED",
   "files": [
-    "base.json"
+    "base.json",
+    "node.json"
   ],
   "exports": {
-    "./base.json": "./base.json"
+    "./base.json": "./base.json",
+    "./node.json": "./node.json"
   }
 }

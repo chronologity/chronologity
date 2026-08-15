@@ -1495,6 +1495,34 @@ This decision is reversed by removing the `typescript` dependency from `packages
 
 ---
 
+# ADR-070 — Use Zod for Runtime Contract Validation
+
+**Status:** Accepted
+
+## Decision
+
+`packages/contracts` defines serialized boundary contracts with Zod. Command DTOs, event schemas, API request and response contracts, and environment schemas are written once in Zod and shared across applications.
+
+## Alternatives Considered
+
+TypeBox was considered, which makes JSON Schema the source of truth and is Fastify's native path. Valibot was considered for its substantially smaller client bundle.
+
+## Rationale
+
+Runtime validation is mandatory at trust boundaries, and TypeScript types alone cannot provide it. The same contract must be usable by the Fastify API, the feed aggregator, the React Native client, and Kafka consumers.
+
+Zod 4 emits JSON Schema directly, so Fastify still receives real JSON Schema for validation and fast serialization rather than losing that capability to a runtime-only validator. This removes the principal advantage TypeBox held, while keeping type inference that reads closer to the product language.
+
+Contracts are read far more often than they are written, and by more people than write them. Familiarity is therefore a durable property rather than a matter of taste.
+
+## Consequences
+
+Zod is a runtime dependency of every application, including mobile, where it is the largest of the three candidates. If mobile bundle size becomes a measured problem, the contract definitions remain the single place to address it.
+
+JSON Schema is a derived artifact rather than the source of truth. Anything requiring hand-written JSON Schema must convert rather than author it directly.
+
+---
+
 # Superseded Decisions
 
 This section preserves important architectural choices that are no longer canonical.
