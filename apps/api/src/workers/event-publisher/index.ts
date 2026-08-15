@@ -49,7 +49,7 @@ async function main(): Promise<void> {
   process.once("SIGINT", () => void shutdown());
 
   while (running) {
-    const { published } = await publishPendingEvents({
+    const { reachedEnd } = await publishPendingEvents({
       client: eventStore.client,
       pool: database.pool,
       producer,
@@ -57,9 +57,10 @@ async function main(): Promise<void> {
       maxEvents: 500,
     });
 
-    // Idle only when there was nothing to do. A publisher that always sleeps
-    // adds latency to every event for the sake of the quiet case.
-    if (published === 0) {
+    // Idle only once caught up. Sleeping because a pass published nothing
+    // would stall whenever a batch happened to contain only events this
+    // publisher does not route.
+    if (reachedEnd) {
       await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
     }
   }

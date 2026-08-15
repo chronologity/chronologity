@@ -28,6 +28,21 @@ export const envSchema = z.object({
   EVENTSTOREDB_URL: z.string().startsWith("esdb://"),
 
   KAFKA_BROKERS: z.string().min(1),
+
+  // No default for the signing secret: a development fallback would eventually
+  // reach an environment nobody re-checked, and a known signing key is a
+  // forged session for anyone who has read the repository.
+  AUTH_JWT_SECRET: z.string().min(16),
+  AUTH_JWT_ISSUER: z.string().min(1).default("chronologity"),
+  AUTH_JWT_AUDIENCE: z.string().min(1).default("chronologity-clients"),
+  AUTH_ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(600),
+  AUTH_REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(2_592_000),
+  AUTH_MAGIC_LINK_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+  AUTH_MAGIC_LINK_BASE_URL: z.url(),
+
+  SMTP_HOST: z.string().min(1),
+  SMTP_PORT: portSchema,
+  SMTP_FROM: z.email(),
 });
 
 export type Env = z.infer<typeof envSchema>;

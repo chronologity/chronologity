@@ -3,6 +3,7 @@ import { loadConfig } from "./config/app-config.js";
 import { createDatabase } from "./lib/database/postgres.js";
 import { createEventStore } from "./lib/eventstore/client.js";
 import { createMessaging } from "./lib/messaging/kafka.js";
+import { createEmailClient } from "./integrations/email/email-client.js";
 import { buildApp } from "./server/app.js";
 import { startServer } from "./server/server.js";
 
@@ -21,9 +22,24 @@ async function main(): Promise<void> {
   const messaging = createMessaging(config.messaging);
   const dependencies = [database, eventStore, messaging];
 
-  const app = await buildApp({ config, dependencies });
+  const email = createEmailClient(config.email);
 
-  await startServer({ app, config, resources: dependencies });
+  const app = await buildApp({
+    config,
+    dependencies,
+    auth: {
+      client: eventStore.client,
+      pool: database.pool,
+      config: config.auth,
+      email,
+    },
+  });
+
+  await startServer({
+    app,
+    config,
+    resources: [...dependencies, { name: "email", close: () => email.close() }],
+  });
 
   // Connectivity is reported rather than required at startup. An API that
   // refuses to boot while a dependency is briefly unavailable cannot serve

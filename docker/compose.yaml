@@ -143,6 +143,32 @@ services:
       retries: 20
       start_period: 10s
 
+  # ───────────────────────────────────────────────────────────────
+  # Mailpit — local SMTP sink.
+  #
+  # Magic-link authentication is only meaningfully tested if a message
+  # actually leaves the application. Mailpit accepts real SMTP and exposes an
+  # HTTP API the integration tests read the message back from, so the login
+  # flow is proven end to end rather than stubbed at the boundary.
+  #
+  # Development only. Nothing here implies a production email provider.
+  # ───────────────────────────────────────────────────────────────
+  mailpit:
+    image: axllent/mailpit:v1.30.7
+    restart: unless-stopped
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    ports:
+      - "${SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
 volumes:
   postgres-data:
   eventstore-data:

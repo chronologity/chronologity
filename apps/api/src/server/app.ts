@@ -3,6 +3,7 @@ import type { AppConfig } from "../config/app-config.js";
 import { toErrorResponse } from "../lib/errors/to-error-response.js";
 import type { HealthCheckable } from "../lib/health.js";
 import { loggerOptions } from "../lib/logger/logger.js";
+import type { AuthDependencies } from "../features/auth/index.js";
 import { registerPlugins } from "./register-plugins.js";
 import { registerRoutes } from "./register-routes.js";
 
@@ -23,6 +24,14 @@ export interface BuildAppOptions {
    * on purpose — which is the only way to prove readiness reports it.
    */
   dependencies: readonly HealthCheckable[];
+  /**
+   * Authentication wiring.
+   *
+   * Optional so a test can build an application without it — health checks and
+   * error mapping do not need authentication, and tests for them should not
+   * have to provide a database and an event store.
+   */
+  auth?: AuthDependencies | undefined;
 }
 
 /**
@@ -35,6 +44,7 @@ export interface BuildAppOptions {
 export async function buildApp({
   config,
   dependencies,
+  auth,
 }: BuildAppOptions): Promise<FastifyInstance> {
   // Typed explicitly: Fastify's overloads otherwise resolve a broadly-typed
   // `logger` to the HTTP/2 signature, and every later use of the instance
@@ -72,8 +82,8 @@ export async function buildApp({
     }),
   );
 
-  await registerPlugins(app);
-  await registerRoutes(app);
+  await registerPlugins(app, auth);
+  await registerRoutes(app, auth);
 
   return app;
 }

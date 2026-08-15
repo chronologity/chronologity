@@ -26,7 +26,18 @@
       "dependsOn": ["build", "^build"]
     },
     "test:integration": {
-      "cache": false
+      "cache": false,
+      "env": [
+        "NODE_ENV",
+        "LOG_LEVEL",
+        "POSTGRES_*",
+        "EVENTSTOREDB_*",
+        "KAFKA_*",
+        "CLICKHOUSE_*",
+        "AUTH_*",
+        "SMTP_*",
+        "MAILPIT_*"
+      ]
     },
     "clean": {
       "cache": false

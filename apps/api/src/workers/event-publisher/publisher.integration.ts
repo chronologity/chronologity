@@ -31,9 +31,17 @@ const databaseConfig = {
   password: process.env.POSTGRES_PASSWORD ?? "chronologity",
 };
 
-const CATEGORY = "pubtest";
-const BOUNDARY = "pubtest";
+// A distinct category and topic per run. Sharing them across runs makes a
+// fresh consumer replay every message an earlier run left behind, and sharing
+// a category between the two suites below lets one suite's appends land in the
+// other's assertions.
+const RUN = randomUUID().slice(0, 8);
+const CATEGORY = `pubtest${RUN.replace(/-/g, "")}`;
+const BOUNDARY = `pubtest-${RUN}`;
 const TOPIC = topicName(BOUNDARY);
+
+/** The projection suite writes its own history, so it cannot disturb publication. */
+const PROJECTION_CATEGORY = `projtest${RUN.replace(/-/g, "")}`;
 
 const metadata = (traceId: string): EventMetadata => ({
   traceId,
@@ -52,14 +60,14 @@ const metadata = (traceId: string): EventMetadata => ({
  * its slice. Draining is what makes "published" mean "caught up".
  */
 const drain = async (
-  run: () => Promise<{ published: number }>,
-  maxPasses = 100,
+  run: () => Promise<{ published: number; reachedEnd: boolean }>,
+  maxPasses = 200,
 ): Promise<number> => {
   let total = 0;
   for (let pass = 0; pass < maxPasses; pass += 1) {
-    const { published } = await run();
+    const { published, reachedEnd } = await run();
     total += published;
-    if (published === 0) return total;
+    if (reachedEnd) return total;
   }
   throw new Error("Publisher did not drain");
 };
@@ -274,7 +282,7 @@ describe("projection foundation", () => {
 
     await appendEvents({
       client: eventStore.client,
-      streamName: streamName(CATEGORY, randomUUID()),
+      streamName: streamName(PROJECTION_CATEGORY, randomUUID()),
       events: [{ type: "Counted", payload: { n: 1 } }],
       metadata: metadata(randomUUID()),
       expectedRevision: "no_stream",
@@ -308,7 +316,7 @@ describe("projection foundation", () => {
 
     await appendEvents({
       client: eventStore.client,
-      streamName: streamName(CATEGORY, randomUUID()),
+      streamName: streamName(PROJECTION_CATEGORY, randomUUID()),
       events: [{ type: "Rebuildable", payload: { n: 1 } }],
       metadata: metadata(randomUUID()),
       expectedRevision: "no_stream",

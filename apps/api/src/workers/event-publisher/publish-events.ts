@@ -38,6 +38,14 @@ export interface PublisherOptions {
 export interface PublishResult {
   readonly published: number;
   readonly position: bigint | undefined;
+  /**
+   * Whether this pass read to the end of history.
+   *
+   * "Published nothing" does not mean "caught up": a pass can spend its whole
+   * budget on events belonging to categories this publisher does not route.
+   * Callers deciding whether to poll again need this rather than the count.
+   */
+  readonly reachedEnd: boolean;
 }
 
 const DEFAULT_PUBLISHER_NAME = "eventstore-to-kafka";
@@ -70,6 +78,14 @@ export async function publishPendingEvents({
 
   let published = 0;
   let position = fromPosition;
+  // Positions passed over without publishing. Committing one transaction per
+  // skipped event makes a pass cost as much as the whole log, and `$all`
+  // contains every stream in the database, most of which any given publisher
+  // does not route. Recording them once per pass is safe: a crash re-scans
+  // events it had already decided not to publish, which costs a little time
+  // and changes nothing.
+  let unrecordedSkip: bigint | undefined;
+  let examined = 0;
 
   const stream = client.readAll({
     direction: "forwards",
@@ -79,6 +95,7 @@ export async function publishPendingEvents({
   });
 
   for await (const resolved of stream) {
+    examined += 1;
     const event = resolved.event;
 
     if (event === undefined || event.type.startsWith("$") || event.streamId.startsWith("$")) {
@@ -103,7 +120,7 @@ export async function publishPendingEvents({
     if (parsed === undefined) {
       logger?.debug({ streamName: event.streamId }, "Skipping unrecognised stream");
       position = commitPosition;
-      await recordPosition(commitPosition);
+      unrecordedSkip = commitPosition;
       continue;
     }
 
@@ -115,7 +132,7 @@ export async function publishPendingEvents({
     // consumer merely because it was created.
     if (boundary === undefined) {
       position = commitPosition;
-      await recordPosition(commitPosition);
+      unrecordedSkip = commitPosition;
       continue;
     }
 
@@ -150,14 +167,23 @@ export async function publishPendingEvents({
     // Only after the broker has acknowledged. Advancing first would turn a
     // publish failure into an event that is silently never published.
     await recordPosition(commitPosition);
+    unrecordedSkip = undefined;
 
     published += 1;
     position = commitPosition;
   }
 
-  logger?.info({ publisher: publisherName, published }, "Publication pass complete");
+  // Skipped ground is recorded once, at the end, so the next pass starts past
+  // it rather than walking it again.
+  if (unrecordedSkip !== undefined) {
+    await recordPosition(unrecordedSkip);
+  }
 
-  return { published, position };
+  const reachedEnd = maxEvents === undefined || examined < maxEvents;
+
+  logger?.info({ publisher: publisherName, published, reachedEnd }, "Publication pass complete");
+
+  return { published, position, reachedEnd };
 
   async function recordPosition(value: bigint): Promise<void> {
     await withTransaction(pool, async (tx) => {

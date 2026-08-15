@@ -33,6 +33,22 @@ export {
   type ErrorResponse,
 } from "./errors.js";
 export {
+  createSessionRequestSchema,
+  magicLinkRequestSchema,
+  magicLinkResponseSchema,
+  refreshSessionRequestSchema,
+  sessionCredentialsSchema,
+  sessionListSchema,
+  sessionSummarySchema,
+  type CreateSessionRequest,
+  type MagicLinkRequest,
+  type MagicLinkResponse,
+  type RefreshSessionRequest,
+  type SessionCredentials,
+  type SessionList,
+  type SessionSummary,
+} from "./auth.js";
+export {
   actorSchema,
   envelopeOf,
   eventEnvelopeSchema,

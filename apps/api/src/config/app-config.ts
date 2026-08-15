@@ -1,5 +1,7 @@
 import { parseEnv } from "@chronologity/config";
+import { toAuthConfig, type AuthConfig } from "./auth-config.js";
 import { toDatabaseConfig, type DatabaseConfig } from "./database-config.js";
+import { toEmailConfig, type EmailConfig } from "./email-config.js";
 import { envSchema, type Env } from "./env.js";
 import { toEventStoreConfig, type EventStoreConfig } from "./eventstore-config.js";
 import { toMessagingConfig, type MessagingConfig } from "./messaging-config.js";
@@ -18,6 +20,8 @@ export interface AppConfig {
   readonly database: DatabaseConfig;
   readonly eventStore: EventStoreConfig;
   readonly messaging: MessagingConfig;
+  readonly auth: AuthConfig;
+  readonly email: EmailConfig;
 }
 
 /**
@@ -37,5 +41,7 @@ export function loadConfig(source: Record<string, string | undefined> = process.
     database: toDatabaseConfig(env),
     eventStore: toEventStoreConfig(env),
     messaging: toMessagingConfig(env),
+    auth: toAuthConfig(env),
+    email: toEmailConfig(env),
   };
 }

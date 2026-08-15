@@ -47,6 +47,25 @@ export function toErrorResponse(error: unknown, traceId: string): MappedError {
     };
   }
 
+  // Fastify and its plugins reject some requests before a handler ever runs:
+  // rate limits, oversized bodies, unsupported media types. Those carry a
+  // deliberate 4xx status, and treating them as unexpected would report a
+  // refusal the system meant as a server failure it did not have.
+  const framework = frameworkStatus(error);
+
+  if (framework !== undefined) {
+    return {
+      status: framework,
+      body: {
+        code: CODE_FOR_STATUS[framework] ?? "VALIDATION_FAILED",
+        // Our wording, not the framework's: its messages are written for
+        // developers and occasionally name internals.
+        message: MESSAGE_FOR_STATUS[framework] ?? "Request rejected",
+        traceId,
+      },
+    };
+  }
+
   return {
     status: 500,
     body: {
@@ -55,4 +74,45 @@ export function toErrorResponse(error: unknown, traceId: string): MappedError {
       traceId,
     },
   };
+}
+
+const CODE_FOR_STATUS: Readonly<Record<number, ErrorResponse["code"]>> = {
+  400: "VALIDATION_FAILED",
+  401: "AUTHENTICATION_FAILED",
+  403: "AUTHORIZATION_DENIED",
+  404: "NOT_FOUND",
+  413: "VALIDATION_FAILED",
+  415: "VALIDATION_FAILED",
+  429: "RATE_LIMITED",
+};
+
+const MESSAGE_FOR_STATUS: Readonly<Record<number, string>> = {
+  400: "Request failed validation",
+  401: "Authentication required",
+  403: "Not permitted",
+  404: "Not found",
+  413: "Request payload is too large",
+  415: "Unsupported content type",
+  429: "Too many requests",
+};
+
+/**
+ * The status a framework-level rejection asked for, if any.
+ *
+ * Only 4xx is honoured. A plugin reporting 5xx is reporting a failure, and
+ * failures go through the unexpected-error path where their detail stays in
+ * the logs.
+ */
+function frameworkStatus(error: unknown): number | undefined {
+  if (typeof error !== "object" || error === null || !("statusCode" in error)) {
+    return undefined;
+  }
+
+  const status = (error as { statusCode: unknown }).statusCode;
+
+  if (typeof status !== "number" || !Number.isInteger(status) || status < 400 || status > 499) {
+    return undefined;
+  }
+
+  return status;
 }

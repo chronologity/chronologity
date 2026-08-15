@@ -26,16 +26,20 @@
     "@eventstore/db-client": "^6.2.1",
     "@fastify/cors": "^11.3.0",
     "@fastify/helmet": "^13.1.0",
+    "@fastify/rate-limit": "^11.2.0",
     "fastify": "^5.12.0",
     "fastify-plugin": "^6.0.0",
     "fastify-type-provider-zod": "^7.0.0",
+    "jose": "^6.2.8",
     "kafkajs": "^2.2.4",
+    "nodemailer": "^9.0.5",
     "pg": "^8.23.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@chronologity/tsconfig": "workspace:*",
     "@types/node": "^24.0.0",
+    "@types/nodemailer": "^8.0.1",
     "@types/pg": "^8.21.0",
     "typescript": "^7.0.2"
   }

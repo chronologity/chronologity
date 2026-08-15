@@ -20,6 +20,16 @@ const config: AppConfig = {
   },
   eventStore: { connectionString: "esdb://unused:2113?tls=false" },
   messaging: { brokers: ["unused:9092"], clientId: "test" },
+  auth: {
+    jwtSecret: new TextEncoder().encode("test-secret-value-long-enough-for-hs256"),
+    issuer: "chronologity",
+    audience: "chronologity-clients",
+    accessTokenTtlSeconds: 600,
+    refreshTokenTtlSeconds: 2_592_000,
+    magicLinkTtlSeconds: 900,
+    magicLinkBaseUrl: "http://localhost:3000/auth/sessions",
+  },
+  email: { host: "unused", port: 1025, from: "no-reply@chronologity.local" },
 };
 
 const healthy = (name: string): HealthCheckable => ({
