@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { after, describe, it } from "node:test";
 import type { AppConfig } from "../config/app-config.js";
-import { NotFoundError, UnauthorizedError } from "../lib/errors/index.js";
+import { NotFoundError } from "../lib/errors/not-found-error.js";
+import { UnauthorizedError } from "../lib/errors/unauthorized-error.js";
 import type { HealthCheckable } from "../lib/health.js";
 import { buildApp } from "./app.js";
 

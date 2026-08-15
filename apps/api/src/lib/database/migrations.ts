@@ -17,7 +17,7 @@ import type { Logger } from "../logger/logger.js";
  *
  * Filenames are `<UTC timestamp>_<name>.sql`:
  *
- *     20260815031100_foundation.sql
+ *     20260815031100-foundation.sql
  *
  * The prefix is YYYYMMDDHHMMSS in UTC. Being fixed-width, it sorts
  * lexicographically in the same order it sorts chronologically, so ordering is
@@ -36,8 +36,8 @@ const ADVISORY_LOCK_KEY = 8_264_119_570_001n;
 
 const MIGRATIONS_DIRECTORY = new URL("../../../migrations/", import.meta.url);
 
-/** `YYYYMMDDHHMMSS_<name>`, e.g. `20260815031100_foundation`. */
-const VERSION_PATTERN = /^\d{14}_[a-z0-9]+(?:_[a-z0-9]+)*$/;
+/** `YYYYMMDDHHMMSS-<kebab-case-name>`, e.g. `20260815031100-foundation`. */
+const VERSION_PATTERN = /^\d{14}-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export interface MigrationResult {
   readonly applied: readonly string[];
@@ -65,7 +65,7 @@ async function readMigrations(): Promise<{ version: string; sql: string }[]> {
     // somewhere unintended, and a migration applied out of order is not
     // something the schema can be talked out of afterwards.
     throw new Error(
-      `Migration filenames must be <UTC timestamp>_<name>.sql, e.g. 20260815031100_add_moments.sql. Offending: ${malformed.join(", ")}`,
+      `Migration filenames must be <UTC timestamp>_<name>.sql, e.g. 20260815031100-add-moments.sql. Offending: ${malformed.join(", ")}`,
     );
   }
 
