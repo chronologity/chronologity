@@ -24,7 +24,15 @@ const claims = {
   sessionId: "55555555-5555-4555-8555-555555555555",
 };
 
-const now = new Date("2026-08-15T12:00:00.000Z");
+/**
+ * Verification checks `exp` against the real clock, so tokens under test must
+ * be issued relative to now. A fixed issue time makes these tests pass until
+ * the wall clock overtakes it and then fail forever after.
+ */
+const now = new Date();
+
+/** Fixed instant, for assertions about arithmetic rather than validity. */
+const fixed = new Date("2026-08-15T12:00:00.000Z");
 
 describe("access tokens", () => {
   it("round-trips its claims", async () => {
@@ -35,9 +43,9 @@ describe("access tokens", () => {
   });
 
   it("expires after the configured lifetime", async () => {
-    const issued = await issueAccessToken(config, claims, now);
+    const issued = await issueAccessToken(config, claims, fixed);
 
-    assert.equal(issued.expiresAt.getTime() - now.getTime(), 600_000);
+    assert.equal(issued.expiresAt.getTime() - fixed.getTime(), 600_000);
   });
 
   it("rejects a token signed with a different secret", async () => {
@@ -113,9 +121,9 @@ describe("refresh tokens", () => {
   });
 
   it("expires after the configured lifetime", () => {
-    const refresh = generateRefreshToken(config, now);
+    const refresh = generateRefreshToken(config, fixed);
 
-    assert.equal(refresh.expiresAt.getTime() - now.getTime(), 2_592_000_000);
+    assert.equal(refresh.expiresAt.getTime() - fixed.getTime(), 2_592_000_000);
   });
 });
 
