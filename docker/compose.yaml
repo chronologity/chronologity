@@ -1,0 +1,152 @@
+# Chronologity local development infrastructure.
+#
+# Start with `pnpm infra:up` from the repository root, which waits for every
+# service to report healthy before returning.
+#
+# These services are for local development only. Credentials are deliberately
+# weak and non-secret, TLS is disabled, and no production vendor is implied by
+# anything here — production hosting is a Phase 16 decision.
+#
+# Every image is pinned to an exact patch version so a rebuild produces the
+# same infrastructure. Defaults below mirror .env.example; a root .env
+# overrides them.
+
+name: chronologity
+
+services:
+  # ───────────────────────────────────────────────────────────────
+  # PostgreSQL — relational and operational authoritative state.
+  # ───────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:18.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-chronologity}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chronologity}
+      POSTGRES_DB: ${POSTGRES_DATABASE:-chronologity}
+      # Pinned explicitly so the data location does not depend on an image default.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-chronologity} -d ${POSTGRES_DATABASE:-chronologity}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  # ───────────────────────────────────────────────────────────────
+  # EventStoreDB — authoritative event history for event-sourced domains.
+  #
+  # Single node, insecure mode. Standard projections are enabled because
+  # projection replay is exercised from Phase 4 onward.
+  # ───────────────────────────────────────────────────────────────
+  eventstore:
+    image: eventstore/eventstore:24.10.14
+    restart: unless-stopped
+    environment:
+      EVENTSTORE_CLUSTER_SIZE: 1
+      EVENTSTORE_INSECURE: "true"
+      EVENTSTORE_RUN_PROJECTIONS: All
+      EVENTSTORE_START_STANDARD_PROJECTIONS: "true"
+      EVENTSTORE_ENABLE_ATOM_PUB_OVER_HTTP: "true"
+    ports:
+      - "${EVENTSTOREDB_PORT:-2113}:2113"
+    volumes:
+      - eventstore-data:/var/lib/eventstore
+      - eventstore-logs:/var/log/eventstore
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:2113/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  # ───────────────────────────────────────────────────────────────
+  # Kafka — asynchronous transport. Never a source of truth (ADR-013).
+  #
+  # KRaft mode, single combined broker/controller node. Two listeners:
+  # `kafka:29092` for containers on this network, `localhost:9092` for the
+  # host. Workers added in later phases use the internal listener.
+  # ───────────────────────────────────────────────────────────────
+  kafka:
+    image: apache/kafka:4.3.1
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:29092,HOST://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      # Single-node development settings. Production replication is a Phase 16 concern.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    ports:
+      - "${KAFKA_PORT:-9092}:9092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
+
+  # ───────────────────────────────────────────────────────────────
+  # ClickHouse — derived read models, rebuildable (ADR-012).
+  #
+  # Only the HTTP interface is published. The native port is deliberately
+  # unpublished: nothing uses it yet, and 9000 is where object storage will
+  # want to live when the media subsystem arrives in Phase 5E.
+  # ───────────────────────────────────────────────────────────────
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.4.5-alpine
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USERNAME:-chronologity}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-chronologity}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-chronologity}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports:
+      - "${CLICKHOUSE_HTTP_PORT:-8123}:8123"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - clickhouse-logs:/var/log/clickhouse-server
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      # 127.0.0.1 rather than localhost: inside the container localhost resolves
+      # to ::1, and ClickHouse's default configuration listens on IPv4 only.
+      test:
+        ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+volumes:
+  postgres-data:
+  eventstore-data:
+  eventstore-logs:
+  kafka-data:
+  clickhouse-data:
+  clickhouse-logs:

@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+#
+# Validate Chronologity's local development infrastructure.
+#
+# Phase 1 requires more than "the containers are running": each service must be
+# reachable from the host and must perform a representative operation. Every
+# check below therefore reads or writes real data and cleans up after itself.
+#
+# Usage: pnpm infra:validate
+
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+COMPOSE=(bash "$ROOT/scripts/compose.sh")
+[ -f "$ROOT/.env" ] && set -a && . "$ROOT/.env" && set +a
+
+POSTGRES_PORT="${POSTGRES_PORT:-5432}"
+POSTGRES_USER="${POSTGRES_USER:-chronologity}"
+POSTGRES_DATABASE="${POSTGRES_DATABASE:-chronologity}"
+EVENTSTOREDB_PORT="${EVENTSTOREDB_PORT:-2113}"
+KAFKA_PORT="${KAFKA_PORT:-9092}"
+CLICKHOUSE_HTTP_PORT="${CLICKHOUSE_HTTP_PORT:-8123}"
+CLICKHOUSE_USERNAME="${CLICKHOUSE_USERNAME:-chronologity}"
+CLICKHOUSE_PASSWORD="${CLICKHOUSE_PASSWORD:-chronologity}"
+CLICKHOUSE_DATABASE="${CLICKHOUSE_DATABASE:-chronologity}"
+
+FAILURES=0
+RUN_ID="probe_$(date +%s)"
+
+pass() { printf '  \033[32m✓\033[0m %s\n' "$1"; }
+fail() {
+  printf '  \033[31m✗\033[0m %s\n' "$1"
+  FAILURES=$((FAILURES + 1))
+}
+section() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+
+# Host-side TCP reachability, independent of any client library.
+host_can_reach() {
+  local host="$1" port="$2"
+  (exec 3<>"/dev/tcp/${host}/${port}") 2>/dev/null && exec 3>&- && return 0
+  return 1
+}
+
+# ─────────────────────────────────────────────────────────────────
+section "PostgreSQL (localhost:${POSTGRES_PORT})"
+
+if host_can_reach 127.0.0.1 "$POSTGRES_PORT"; then
+  pass "host reaches port ${POSTGRES_PORT}"
+else
+  fail "host cannot reach port ${POSTGRES_PORT}"
+fi
+
+if "${COMPOSE[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -q \
+  -U "$POSTGRES_USER" -d "$POSTGRES_DATABASE" -c "
+    CREATE TABLE ${RUN_ID} (id int primary key, occurred_at timestamptz not null);
+    INSERT INTO ${RUN_ID} VALUES (1, now());
+    SELECT count(*) FROM ${RUN_ID};
+    DROP TABLE ${RUN_ID};" >/dev/null 2>&1; then
+  pass "create table, insert, select, drop"
+else
+  fail "could not complete a write/read cycle"
+fi
+
+# ─────────────────────────────────────────────────────────────────
+section "EventStoreDB (localhost:${EVENTSTOREDB_PORT})"
+
+if host_can_reach 127.0.0.1 "$EVENTSTOREDB_PORT"; then
+  pass "host reaches port ${EVENTSTOREDB_PORT}"
+else
+  fail "host cannot reach port ${EVENTSTOREDB_PORT}"
+fi
+
+ES="http://127.0.0.1:${EVENTSTOREDB_PORT}"
+if curl --fail --silent "${ES}/health/live" >/dev/null 2>&1; then
+  pass "reports healthy"
+else
+  fail "health endpoint did not respond"
+fi
+
+# Append one event to a scratch stream and read it back: the smallest real
+# exercise of the write path this database exists for.
+if curl --fail --silent -X POST "${ES}/streams/${RUN_ID}" \
+  -H "Content-Type: application/vnd.eventstore.events+json" \
+  -d "[{\"eventId\":\"$(uuidgen | tr '[:upper:]' '[:lower:]')\",\"eventType\":\"ProbeRecorded\",\"data\":{\"ok\":true}}]" \
+  >/dev/null 2>&1 &&
+  curl --fail --silent -H "Accept: application/vnd.eventstore.atom+json" \
+    "${ES}/streams/${RUN_ID}/head" | grep -q "ProbeRecorded"; then
+  pass "append event to stream, read it back"
+  curl --fail --silent -X DELETE "${ES}/streams/${RUN_ID}" >/dev/null 2>&1
+else
+  fail "could not append and read back an event"
+fi
+
+# ─────────────────────────────────────────────────────────────────
+section "Kafka (localhost:${KAFKA_PORT})"
+
+if host_can_reach 127.0.0.1 "$KAFKA_PORT"; then
+  pass "host reaches port ${KAFKA_PORT}"
+else
+  fail "host cannot reach port ${KAFKA_PORT}"
+fi
+
+KBIN=/opt/kafka/bin
+if "${COMPOSE[@]}" exec -T kafka "${KBIN}/kafka-topics.sh" \
+  --bootstrap-server localhost:9092 --create --topic "$RUN_ID" \
+  --partitions 1 --replication-factor 1 >/dev/null 2>&1; then
+  pass "create topic"
+else
+  fail "could not create a topic"
+fi
+
+if echo "probe-message" | "${COMPOSE[@]}" exec -T kafka "${KBIN}/kafka-console-producer.sh" \
+  --bootstrap-server localhost:9092 --topic "$RUN_ID" >/dev/null 2>&1 &&
+  "${COMPOSE[@]}" exec -T kafka "${KBIN}/kafka-console-consumer.sh" \
+    --bootstrap-server localhost:9092 --topic "$RUN_ID" \
+    --from-beginning --max-messages 1 --timeout-ms 15000 2>/dev/null | grep -q "probe-message"; then
+  pass "produce and consume a message"
+else
+  fail "could not round-trip a message"
+fi
+
+"${COMPOSE[@]}" exec -T kafka "${KBIN}/kafka-topics.sh" \
+  --bootstrap-server localhost:9092 --delete --topic "$RUN_ID" >/dev/null 2>&1
+
+# ─────────────────────────────────────────────────────────────────
+section "ClickHouse (localhost:${CLICKHOUSE_HTTP_PORT})"
+
+CH="http://127.0.0.1:${CLICKHOUSE_HTTP_PORT}"
+CH_AUTH=(--user "${CLICKHOUSE_USERNAME}:${CLICKHOUSE_PASSWORD}")
+
+if host_can_reach 127.0.0.1 "$CLICKHOUSE_HTTP_PORT"; then
+  pass "host reaches port ${CLICKHOUSE_HTTP_PORT}"
+else
+  fail "host cannot reach port ${CLICKHOUSE_HTTP_PORT}"
+fi
+
+if curl --fail --silent "${CH}/ping" | grep -q "Ok"; then
+  pass "responds to ping"
+else
+  fail "ping did not respond"
+fi
+
+ch_query() { curl --fail --silent "${CH_AUTH[@]}" "${CH}/?database=${CLICKHOUSE_DATABASE}" --data-binary "$1"; }
+
+if ch_query "CREATE TABLE ${RUN_ID} (id UInt64, occurred_at DateTime64(3)) ENGINE = MergeTree ORDER BY (occurred_at, id)" >/dev/null 2>&1 &&
+  ch_query "INSERT INTO ${RUN_ID} VALUES (1, now64(3))" >/dev/null 2>&1 &&
+  [ "$(ch_query "SELECT count() FROM ${RUN_ID}" 2>/dev/null | tr -d '[:space:]')" = "1" ]; then
+  pass "create MergeTree table, insert, select"
+  ch_query "DROP TABLE ${RUN_ID}" >/dev/null 2>&1
+else
+  fail "could not complete a write/read cycle"
+  ch_query "DROP TABLE IF EXISTS ${RUN_ID}" >/dev/null 2>&1
+fi
+
+# ─────────────────────────────────────────────────────────────────
+if [ "$FAILURES" -eq 0 ]; then
+  printf '\n\033[32mAll services reachable and operational.\033[0m\n'
+  exit 0
+fi
+
+printf '\n\033[31m%d check(s) failed.\033[0m\n' "$FAILURES"
+exit 1
