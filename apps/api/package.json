@@ -1,0 +1,39 @@
+{
+  "name": "@chronologity/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Chronologity's authoritative backend application.",
+  "license": "UNLICENSED",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "dev": "node --watch dist/index.js",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "start": "node dist/index.js",
+    "test": "node --test \"dist/**/*.test.js\"",
+    "test:unit": "node --test \"dist/**/*.test.js\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@chronologity/config": "workspace:*",
+    "@chronologity/contracts": "workspace:*",
+    "@eventstore/db-client": "^6.2.1",
+    "@fastify/cors": "^11.3.0",
+    "@fastify/helmet": "^13.1.0",
+    "fastify": "^5.12.0",
+    "fastify-plugin": "^6.0.0",
+    "fastify-type-provider-zod": "^7.0.0",
+    "kafkajs": "^2.2.4",
+    "pg": "^8.23.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@chronologity/tsconfig": "workspace:*",
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.21.0",
+    "typescript": "^7.0.2"
+  }
+}

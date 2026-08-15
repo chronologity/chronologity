@@ -66,3 +66,9 @@ Application workers added in later phases run on the host during development and
 - ClickHouse's health check targets `127.0.0.1` rather than `localhost`, because inside the container `localhost` resolves to `::1` while ClickHouse listens on IPv4 only.
 - EventStoreDB runs with `EVENTSTORE_INSECURE=true` and standard projections enabled, since projection replay is exercised from Phase 4 onward.
 - Data survives `infra:down` and is destroyed by `infra:reset`. Both behaviors are verified.
+
+## Port conflicts
+
+A service already running natively on the host wins the port, and the symptom is confusing: the container is healthy, but clients reach the other server. A native PostgreSQL binding `127.0.0.1:5432` beats the container's wildcard `*:5432`, so an application connecting to `localhost` gets the native one and reports errors like `role "chronologity" does not exist`.
+
+Check with `lsof -nP -iTCP:5432 -sTCP:LISTEN`. Fix by changing the port in `.env` rather than in the compose file — the same variable moves both the published port and every application that reads it.

@@ -1,3 +1,12 @@
 packages:
   - "apps/*"
   - "packages/*"
+
+# Dependencies permitted to run install scripts. A dependency must be named
+# here before its build script runs, so adding one is a deliberate act.
+#
+# protobufjs arrives via @eventstore/db-client. Its postinstall builds the
+# pbjs/pbts CLI, which nothing in this repository uses; the runtime library
+# needs no build step.
+allowBuilds:
+  protobufjs: false
