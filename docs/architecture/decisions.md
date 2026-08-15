@@ -1547,6 +1547,8 @@ Passwords become a permanent liability. Hashing cost must be maintained as hardw
 
 Password reset is a new attack surface, mitigated by single-use, purpose-bound, time-limited links and by revoking every Session on completion. A password change revokes every Session except the one making the change.
 
+Breached-password detection is adopted, which `docs/architecture/security.md` left optional. The corpus is vendored and searched locally rather than queried from Have I Been Pwned, because a third-party call inside registration would fail either open — silently disabling the check — or closed, making someone else's outage ours.
+
 Registration cannot verify an address, so a registered address is unverified until a mailed link is redeemed, and password sign-in is refused until then.
 
 Session semantics are unchanged. Both methods produce the same Session, the same rotating refresh credential, and the same revocation boundary, which is what `docs/architecture/authentication.md` requires of any added method.

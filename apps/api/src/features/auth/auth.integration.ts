@@ -537,6 +537,15 @@ describe("authentication", () => {
       assert.equal(response.json().code, "VALIDATION_FAILED");
     });
 
+    it("refuses a password that has appeared in a breach", async () => {
+      // Long and unpatterned, so only the corpus catches it. This is what an
+      // attacker replays rather than guesses.
+      const response = await register(uniqueEmail(), "PE#5GZ29PTZMSE");
+
+      assert.equal(response.statusCode, 400);
+      assert.match(response.json().message, /data breach/);
+    });
+
     it("resets a password and ends every existing session", async () => {
       const email = uniqueEmail();
       await registerAndVerify(email);

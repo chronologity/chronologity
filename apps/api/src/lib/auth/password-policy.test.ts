@@ -55,6 +55,13 @@ describe("checkPassword", () => {
     assert.deepEqual(checkPassword(config, "a".repeat(30)), { ok: false, reason: "too_common" });
   });
 
+  it("refuses a password that has appeared in a breach", () => {
+    // Long, unpatterned, and not in the small embedded list — but already in
+    // every credential-stuffing list, which is what actually matters.
+    assert.deepEqual(checkPassword(config, "PE#5GZ29PTZMSE"), { ok: false, reason: "breached" });
+    assert.deepEqual(checkPassword(config, "Sojdlg123aljg"), { ok: false, reason: "breached" });
+  });
+
   it("leaves genuine passphrases alone", () => {
     // The substitution check must not become a source of false rejections.
     for (const good of [
@@ -94,5 +101,8 @@ describe("describeRejection", () => {
     assert.match(describeRejection("too_long", config), /at most 256/);
     assert.match(describeRejection("too_common", config), /guessed/);
     assert.match(describeRejection("contains_email", config), /email/);
+    // Said plainly: someone whose password has leaked has almost certainly
+    // used it somewhere else too.
+    assert.match(describeRejection("breached", config), /data breach/);
   });
 });

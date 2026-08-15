@@ -4,6 +4,7 @@ import { createDatabase } from "./lib/database/postgres.js";
 import { createEventStore } from "./lib/eventstore/client.js";
 import { createMessaging } from "./lib/messaging/kafka.js";
 import { createEmailClient } from "./integrations/email/email-client.js";
+import { loadBreachedPasswordIndex } from "./lib/auth/breached-passwords.js";
 import { buildApp } from "./server/app.js";
 import { startServer } from "./server/server.js";
 
@@ -16,6 +17,11 @@ import { startServer } from "./server/server.js";
  */
 async function main(): Promise<void> {
   const config = loadConfig();
+
+  // Loaded before anything serves traffic: a missing index is a broken build,
+  // and discovering that on someone's first registration would mean the check
+  // had been silently absent until then.
+  loadBreachedPasswordIndex();
 
   const database = createDatabase(config.database);
   const eventStore = createEventStore(config.eventStore);

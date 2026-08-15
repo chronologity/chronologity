@@ -1,4 +1,5 @@
 import type { PasswordPolicyConfig } from "../../config/auth-config.js";
+import { isBreachedPassword } from "./breached-passwords.js";
 
 /**
  * What Chronologity will accept as a password.
@@ -21,10 +22,12 @@ export type PasswordCheck =
   { readonly ok: true } | { readonly ok: false; readonly reason: PasswordRejection };
 
 /**
- * Passwords common enough that an attacker tries them first.
+ * Passwords common enough to refuse on sight.
  *
- * A deliberately small embedded list. Detection against a full breach corpus
- * is worth doing and is handled separately.
+ * Kept alongside the far larger breach corpus because this list catches
+ * decorated variants — "P@ssw0rd-123!" is not in any leak verbatim, but it is
+ * "password" wearing a hat. The corpus catches what has actually leaked; this
+ * catches what someone has just made up along the same lines.
  */
 const COMMON_PASSWORDS = new Set([
   "password",
@@ -176,6 +179,12 @@ export function checkPassword(
     return { ok: false, reason: "too_common" };
   }
 
+  // Checked last: it is the most expensive of these, and the cheap structural
+  // checks have already removed most of what would fail here anyway.
+  if (isBreachedPassword(password)) {
+    return { ok: false, reason: "breached" };
+  }
+
   // The local part of an address is among the first things guessed for the
   // account it belongs to.
   if (email !== undefined) {
@@ -198,6 +207,11 @@ export function describeRejection(reason: PasswordRejection, config: PasswordPol
       return `Password must be at most ${config.maximumLength} characters`;
     case "too_common":
       return "That password is too easily guessed";
+    case "breached":
+      // Said plainly rather than euphemistically. Someone whose password has
+      // leaked should know, because they have almost certainly used it
+      // somewhere else too.
+      return "That password has appeared in a known data breach and cannot be used";
     case "contains_email":
       return "Password must not contain your email address";
     default:
