@@ -151,7 +151,13 @@ async function writeIdentityHistory(
   context: RequestContext,
   at: Date,
 ): Promise<void> {
-  const decision = decideCreateIdentity(initialIdentityState, { identityId, email, now: at });
+  // Verified: redeeming the link is itself proof of control of the address.
+  const decision = decideCreateIdentity(initialIdentityState, {
+    identityId,
+    email,
+    emailVerified: true,
+    now: at,
+  });
 
   if (!decision.ok) {
     return;

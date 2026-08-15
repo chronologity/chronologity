@@ -1,5 +1,18 @@
 import type { Env } from "./env.js";
 
+/** Argon2id cost. Raising these migrates stored hashes on next successful login. */
+export interface PasswordHashingConfig {
+  readonly memoryCostKib: number;
+  readonly timeCost: number;
+  readonly parallelism: number;
+}
+
+/** What Chronologity accepts as a password. Length only; no composition rules. */
+export interface PasswordPolicyConfig {
+  readonly minimumLength: number;
+  readonly maximumLength: number;
+}
+
 /**
  * Authentication configuration.
  *
@@ -14,6 +27,8 @@ export interface AuthConfig {
   readonly refreshTokenTtlSeconds: number;
   readonly magicLinkTtlSeconds: number;
   readonly magicLinkBaseUrl: string;
+  readonly passwordHashing: PasswordHashingConfig;
+  readonly passwordPolicy: PasswordPolicyConfig;
 }
 
 export function toAuthConfig(env: Env): AuthConfig {
@@ -25,5 +40,14 @@ export function toAuthConfig(env: Env): AuthConfig {
     refreshTokenTtlSeconds: env.AUTH_REFRESH_TOKEN_TTL_SECONDS,
     magicLinkTtlSeconds: env.AUTH_MAGIC_LINK_TTL_SECONDS,
     magicLinkBaseUrl: env.AUTH_MAGIC_LINK_BASE_URL,
+    passwordHashing: {
+      memoryCostKib: env.AUTH_PASSWORD_MEMORY_COST_KIB,
+      timeCost: env.AUTH_PASSWORD_TIME_COST,
+      parallelism: env.AUTH_PASSWORD_PARALLELISM,
+    },
+    passwordPolicy: {
+      minimumLength: env.AUTH_PASSWORD_MIN_LENGTH,
+      maximumLength: env.AUTH_PASSWORD_MAX_LENGTH,
+    },
   };
 }

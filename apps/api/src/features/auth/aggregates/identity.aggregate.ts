@@ -1,6 +1,7 @@
 import type { EmailAdded } from "../events/email-added.event.js";
 import type { EmailVerified } from "../events/email-verified.event.js";
 import type { IdentityCreated } from "../events/identity-created.event.js";
+import type { PasswordSet } from "../events/password-set.event.js";
 
 /**
  * Identity — the durable authentication identity behind an account.
@@ -27,16 +28,24 @@ export interface IdentityState {
   readonly identityId: string | undefined;
   readonly emails: readonly IdentityEmail[];
   readonly createdAt: string | undefined;
+  /**
+   * Whether a password credential exists.
+   *
+   * The hash itself lives in PostgreSQL; history records only that one was
+   * set, and when.
+   */
+  readonly hasPassword: boolean;
 }
 
 /** Everything that can happen to an Identity. */
-export type IdentityEvent = IdentityCreated | EmailAdded | EmailVerified;
+export type IdentityEvent = IdentityCreated | EmailAdded | EmailVerified | PasswordSet;
 
 export const initialIdentityState: IdentityState = {
   exists: false,
   identityId: undefined,
   emails: [],
   createdAt: undefined,
+  hasPassword: false,
 };
 
 /**
@@ -90,6 +99,9 @@ export function evolveIdentity(state: IdentityState, event: IdentityEvent): Iden
         ),
       };
 
+    case "PasswordSet":
+      return { ...state, hasPassword: true };
+
     default:
       // History outlives code: an unrecognised event is skipped, not fatal.
       return state;
@@ -113,15 +125,17 @@ export type IdentityRejection =
   | "email_already_verified";
 
 /**
- * Create an Identity with its first email, already verified.
+ * Create an Identity with its first email.
  *
- * Redeeming a magic link is itself proof of control of the address, so the
- * address arrives verified rather than requiring a second confirmation step
- * for something already demonstrated.
+ * Whether that address is already verified depends on how the Identity came to
+ * exist, so the caller must say. Redeeming a magic link is itself proof of
+ * control and arrives verified; registering with a password proves nothing
+ * about the address yet, and must be confirmed before it can be used to sign
+ * in (`authentication.md:240`).
  */
 export function decideCreateIdentity(
   state: IdentityState,
-  input: { identityId: string; email: string; now: Date },
+  input: { identityId: string; email: string; emailVerified: boolean; now: Date },
 ): IdentityDecision {
   if (state.exists) {
     return { ok: false, reason: "identity_already_exists" };
@@ -130,20 +144,53 @@ export function decideCreateIdentity(
   const normalizedEmail = normalizeEmail(input.email);
   const timestamp = input.now.toISOString();
 
+  const events: IdentityEvent[] = [
+    {
+      type: "IdentityCreated",
+      payload: { identityId: input.identityId, createdAt: timestamp },
+    },
+    {
+      type: "EmailAdded",
+      payload: { email: input.email, normalizedEmail },
+    },
+  ];
+
+  if (input.emailVerified) {
+    events.push({
+      type: "EmailVerified",
+      payload: { normalizedEmail, verifiedAt: timestamp },
+    });
+  }
+
+  return { ok: true, events };
+}
+
+/**
+ * Record that a password credential was set.
+ *
+ * Setting a password over an existing one is legitimate — that is what a reset
+ * and a change both are — so this does not refuse an Identity that already has
+ * one. The hash is written to PostgreSQL by the handler; only the fact reaches
+ * history.
+ */
+export function decideSetPassword(
+  state: IdentityState,
+  input: { algorithm: string; reason: "registration" | "reset" | "change"; now: Date },
+): IdentityDecision {
+  if (!state.exists) {
+    return { ok: false, reason: "identity_not_found" };
+  }
+
   return {
     ok: true,
     events: [
       {
-        type: "IdentityCreated",
-        payload: { identityId: input.identityId, createdAt: timestamp },
-      },
-      {
-        type: "EmailAdded",
-        payload: { email: input.email, normalizedEmail },
-      },
-      {
-        type: "EmailVerified",
-        payload: { normalizedEmail, verifiedAt: timestamp },
+        type: "PasswordSet",
+        payload: {
+          algorithm: input.algorithm,
+          reason: input.reason,
+          setAt: input.now.toISOString(),
+        },
       },
     ],
   };

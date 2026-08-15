@@ -10,8 +10,14 @@ import { hashToken } from "./tokens.js";
  * usable exactly once. `authentication.md:262-286` requires all four.
  */
 
-/** What a link is allowed to do. A link issued to log in cannot do anything else. */
-export type MagicLinkPurpose = "login";
+/**
+ * What a link is allowed to do.
+ *
+ * Purpose is bound into the token record and checked on redemption, so a link
+ * sent to verify an address cannot be redeemed to set a new password. Without
+ * it, one link type would be a skeleton key for the others.
+ */
+export type MagicLinkPurpose = "login" | "verify_email" | "reset_password";
 
 export interface IssuedMagicLink {
   /** Sent to the address. Never stored, never logged. */

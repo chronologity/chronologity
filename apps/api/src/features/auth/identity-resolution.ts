@@ -23,14 +23,16 @@ export interface ResolvedIdentity {
 }
 
 /**
- * Find the Identity for a verified address, claiming it if unclaimed.
+ * Find the Identity for an address, claiming it if unclaimed.
  *
- * Called only after a magic link has been redeemed, so the address is proven
- * rather than asserted; the row is written already verified.
+ * `verified` says whether control of the address has actually been proven.
+ * Redeeming a magic link proves it; registering with a password does not, and
+ * recording an unproven address as verified would let anyone claim someone
+ * else's address by typing it.
  */
 export async function resolveIdentityForEmail(
   tx: Transaction,
-  input: { email: string; now: Date },
+  input: { email: string; now: Date; verified?: boolean },
 ): Promise<ResolvedIdentity> {
   const normalizedEmail = normalizeEmail(input.email);
 
@@ -39,7 +41,12 @@ export async function resolveIdentityForEmail(
      VALUES ($1, $2, $3, $4)
      ON CONFLICT (normalized_email) DO NOTHING
      RETURNING identity_id`,
-    [normalizedEmail, input.email, generateId(), input.now.toISOString()],
+    [
+      normalizedEmail,
+      input.email,
+      generateId(),
+      (input.verified ?? true) ? input.now.toISOString() : null,
+    ],
   );
 
   const claimed = inserted.rows[0];
@@ -78,4 +85,36 @@ export async function findIdentityByEmail(
   );
 
   return rows[0]?.identity_id;
+}
+
+/**
+ * Record that an address has been proven.
+ *
+ * Idempotent, and it keeps the original timestamp: verifying twice does not
+ * move the moment control was first demonstrated.
+ */
+export async function markEmailVerified(
+  tx: Transaction,
+  normalizedEmail: string,
+  at: Date,
+): Promise<string | undefined> {
+  const { rows } = await tx.query<{ identity_id: string }>(
+    `UPDATE identity_emails
+        SET verified_at = COALESCE(verified_at, $2)
+      WHERE normalized_email = $1
+      RETURNING identity_id`,
+    [normalizedEmail, at.toISOString()],
+  );
+
+  return rows[0]?.identity_id;
+}
+
+/** Whether an address has been proven. Password sign-in requires it. */
+export async function isEmailVerified(tx: Transaction, normalizedEmail: string): Promise<boolean> {
+  const { rows } = await tx.query<{ verified_at: Date | null }>(
+    `SELECT verified_at FROM identity_emails WHERE normalized_email = $1`,
+    [normalizedEmail],
+  );
+
+  return rows[0]?.verified_at != null;
 }

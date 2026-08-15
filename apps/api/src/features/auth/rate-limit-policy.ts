@@ -12,11 +12,20 @@
 export interface AuthRateLimits {
   readonly magicLinkRequestsPerWindow: number;
   readonly sessionCreationsPerWindow: number;
+  /**
+   * Password attempts. The tightest limit here, because this is the only
+   * endpoint an attacker can make progress against by sheer repetition.
+   */
+  readonly passwordAttemptsPerWindow: number;
+  /** Registration also sends mail to a caller-chosen address. */
+  readonly registrationsPerWindow: number;
   readonly windowMinutes: number;
 }
 
 export const defaultAuthRateLimits: AuthRateLimits = {
   magicLinkRequestsPerWindow: 5,
   sessionCreationsPerWindow: 10,
+  passwordAttemptsPerWindow: 10,
+  registrationsPerWindow: 5,
   windowMinutes: 15,
 };

@@ -1523,6 +1523,36 @@ JSON Schema is a derived artifact rather than the source of truth. Anything requ
 
 ---
 
+# ADR-071 — Support Email and Password Authentication Alongside Magic Links
+
+**Status:** Accepted
+
+## Decision
+
+Chronologity supports email and password authentication as a day-one method, alongside magic-link sign-in. Passwords are hashed with Argon2id and stored in PostgreSQL, never in event history.
+
+## Alternatives Considered
+
+Magic link alone was the earlier position, on the grounds that a password that is never stored cannot be breached. OAuth remains unscheduled and is blocked on provider credentials.
+
+## Rationale
+
+Requiring a mail round trip for every sign-in is a real cost to the person signing in, and one that falls hardest when mail is slow, filtered, or unavailable. Supporting both leaves the choice with the account holder.
+
+Argon2id is named by `docs/architecture/security.md`; this decision does not select it so much as apply it.
+
+## Consequences
+
+Passwords become a permanent liability. Hashing cost must be maintained as hardware improves, and stored hashes carry their own parameters so raising cost migrates people on next sign-in rather than invalidating them.
+
+Password reset is a new attack surface, mitigated by single-use, purpose-bound, time-limited links and by revoking every Session on completion. A password change revokes every Session except the one making the change.
+
+Registration cannot verify an address, so a registered address is unverified until a mailed link is redeemed, and password sign-in is refused until then.
+
+Session semantics are unchanged. Both methods produce the same Session, the same rotating refresh credential, and the same revocation boundary, which is what `docs/architecture/authentication.md` requires of any added method.
+
+---
+
 # Superseded Decisions
 
 This section preserves important architectural choices that are no longer canonical.

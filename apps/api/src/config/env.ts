@@ -40,6 +40,17 @@ export const envSchema = z.object({
   AUTH_MAGIC_LINK_TTL_SECONDS: z.coerce.number().int().positive().default(900),
   AUTH_MAGIC_LINK_BASE_URL: z.url(),
 
+  // OWASP's recommended Argon2id floor. Configurable so cost can be raised
+  // as hardware improves without a code change; stored hashes carry their own
+  // parameters, so raising these migrates people gradually rather than
+  // invalidating them.
+  AUTH_PASSWORD_MEMORY_COST_KIB: z.coerce.number().int().min(8_192).default(19_456),
+  AUTH_PASSWORD_TIME_COST: z.coerce.number().int().min(1).default(2),
+  AUTH_PASSWORD_PARALLELISM: z.coerce.number().int().min(1).default(1),
+  // Length is the control that matters; composition rules are deliberately absent.
+  AUTH_PASSWORD_MIN_LENGTH: z.coerce.number().int().min(8).default(12),
+  AUTH_PASSWORD_MAX_LENGTH: z.coerce.number().int().max(1_024).default(256),
+
   SMTP_HOST: z.string().min(1),
   SMTP_PORT: portSchema,
   SMTP_FROM: z.email(),

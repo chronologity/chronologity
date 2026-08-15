@@ -48,6 +48,11 @@ const config: AppConfig = {
     refreshTokenTtlSeconds: 2_592_000,
     magicLinkTtlSeconds: 900,
     magicLinkBaseUrl: "http://localhost:3000/auth/sessions",
+    // Cheapest parameters the schema permits: these tests hash many passwords,
+    // and Argon2id at production cost would dominate the suite's runtime
+    // without testing anything the parameters change.
+    passwordHashing: { memoryCostKib: 8_192, timeCost: 1, parallelism: 1 },
+    passwordPolicy: { minimumLength: 12, maximumLength: 256 },
   },
   email: {
     host: process.env.SMTP_HOST ?? "localhost",
@@ -108,6 +113,8 @@ describe("authentication", () => {
       rateLimits: {
         magicLinkRequestsPerWindow: 1000,
         sessionCreationsPerWindow: 1000,
+        passwordAttemptsPerWindow: 1000,
+        registrationsPerWindow: 1000,
         windowMinutes: 15,
       },
     };
@@ -416,6 +423,8 @@ describe("authentication", () => {
         rateLimits: {
           magicLinkRequestsPerWindow: 3,
           sessionCreationsPerWindow: 10,
+          passwordAttemptsPerWindow: 3,
+          registrationsPerWindow: 10,
           windowMinutes: 15,
         },
       },
@@ -440,6 +449,336 @@ describe("authentication", () => {
       await limited.close();
     }
   });
+
+  describe("password authentication", () => {
+    const strongPassword = "a perfectly reasonable passphrase";
+
+    const register = async (email: string, password = strongPassword) =>
+      app.inject({ method: "POST", url: "/auth/registrations", payload: { email, password } });
+
+    const signInWithPassword = async (email: string, password = strongPassword) =>
+      app.inject({
+        method: "POST",
+        url: "/auth/sessions/password",
+        payload: { email, password },
+      });
+
+    const registerAndVerify = async (email: string, password = strongPassword) => {
+      const registration = await register(email, password);
+      assert.equal(registration.statusCode, 202, registration.body);
+
+      const token = await readMagicLinkFor(email);
+      const verified = await app.inject({
+        method: "POST",
+        url: "/auth/email-verifications",
+        payload: { token },
+      });
+      assert.equal(verified.statusCode, 204, verified.body);
+
+      return token;
+    };
+
+    it("registers, verifies by mail, and signs in", async () => {
+      const email = uniqueEmail();
+      await registerAndVerify(email);
+
+      const signedIn = await signInWithPassword(email);
+
+      assert.equal(signedIn.statusCode, 201, signedIn.body);
+      assert.ok(signedIn.json().accessToken.length > 0);
+    });
+
+    it("refuses a password sign-in before the address is verified", async () => {
+      // Anyone can type any address. Until control is proven, a password on it
+      // means nothing (authentication.md:240).
+      const email = uniqueEmail();
+      const registration = await register(email);
+      assert.equal(registration.statusCode, 202);
+
+      const signedIn = await signInWithPassword(email);
+
+      assert.equal(signedIn.statusCode, 401);
+    });
+
+    it("answers identically for a wrong password and an unknown address", async () => {
+      const email = uniqueEmail();
+      await registerAndVerify(email);
+
+      const wrongPassword = await signInWithPassword(email, "some other passphrase entirely");
+      const unknownAddress = await signInWithPassword(uniqueEmail());
+
+      assert.equal(wrongPassword.statusCode, unknownAddress.statusCode);
+      assert.deepEqual(wrongPassword.json().code, unknownAddress.json().code);
+      assert.deepEqual(wrongPassword.json().message, unknownAddress.json().message);
+    });
+
+    it("answers identically when an address is already registered", async () => {
+      const email = uniqueEmail();
+      const first = await register(email);
+      const second = await register(email);
+
+      assert.equal(first.statusCode, second.statusCode);
+      assert.deepEqual(first.json(), second.json());
+
+      // The owner is told instead of the caller.
+      const notice = await readMailSubjectsFor(email);
+      assert.ok(
+        notice.some((subject) => subject.includes("tried to register")),
+        `expected a notice to the owner, saw ${JSON.stringify(notice)}`,
+      );
+    });
+
+    it("refuses a password the policy rejects, and says why", async () => {
+      // The one thing worth explaining plainly: refusing without a reason
+      // leaves someone guessing at rules they cannot see.
+      const response = await register(uniqueEmail(), "password123");
+
+      assert.equal(response.statusCode, 400);
+      assert.equal(response.json().code, "VALIDATION_FAILED");
+    });
+
+    it("resets a password and ends every existing session", async () => {
+      const email = uniqueEmail();
+      await registerAndVerify(email);
+
+      const before = await signInWithPassword(email);
+      assert.equal(before.statusCode, 201);
+
+      const requested = await app.inject({
+        method: "POST",
+        url: "/auth/password-resets",
+        payload: { email },
+      });
+      assert.equal(requested.statusCode, 202);
+
+      const token = await readMagicLinkFor(email);
+      const completed = await app.inject({
+        method: "POST",
+        url: "/auth/password-resets/complete",
+        payload: { token, password: "an entirely different passphrase" },
+      });
+      assert.equal(completed.statusCode, 204, completed.body);
+
+      // A reset is what someone does when they may have lost control, so every
+      // session goes with it.
+      const stillValid = await app.inject({
+        method: "GET",
+        url: "/auth/sessions",
+        headers: { authorization: `Bearer ${before.json().accessToken}` },
+      });
+      assert.equal(stillValid.statusCode, 401);
+
+      assert.equal((await signInWithPassword(email)).statusCode, 401);
+      assert.equal(
+        (await signInWithPassword(email, "an entirely different passphrase")).statusCode,
+        201,
+      );
+    });
+
+    it("changes a password, keeping the current session and ending the others", async () => {
+      const email = uniqueEmail();
+      await registerAndVerify(email);
+
+      const current = await signInWithPassword(email);
+      const other = await signInWithPassword(email);
+      assert.equal(current.statusCode, 201);
+      assert.equal(other.statusCode, 201);
+
+      const changed = await app.inject({
+        method: "PUT",
+        url: "/auth/password",
+        headers: { authorization: `Bearer ${current.json().accessToken}` },
+        payload: {
+          currentPassword: strongPassword,
+          newPassword: "yet another reasonable passphrase",
+        },
+      });
+
+      assert.equal(changed.statusCode, 200, changed.body);
+      assert.ok(changed.json().otherSessionsRevoked >= 1);
+
+      // The device doing the changing stays signed in; the others do not.
+      const currentStillWorks = await app.inject({
+        method: "GET",
+        url: "/auth/sessions",
+        headers: { authorization: `Bearer ${current.json().accessToken}` },
+      });
+      assert.equal(currentStillWorks.statusCode, 200);
+
+      const otherIsDead = await app.inject({
+        method: "GET",
+        url: "/auth/sessions",
+        headers: { authorization: `Bearer ${other.json().accessToken}` },
+      });
+      assert.equal(otherIsDead.statusCode, 401);
+    });
+
+    it("requires the current password to change it", async () => {
+      // An access token left on a shared device must not be enough to take an
+      // account over.
+      const email = uniqueEmail();
+      await registerAndVerify(email);
+      const session = await signInWithPassword(email);
+
+      const changed = await app.inject({
+        method: "PUT",
+        url: "/auth/password",
+        headers: { authorization: `Bearer ${session.json().accessToken}` },
+        payload: { currentPassword: "not the password", newPassword: "a fine new passphrase" },
+      });
+
+      assert.equal(changed.statusCode, 401);
+      assert.equal(
+        (await signInWithPassword(email)).statusCode,
+        201,
+        "password should be unchanged",
+      );
+    });
+
+    it("will not let one kind of link do another's job", async () => {
+      const email = uniqueEmail();
+      const registration = await register(email);
+      assert.equal(registration.statusCode, 202);
+      const verificationToken = await readMagicLinkFor(email);
+
+      // A verification link is not a reset link, and not a sign-in link.
+      const asReset = await app.inject({
+        method: "POST",
+        url: "/auth/password-resets/complete",
+        payload: { token: verificationToken, password: "a fine new passphrase" },
+      });
+      assert.equal(asReset.statusCode, 401);
+
+      const asSignIn = await app.inject({
+        method: "POST",
+        url: "/auth/sessions",
+        payload: { token: verificationToken },
+      });
+      assert.equal(asSignIn.statusCode, 401);
+
+      // And it still works for what it was issued for.
+      const asVerification = await app.inject({
+        method: "POST",
+        url: "/auth/email-verifications",
+        payload: { token: verificationToken },
+      });
+      assert.equal(asVerification.statusCode, 204);
+    });
+
+    it("keeps magic-link sign-in working for an account that has a password", async () => {
+      const email = uniqueEmail();
+      await registerAndVerify(email);
+
+      await app.inject({ method: "POST", url: "/auth/magic-link", payload: { email } });
+      const linkToken = await readMagicLinkFor(email);
+      const linkSignIn = await app.inject({
+        method: "POST",
+        url: "/auth/sessions",
+        payload: { token: linkToken },
+      });
+
+      assert.equal(linkSignIn.statusCode, 201, linkSignIn.body);
+
+      // Both methods lead to the same account.
+      const passwordSignIn = await signInWithPassword(email);
+      assert.equal(passwordSignIn.statusCode, 201);
+      assert.notEqual(linkSignIn.json().sessionId, passwordSignIn.json().sessionId);
+    });
+
+    it("stores no password in recoverable form, and none in history or audit", async () => {
+      const email = uniqueEmail();
+      await registerAndVerify(email);
+      const identityId = await identityIdFor(email);
+
+      const stored = await deps.pool.query<{ password_hash: string }>(
+        `SELECT password_hash FROM identity_passwords WHERE identity_id = $1`,
+        [identityId],
+      );
+
+      assert.match(stored.rows[0]?.password_hash ?? "", /^\$argon2id\$/);
+      assert.ok(!(stored.rows[0]?.password_hash ?? "").includes(strongPassword));
+
+      const audit = await deps.pool.query(
+        `SELECT context, reason FROM auth_audit_events WHERE identity_id = $1`,
+        [identityId],
+      );
+      assert.ok(!JSON.stringify(audit.rows).includes(strongPassword));
+
+      // The hash belongs in PostgreSQL, where it can be rotated; history is
+      // permanent, so it records only that a password was set.
+      const events = await readIdentityHistory(identityId);
+      assert.ok(!JSON.stringify(events).includes(strongPassword));
+      assert.ok(!JSON.stringify(events).includes(stored.rows[0]?.password_hash ?? "never"));
+      assert.ok(events.some((event) => event.type === "PasswordSet"));
+    });
+
+    it("stops a burst of password attempts", async () => {
+      const limited = await buildApp({
+        config,
+        dependencies: [],
+        auth: {
+          ...deps,
+          rateLimits: {
+            magicLinkRequestsPerWindow: 100,
+            sessionCreationsPerWindow: 100,
+            passwordAttemptsPerWindow: 3,
+            registrationsPerWindow: 100,
+            windowMinutes: 15,
+          },
+        },
+      });
+
+      try {
+        const email = uniqueEmail();
+        const statuses: number[] = [];
+
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          const response = await limited.inject({
+            method: "POST",
+            url: "/auth/sessions/password",
+            payload: { email, password: "guessing repeatedly here" },
+          });
+          statuses.push(response.statusCode);
+        }
+
+        assert.deepEqual(statuses.slice(0, 3), [401, 401, 401]);
+        assert.deepEqual(statuses.slice(3), [429, 429]);
+      } finally {
+        await limited.close();
+      }
+    });
+  });
+
+  /** Subjects of everything Mailpit holds for an address. */
+  async function readMailSubjectsFor(email: string): Promise<string[]> {
+    const response = await fetch(
+      `${MAILPIT}/api/v1/search?query=${encodeURIComponent(`to:${email}`)}`,
+    );
+    const body = (await response.json()) as { messages?: { Subject: string }[] };
+
+    return (body.messages ?? []).map((message) => message.Subject);
+  }
+
+  /**
+   * An Identity's event history, for asserting what is and is not recorded.
+   *
+   * Revisions are dropped: they are bigints, which JSON.stringify refuses, and
+   * the assertions are about payloads rather than positions.
+   */
+  async function readIdentityHistory(
+    identityId: string,
+  ): Promise<{ type: string; payload: unknown; metadata: unknown }[]> {
+    const { readStream } = await import("../../lib/eventstore/read-stream.js");
+    const { streamName } = await import("../../lib/eventstore/stream-name.js");
+
+    const recorded = await readStream(deps.client, streamName("identity", identityId));
+
+    return recorded.map((event) => ({
+      type: event.type,
+      payload: event.payload,
+      metadata: event.metadata,
+    }));
+  }
 
   async function identityIdFor(email: string): Promise<string> {
     const { rows } = await deps.pool.query<{ identity_id: string }>(

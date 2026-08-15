@@ -28,6 +28,69 @@ export const magicLinkResponseSchema = z.object({
 
 export type MagicLinkResponse = z.infer<typeof magicLinkResponseSchema>;
 
+/**
+ * Registering with an address and a password.
+ *
+ * The response is identical whether or not the address is already registered,
+ * so this cannot be used to discover who has an account.
+ */
+export const registrationRequestSchema = z.object({
+  email: z.email().max(320),
+  password: z.string().min(1).max(1024),
+});
+
+export type RegistrationRequest = z.infer<typeof registrationRequestSchema>;
+
+export const registrationResponseSchema = z.object({
+  message: z.string(),
+});
+
+export type RegistrationResponse = z.infer<typeof registrationResponseSchema>;
+
+/** Signing in with a password. */
+export const passwordSignInRequestSchema = z.object({
+  email: z.email().max(320),
+  password: z.string().min(1).max(1024),
+});
+
+export type PasswordSignInRequest = z.infer<typeof passwordSignInRequestSchema>;
+
+/** Proving control of an address after registering. */
+export const verifyEmailRequestSchema = z.object({
+  token: z.string().min(1).max(512),
+});
+
+export type VerifyEmailRequest = z.infer<typeof verifyEmailRequestSchema>;
+
+/** Asking for a password reset link. */
+export const passwordResetRequestSchema = z.object({
+  email: z.email().max(320),
+});
+
+export type PasswordResetRequest = z.infer<typeof passwordResetRequestSchema>;
+
+/** Completing a password reset with the emailed token. */
+export const passwordResetCompletionSchema = z.object({
+  token: z.string().min(1).max(512),
+  password: z.string().min(1).max(1024),
+});
+
+export type PasswordResetCompletion = z.infer<typeof passwordResetCompletionSchema>;
+
+/**
+ * Changing a password while signed in.
+ *
+ * The current password is required even though the caller is authenticated: an
+ * access token that has been left behind on a shared device should not be
+ * enough to take an account over.
+ */
+export const passwordChangeRequestSchema = z.object({
+  currentPassword: z.string().min(1).max(1024),
+  newPassword: z.string().min(1).max(1024),
+});
+
+export type PasswordChangeRequest = z.infer<typeof passwordChangeRequestSchema>;
+
 /** Redeeming a login link for a Session. */
 export const createSessionRequestSchema = z.object({
   token: z.string().min(1).max(512),

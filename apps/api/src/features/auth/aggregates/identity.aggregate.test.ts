@@ -19,7 +19,12 @@ const replay = (events: readonly IdentityEvent[]): IdentityState =>
   events.reduce(evolveIdentity, initialIdentityState);
 
 const createdEvents = (email = "Person@Example.com"): readonly IdentityEvent[] => {
-  const decision = decideCreateIdentity(initialIdentityState, { identityId, email, now });
+  const decision = decideCreateIdentity(initialIdentityState, {
+    identityId,
+    email,
+    emailVerified: true,
+    now,
+  });
   return decision.ok ? decision.events : [];
 };
 
@@ -42,6 +47,7 @@ describe("decideCreateIdentity", () => {
     const decision = decideCreateIdentity(initialIdentityState, {
       identityId,
       email: "person@example.com",
+      emailVerified: true,
       now,
     });
 
@@ -57,6 +63,7 @@ describe("decideCreateIdentity", () => {
     const decision = decideCreateIdentity(replay(createdEvents()), {
       identityId,
       email: "person@example.com",
+      emailVerified: true,
       now,
     });
 

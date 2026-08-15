@@ -11,6 +11,13 @@ import { generateId } from "../ids/generate-id.js";
  */
 
 export type AuthAuditEventType =
+  | "identity_registered"
+  | "email_verified"
+  | "password_set"
+  | "password_sign_in_rejected"
+  | "password_reset_requested"
+  | "password_reset_completed"
+  | "password_changed"
   | "magic_link_requested"
   | "magic_link_consumed"
   | "magic_link_rejected"
