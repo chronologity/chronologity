@@ -11,23 +11,23 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
-    "lint": "turbo run lint",
-    "lint:fix": "turbo run lint:fix",
+    "lint": "turbo run lint //#lint:root",
+    "lint:fix": "turbo run lint:fix //#lint:root:fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "test:unit": "turbo run test:unit",
     "test:integration": "turbo run test:integration",
-    "clean": "turbo run clean"
+    "clean": "turbo run clean",
+    "lint:root": "eslint eslint.config.js prettier.config.js",
+    "lint:root:fix": "eslint eslint.config.js prettier.config.js --fix"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
+    "@chronologity/eslint-config": "workspace:*",
     "eslint": "^10.0.1",
-    "globals": "^17.9.0",
     "prettier": "^3.9.6",
     "turbo": "^2.10.7",
-    "typescript": "^7.0.2",
-    "typescript-eslint": "^8.66.0"
+    "typescript": "^7.0.2"
   }
 }

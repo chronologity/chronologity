@@ -1,9 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2024",
-    "lib": [
-      "ES2024"
-    ],
+    "lib": ["ES2024"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
@@ -15,14 +13,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "exclude": [
-    "node_modules",
-    ".turbo",
-    "dist",
-    "build",
-    "coverage",
-    ".expo",
-    ".cache",
-    "public"
-  ]
+  "exclude": ["node_modules", ".turbo", "dist", "build", "coverage", ".expo", ".cache", "public"]
 }

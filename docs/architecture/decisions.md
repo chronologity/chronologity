@@ -1465,6 +1465,36 @@ The canonical document template omits that section.
 
 ---
 
+# ADR-069 — Pin TypeScript 6 for Linting While Compiling With TypeScript 7
+
+**Status:** Accepted
+
+## Decision
+
+`packages/eslint-config` declares its own `typescript` dependency on the 6.x line. The repository root and every application continue to compile with the TypeScript 7 pinned in the root manifest.
+
+## Alternatives Considered
+
+Downgrading the whole repository to TypeScript 6 was considered, as was dropping `typescript-eslint` until it supports TypeScript 7.
+
+## Rationale
+
+`typescript-eslint` declares a peer range of `typescript >=4.8.4 <6.1.0` and refuses to load against TypeScript 7, so the two cannot share one version today.
+
+TypeScript 7 is a native port of the 6.x compiler rather than a language expansion, so both versions currently accept the same syntax. The split therefore costs nothing in practice while preserving the compiler performance that motivated the TypeScript 7 pin.
+
+Dropping `typescript-eslint` would remove type-aware linting on an unknown timeline. Downgrading the repository would discard TypeScript 7 and require the same migration later in the opposite direction.
+
+## Consequences
+
+Two TypeScript versions exist in the dependency graph. pnpm's isolated store keeps the 6.x copy local to the linter.
+
+Syntax introduced in a future TypeScript 7.x release may fail to lint before `typescript-eslint` supports it.
+
+This decision is reversed by removing the `typescript` dependency from `packages/eslint-config` once `typescript-eslint` supports TypeScript 7.
+
+---
+
 # Superseded Decisions
 
 This section preserves important architectural choices that are no longer canonical.
