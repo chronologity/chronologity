@@ -48,6 +48,11 @@ export type EventEnvelope = z.infer<typeof eventEnvelopeSchema>;
  * Domains declare their own events by supplying a payload schema, so the
  * envelope stays canonical while payloads remain owned by the feature that
  * produces them.
+ *
+ * @param eventType - The single type this envelope accepts.
+ * @param payload - The schema its payload must satisfy.
+ * @returns An envelope schema bound to that one event type, so a domain declares
+ *   its own events while the envelope stays canonical.
  */
 export function envelopeOf<PayloadSchema extends z.ZodType>(
   eventType: string,

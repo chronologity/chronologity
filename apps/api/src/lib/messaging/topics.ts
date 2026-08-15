@@ -17,6 +17,15 @@ import { ValidationError } from "../errors/validation-error.js";
 
 const TOPIC_PATTERN = /^chronologity\.[a-z][a-z0-9-]*\.v[1-9][0-9]*$/;
 
+/**
+ * Build a topic name for an integration boundary.
+ *
+ * @param boundary - The integration boundary this topic serves.
+ * @param majorVersion - Part of the name, because a breaking envelope change
+ *   ships as a new topic rather than a reinterpretation of messages in flight.
+ * @returns The topic name.
+ * @throws {ValidationError} If the result is not a valid topic name.
+ */
 export function topicName(boundary: string, majorVersion = 1): string {
   const name = `chronologity.${boundary}.v${majorVersion}`;
 
@@ -33,6 +42,9 @@ export function topicName(boundary: string, majorVersion = 1): string {
  * A message that cannot be processed after its retries is moved aside rather
  * than blocking its partition forever. Nothing is discarded: a poison message
  * is evidence of a defect, and deleting it deletes the evidence.
+ *
+ * @param topic - The topic a message could not be processed from.
+ * @returns Where to put it instead.
  */
 export function deadLetterTopic(topic: string): string {
   return `${topic}.dlq`;
@@ -45,6 +57,9 @@ export function deadLetterTopic(topic: string): string {
  * smallest boundary that genuinely requires ordering — the aggregate. Keying
  * more coarsely serialises unrelated work; more finely loses the ordering the
  * domain depends on.
+ *
+ * @param aggregateId - The aggregate whose events must stay ordered.
+ * @returns The partition key.
  */
 export function partitionKeyForAggregate(aggregateId: string): string {
   return aggregateId;

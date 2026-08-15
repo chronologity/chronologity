@@ -23,6 +23,10 @@ const readinessSchema = z.object({
  * asks whether this instance can serve traffic right now, which depends on
  * dependencies it does not control. A database outage should stop traffic
  * being routed here; it should not cause an orchestrator to kill the process.
+ *
+ * @param app - The instance to register on. Its decorated dependencies are what
+ *   readiness consults.
+ * @returns Nothing.
  */
 export async function healthRoutes(app: FastifyInstance): Promise<void> {
   app.get("/health/live", { schema: { response: { 200: livenessSchema } } }, async () => ({

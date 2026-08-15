@@ -22,6 +22,14 @@ import type { RefreshSessionCommand } from "./refresh-session.command.js";
  * Session rather than merely refusing the request. The events that decision
  * produces are persisted even though the operation fails, because the
  * revocation is a fact regardless of what the caller is told.
+ *
+ * @param deps - Event store, database, configuration, and clock.
+ * @param command - Which Session, and the credential presented.
+ * @param context - Trace identifier and receipt time.
+ * @returns A fresh credential pair.
+ * @throws {UnauthenticatedError} If the Session is unknown, revoked, expired, or
+ *   the credential is not the current one. The last case also revokes the
+ *   Session, and those events are persisted even though the call fails.
  */
 export async function handleRefreshSession(
   deps: AuthDependencies,

@@ -68,7 +68,16 @@ declare module "fastify" {
   }
 }
 
-/** Route guard. Attach as `preHandler` to require an authenticated Session. */
+/**
+ * Route guard. Attach as `preHandler` to require an authenticated Session.
+ *
+ * @param request - The request to authenticate. On success its session is
+ *   populated.
+ * @param _reply - Unused; Fastify passes it to every hook.
+ * @returns Nothing.
+ * @throws {UnauthenticatedError} If the token is absent, invalid, or names a
+ *   Session that can no longer authenticate a request.
+ */
 export async function requireSession(request: FastifyRequest, _reply: FastifyReply): Promise<void> {
   await request.server.authenticate(request);
 }

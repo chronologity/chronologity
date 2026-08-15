@@ -32,13 +32,14 @@ let index: Buffer | undefined;
 /**
  * Load the index into memory.
  *
- * Throws if it is missing or malformed. A deployment without it is a broken
- * build, and quietly treating every password as clean would disable the check
- * exactly where nobody would notice — the failure mode this design exists to
- * avoid.
- *
  * Called at startup so that failure surfaces at boot rather than on someone's
- * first registration.
+ * first registration. Idempotent; subsequent calls do nothing.
+ *
+ * @returns Nothing.
+ * @throws {Error} If the index is missing or its length is not a whole number
+ *   of entries. Deliberately fatal: a deployment without it is a broken build,
+ *   and quietly treating every password as clean would disable the check
+ *   exactly where nobody would notice.
  */
 export function loadBreachedPasswordIndex(): void {
   if (index !== undefined) {
@@ -56,7 +57,13 @@ export function loadBreachedPasswordIndex(): void {
   index = contents;
 }
 
-/** How many passwords the index covers. Used by tests and diagnostics. */
+/**
+ * How many passwords the index covers.
+ *
+ * Used by tests and diagnostics.
+ *
+ * @returns The number of entries.
+ */
 export function breachedPasswordCount(): number {
   loadBreachedPasswordIndex();
 
@@ -68,6 +75,10 @@ export function breachedPasswordCount(): number {
  *
  * Binary search over the sorted index. Synchronous and in memory: this runs on
  * registration, reset, and change, and none of those should wait on anything.
+ *
+ * @param password - The proposed plaintext, compared exactly. The corpus is
+ *   case sensitive, so no normalisation is applied.
+ * @returns Whether it is in the corpus.
  */
 export function isBreachedPassword(password: string): boolean {
   loadBreachedPasswordIndex();

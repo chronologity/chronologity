@@ -28,6 +28,15 @@ import type { ChangePasswordCommand } from "./change-password.command.js";
  * password is a deliberate act by someone present, so logging them out of the
  * device they are using would be a punishment for good hygiene — but any other
  * session may belong to whoever prompted the change.
+ *
+ * @param deps - Event store, database, configuration, and clock.
+ * @param command - Who is changing it, from which Session, and both passwords.
+ * @param context - Trace identifier and receipt time.
+ * @returns How many other Sessions were revoked. The current one survives: the
+ *   person is present, and logging them out of the device they are using would
+ *   punish good hygiene.
+ * @throws {UnauthenticatedError} If the current password is wrong.
+ * @throws {ValidationError} If the new password fails policy.
  */
 export async function handleChangePassword(
   deps: AuthDependencies,

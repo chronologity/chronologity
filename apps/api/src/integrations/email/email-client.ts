@@ -20,6 +20,14 @@ export interface EmailClient {
   close(): Promise<void>;
 }
 
+/**
+ * Build the outbound email adapter.
+ *
+ * @param config - Host, port, and sender address.
+ * @param logger - Optional. Recipients are logged; contents are not, since a
+ *   magic link in a log file is a working credential.
+ * @returns A client that can send and close.
+ */
 export function createEmailClient(config: EmailConfig, logger?: Logger): EmailClient {
   let transporter: Transporter | undefined;
 

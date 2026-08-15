@@ -29,6 +29,13 @@ export interface AppConfig {
  *
  * Throws `ConfigurationError` listing every problem at once. The process is
  * expected to exit rather than start in an unknown state.
+ *
+ * @param source - Where to read from. Defaults to the process environment;
+ *   injectable so tests need not mutate it.
+ * @returns The assembled configuration.
+ * @throws {ConfigurationError} If anything is missing or invalid, listing every
+ *   problem at once. The process is expected to exit rather than start in an
+ *   unknown state.
  */
 export function loadConfig(source: Record<string, string | undefined> = process.env): AppConfig {
   const env = parseEnv(envSchema, source);

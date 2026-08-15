@@ -1,4 +1,5 @@
 import js from "@eslint/js";
+import jsdoc from "eslint-plugin-jsdoc";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
@@ -45,6 +46,68 @@ export const javascript = {
   },
 };
 
+/**
+ * Documentation comments.
+ *
+ * Every function carries a description, its parameters, what it returns, and
+ * what it throws. Types are deliberately absent from the tags: TypeScript
+ * already states them, and repeating them creates two sources of truth that
+ * drift. `check-param-names` is what stops the tags rotting when a parameter
+ * is renamed — without it this convention decays quietly.
+ *
+ * Destructured fields are not individually required. Documenting each one is
+ * often worth doing, but mandating it turns a six-field options object into
+ * six lines that mostly restate their own names.
+ */
+export const documentation = {
+  files: ["**/*.{ts,mts,cts,tsx,js,mjs,cjs}"],
+  plugins: { jsdoc },
+  settings: { jsdoc: { mode: "typescript" } },
+  rules: {
+    "jsdoc/require-jsdoc": [
+      "error",
+      {
+        require: {
+          FunctionDeclaration: true,
+          MethodDefinition: true,
+          ClassDeclaration: true,
+          ArrowFunctionExpression: false,
+          FunctionExpression: false,
+        },
+      },
+    ],
+    "jsdoc/require-description": "error",
+    "jsdoc/require-param": ["error", { checkDestructured: false }],
+    "jsdoc/require-param-description": "error",
+    "jsdoc/check-param-names": ["error", { checkDestructured: false }],
+    "jsdoc/require-returns": "error",
+    "jsdoc/require-returns-description": "error",
+    "jsdoc/require-throws": "error",
+    // TypeScript owns the types; a tag that repeats them can only disagree.
+    "jsdoc/no-types": "error",
+    "jsdoc/check-tag-names": "error",
+    "jsdoc/check-alignment": "error",
+    "jsdoc/empty-tags": "error",
+  },
+};
+
+/**
+ * Tests.
+ *
+ * Exempt from the documentation rules. A test's name is its description, and
+ * requiring tags on assertions helpers would add noise to the files where
+ * readability matters most.
+ */
+export const tests = {
+  files: ["**/*.test.{ts,tsx}", "**/*.integration.ts"],
+  rules: {
+    "jsdoc/require-jsdoc": "off",
+    "jsdoc/require-param": "off",
+    "jsdoc/require-returns": "off",
+    "jsdoc/require-throws": "off",
+  },
+};
+
 /** TypeScript sources. Type-aware rules are added per package, where a tsconfig is available. */
 export const typescript = {
   files: ["**/*.{ts,mts,cts,tsx}"],
@@ -79,7 +142,7 @@ export const typescript = {
   },
 };
 
-/** The default Chronologity baseline: JavaScript and TypeScript rules together. */
-export const base = [javascript, typescript];
+/** The default Chronologity baseline: JavaScript, TypeScript, and documentation rules. */
+export const base = [javascript, typescript, documentation, tests];
 
 export default base;

@@ -49,7 +49,15 @@ export const initialSessionState: SessionState = {
   revocationReason: undefined,
 };
 
-/** Rebuild Session state from its history. Pure, so replay is deterministic. */
+/**
+ * Rebuild Session state from its history.
+ *
+ * Pure, so replay is deterministic.
+ *
+ * @param state - State so far.
+ * @param event - The next event.
+ * @returns The state after applying it; unrecognised types leave it unchanged.
+ */
 export function evolveSession(state: SessionState, event: SessionEvent): SessionState {
   switch (event.type) {
     case "SessionCreated":
@@ -86,9 +94,12 @@ export function evolveSession(state: SessionState, event: SessionEvent): Session
 /**
  * Whether a Session may authenticate a request right now.
  *
- * Expiry is evaluated against the clock rather than waiting for an
- * `SessionExpired` event, because nothing guarantees that event has been
- * written yet — expiry is the passage of time, not an action anyone takes.
+ * @param state - The Session's current state.
+ * @param now - The instant to judge against.
+ * @returns Whether it exists, is active, and has not expired. Expiry is
+ *   evaluated against the clock rather than waiting for a `SessionExpired`
+ *   event, because nothing guarantees that event has been written yet —
+ *   expiry is the passage of time, not an action anyone takes.
  */
 export function isUsable(state: SessionState, now: Date): boolean {
   if (!state.exists || state.status !== "active") {
@@ -114,6 +125,15 @@ export type SessionDecision =
       readonly events?: readonly SessionEvent[];
     };
 
+/**
+ * Begin a Session for an already-authenticated Identity.
+ *
+ * @param state - Must be the initial state; an existing Session is refused.
+ * @param input - The new Session's identifier, whose it is, the hash of its
+ *   first refresh credential, when it expires, what kind of client asked, and
+ *   the current instant.
+ * @returns The event to append, or a refusal.
+ */
 export function decideCreateSession(
   state: SessionState,
   input: {
@@ -150,13 +170,16 @@ export function decideCreateSession(
 /**
  * Rotate the refresh credential.
  *
- * Presenting a credential that is not the current one means an already-rotated
- * credential is in circulation. Either it leaked, or a legitimate client is
- * replaying an old one — and the two are indistinguishable from here. The
- * Session is revoked rather than merely refused, because refusing a stolen
- * credential while leaving the session alive lets the thief keep using the one
- * they hold. Revocation is the response `authentication.md:490` leaves to be
- * defined; this defines it.
+ * @param state - The Session's current state.
+ * @param input - The hash of the credential presented, the hash of its
+ *   replacement, and the current instant.
+ * @returns The events to append. A presented credential that is not the
+ *   current one means an already-rotated credential is in circulation: either
+ *   it leaked or a client is replaying an old one, and the two are
+ *   indistinguishable from here. That case returns a refusal *carrying a
+ *   revocation event*, because refusing a stolen credential while leaving the
+ *   Session alive lets whoever holds it keep trying. Revocation is the
+ *   response `authentication.md:490` leaves to be defined; this defines it.
  */
 export function decideRefreshSession(
   state: SessionState,
@@ -209,9 +232,14 @@ export function decideRefreshSession(
 /**
  * End a Session.
  *
- * Revoking an already-revoked Session succeeds without a further event: the
- * caller's intent is satisfied, and logging out twice is not an error worth
- * showing anyone.
+ * @param state - The Session's current state.
+ * @param input - Why it is being revoked, and the current instant. The reason
+ *   is part of the record: a logout and a suspected theft end the same way but
+ *   mean different things afterwards.
+ * @returns The event to append, or a refusal if the Session does not exist.
+ *   Revoking an already-revoked Session succeeds with no further event: the
+ *   caller's intent is satisfied, and logging out twice is not an error worth
+ *   showing anyone.
  */
 export function decideRevokeSession(
   state: SessionState,

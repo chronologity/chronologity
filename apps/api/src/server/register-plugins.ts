@@ -13,6 +13,11 @@ import { validationPlugin } from "../plugins/validation.plugin.js";
  * Order matters: request context is established before anything that logs or
  * reports an error, so every one of them can quote a trace identifier, and
  * rate limiting is installed before routes so their per-route limits attach.
+ *
+ * @param app - The instance to install on.
+ * @param auth - Authentication wiring; when absent the auth plugin is skipped, so
+ *   a test can build an application without a database.
+ * @returns Nothing.
  */
 export async function registerPlugins(
   app: FastifyInstance,

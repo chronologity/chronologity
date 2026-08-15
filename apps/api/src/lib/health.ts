@@ -22,6 +22,11 @@ export interface DependencyHealth {
  *
  * Failures are reported rather than thrown: readiness needs to say which
  * dependency is unavailable, not merely that something is.
+ *
+ * @param dependencies - Everything this instance needs to serve traffic.
+ * @returns Each dependency's name and whether it answered, checked concurrently.
+ *   Failures are reported rather than thrown: readiness needs to say which
+ *   dependency is unavailable, not merely that something is.
  */
 export async function checkDependencies(
   dependencies: readonly HealthCheckable[],

@@ -15,6 +15,12 @@ import type { RequestPasswordResetCommand } from "./request-password-reset.comma
  * creates the account — a reset link is only meaningful for an existing
  * Identity, so no link is issued when there is none. The response does not
  * change, which is what keeps that difference invisible.
+ *
+ * @param deps - Database, mail, configuration, and clock.
+ * @param command - The address to send to.
+ * @param context - Trace identifier and receipt time.
+ * @returns Nothing, whether or not an account exists. No link is issued when
+ *   there is no Identity, since a reset link is only meaningful for one.
  */
 export async function handleRequestPasswordReset(
   deps: AuthDependencies,

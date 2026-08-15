@@ -48,6 +48,11 @@ const SOURCE = "eventstoredb:$all";
  * A single pass rather than a daemon: the caller decides whether this runs once
  * in a rebuild job or repeatedly in a worker, and a function that returns is far
  * easier to test than one that never does.
+ *
+ * @param options - The projection, where to read from, where to record progress,
+ *   an optional logger, and an optional cap on how many events one pass reads.
+ * @returns How many events were applied, how many were recognised as already
+ *   applied, and the position reached.
  */
 export async function runProjection({
   projection,
@@ -133,6 +138,11 @@ export async function runProjection({
  * Discarding progress is the caller's decision and happens in its own
  * transaction, so a rebuild that fails partway leaves a projection that resumes
  * from where the rebuild reached rather than one stuck between two versions.
+ *
+ * @param options - As for {@link runProjection}.
+ * @returns The result of the rebuilding pass. Progress is discarded in its own
+ *   transaction first, so a rebuild that fails partway leaves a projection that
+ *   resumes from where it reached rather than one stuck between two versions.
  */
 export async function rebuildProjection(
   options: RunProjectionOptions,

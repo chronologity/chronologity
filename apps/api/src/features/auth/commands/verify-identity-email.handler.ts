@@ -23,6 +23,15 @@ import type { VerifyIdentityEmailCommand } from "./verify-identity-email.command
  * and this one cannot be used to sign in. Verifying does not create a Session:
  * proving an address and being logged in are separate things, and conflating
  * them would mean a forwarded verification email logs in whoever opens it.
+ *
+ * @param deps - Event store, database, and clock.
+ * @param command - The token from the verification link.
+ * @param context - Trace identifier and receipt time.
+ * @returns Nothing. Verifying does not create a Session: proving an address and
+ *   being signed in are separate things, and conflating them would let a
+ *   forwarded email sign in whoever opens it.
+ * @throws {UnauthenticatedError} If the link is expired, already used, of the
+ *   wrong purpose, or was never issued.
  */
 export async function handleVerifyIdentityEmail(
   deps: AuthDependencies,

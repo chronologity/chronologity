@@ -16,6 +16,13 @@ export interface MappedError {
  * and schema validation failures — contribute a message. Everything else
  * becomes an internal error whose detail exists solely in the logs, findable
  * by trace identifier.
+ *
+ * @param error - Anything thrown, including values that are not errors.
+ * @param traceId - Ties the sanitized response to the full detail in the logs.
+ * @returns The status and the envelope to send. Only errors that deliberately
+ *   describe themselves contribute a message; everything else becomes an
+ *   internal error, so a stack trace, SQL error, or provider failure cannot
+ *   reach a client.
  */
 export function toErrorResponse(error: unknown, traceId: string): MappedError {
   if (error instanceof DomainError) {
@@ -102,6 +109,11 @@ const MESSAGE_FOR_STATUS: Readonly<Record<number, string>> = {
  * Only 4xx is honoured. A plugin reporting 5xx is reporting a failure, and
  * failures go through the unexpected-error path where their detail stays in
  * the logs.
+ *
+ * @param error - The thrown value.
+ * @returns The status a framework-level rejection asked for, or undefined. Only
+ *   4xx is honoured: a plugin reporting 5xx is reporting a failure, and failures
+ *   go through the unexpected-error path where their detail stays in the logs.
  */
 function frameworkStatus(error: unknown): number | undefined {
   if (typeof error !== "object" || error === null || !("statusCode" in error)) {

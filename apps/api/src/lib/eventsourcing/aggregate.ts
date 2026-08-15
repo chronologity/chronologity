@@ -59,6 +59,12 @@ export interface AggregateStore<State, Event extends DomainEvent> {
  * outlives code: a stream may contain events written by a newer deployment, or
  * by a feature since removed, and refusing to load in that case would make old
  * history unreadable rather than merely unfamiliar.
+ *
+ * @param definition - The stream category, the state before anything has
+ *   happened, and how each event changes it.
+ * @param client - The event store to read and append through.
+ * @returns A store that loads state with the revision it reflects, and appends
+ *   against that same revision.
  */
 export function defineAggregate<State, Event extends DomainEvent>(
   definition: AggregateDefinition<State, Event>,

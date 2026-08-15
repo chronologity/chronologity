@@ -41,7 +41,12 @@ export const errorResponseSchema = z.object({
 
 export type ErrorResponse = z.infer<typeof errorResponseSchema>;
 
-/** Whether a caller can reasonably retry an operation that failed with this code. */
+/**
+ * Whether a caller can reasonably retry an operation that failed with this code.
+ *
+ * @param code - The error code returned.
+ * @returns Whether trying the same operation again could reasonably succeed.
+ */
 export function isRetryable(code: ErrorCode): boolean {
   return (
     code === "CONCURRENCY_CONFLICT" || code === "PROVIDER_UNAVAILABLE" || code === "RATE_LIMITED"

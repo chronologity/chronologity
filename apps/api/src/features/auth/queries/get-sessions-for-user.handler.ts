@@ -9,6 +9,10 @@ import type { GetSessionsForUserQuery } from "./get-sessions-for-user.query.js";
  * listing, not an access decision, and being a moment stale costs nothing.
  * Revoked sessions are omitted rather than shown as ended — someone reviewing
  * their devices wants to know what is open now.
+ *
+ * @param deps - Database.
+ * @param query - Whose Sessions, and which one is asking.
+ * @returns The active Sessions, newest first, with the caller's own marked.
  */
 export async function handleGetSessionsForUser(
   deps: AuthDependencies,

@@ -19,6 +19,10 @@ export interface RecordedEvent<Payload = unknown> {
  * The stream is consumed to completion rather than abandoned partway, so no
  * gRPC call is left open. An early `break` here is what made shutdown hang
  * during Phase 3.
+ *
+ * @param client - The event store to read from.
+ * @param streamName - Which stream.
+ * @returns Its events in order, or an empty list if the stream does not exist.
  */
 export async function readStream<Payload = unknown>(
   client: EventStoreDBClient,

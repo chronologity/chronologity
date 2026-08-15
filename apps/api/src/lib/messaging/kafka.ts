@@ -14,6 +14,12 @@ export interface Messaging extends HealthCheckable {
   close(): Promise<void>;
 }
 
+/**
+ * Build the API's Kafka boundary.
+ *
+ * @param config - Brokers and client identifier.
+ * @returns The client, a health check that lists topics, and a close.
+ */
 export function createMessaging(config: MessagingConfig): Messaging {
   const kafka = new Kafka({
     clientId: config.clientId,

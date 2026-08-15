@@ -24,7 +24,13 @@ export interface AuthDependencies {
   readonly rateLimits?: AuthRateLimits | undefined;
 }
 
-/** The clock a handler should use. */
+/**
+ * The clock a handler should use.
+ *
+ * @param deps - May carry an injected clock.
+ * @returns The clock a handler should read time from, so tests can move time
+ *   without waiting for it.
+ */
 export function clockFor(deps: AuthDependencies): () => Date {
   return deps.clock ?? (() => new Date());
 }

@@ -12,6 +12,15 @@ export type Transaction = pg.PoolClient;
  *
  * The client is released in every path. A leaked connection does not fail
  * loudly; it exhausts the pool later, somewhere unrelated.
+ *
+ * @param pool - The pool to take a connection from.
+ * @param work - Runs inside the transaction and receives the connection.
+ *   Repository functions take this connection rather than the pool, which is what
+ *   makes the transactional outbox possible.
+ * @returns Whatever the work returns, once committed.
+ * @throws Whatever the work throws, after rolling back. A rollback that itself
+ *   fails is swallowed: the connection is unusable either way, and the original
+ *   error is the one that explains what went wrong.
  */
 export async function withTransaction<Result>(
   pool: pg.Pool,

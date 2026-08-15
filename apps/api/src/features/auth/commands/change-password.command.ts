@@ -11,6 +11,13 @@ export type ChangePasswordCommand = Command<
   }
 >;
 
+/**
+ * Change a password while signed in.
+ *
+ * @param input - Who is changing it, from which Session, the current password,
+ *   and the new one.
+ * @returns The command.
+ */
 export function changePassword(input: {
   identityId: string;
   currentSessionId: string;

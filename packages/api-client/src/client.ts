@@ -9,6 +9,12 @@ export class ApiError extends Error {
   readonly traceId: string;
   readonly details: Readonly<Record<string, unknown>> | undefined;
 
+  /**
+   * Build an error from the API's stable envelope.
+   *
+   * @param status - The HTTP status returned.
+   * @param response - The envelope body.
+   */
   constructor(status: number, response: ErrorResponse) {
     super(response.message);
     this.status = status;
@@ -55,6 +61,11 @@ const DEFAULT_TIMEOUT_MS = 30_000;
  *
  * Only `request` is exposed. Named operations are added as the API implements
  * the routes behind them.
+ *
+ * @param options - Base URL, an optional token supplier, an optional fetch
+ *   implementation for tests, and a per-request timeout.
+ * @returns A client exposing only `request`. Named operations are added as the
+ *   API implements the routes behind them.
  */
 export function createApiClient(options: ApiClientOptions): ApiClient {
   const {
@@ -109,6 +120,11 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
  * A response that is not the documented envelope is reported as an internal
  * error rather than being reshaped into one, so a proxy's HTML error page is
  * never mistaken for an API contract.
+ *
+ * @param response - The failed response.
+ * @returns An ApiError. A body that is not the documented envelope becomes an
+ *   internal error rather than being reshaped into one, so a proxy's HTML error
+ *   page is never mistaken for an API contract.
  */
 async function toApiError(response: Response): Promise<ApiError> {
   const fallback: ErrorResponse = {

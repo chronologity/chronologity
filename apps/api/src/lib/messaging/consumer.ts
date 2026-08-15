@@ -44,6 +44,13 @@ export interface EventConsumer {
 
 const DEFAULT_MAX_ATTEMPTS = 3;
 
+/**
+ * Build a consumer for integration events.
+ *
+ * @param options - The client, the consumer group, the topics, the handler, an
+ *   optional logger, and how many attempts a message gets before it is set aside.
+ * @returns A consumer that can be started and stopped.
+ */
 export function createEventConsumer(options: ConsumerOptions): EventConsumer {
   const { kafka, groupId, topics, handler, logger, maxAttempts = DEFAULT_MAX_ATTEMPTS } = options;
 
@@ -132,6 +139,14 @@ export function createEventConsumer(options: ConsumerOptions): EventConsumer {
     },
   };
 
+  /**
+   * Set a message aside rather than leaving it to block its partition.
+   *
+   * @param topic - The topic it could not be processed from.
+   * @param raw - The message exactly as received, so nothing is lost.
+   * @param key - Partition key for the dead-letter record.
+   * @returns Nothing.
+   */
   async function sendToDeadLetter(topic: string, raw: string, key: string): Promise<void> {
     const producer = kafka.producer();
 

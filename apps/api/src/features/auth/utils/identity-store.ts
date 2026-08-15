@@ -14,7 +14,13 @@ export interface LoadedIdentity {
   readonly revision: bigint | "no_stream";
 }
 
-/** Load an Identity from its authoritative history. */
+/**
+ * Load an Identity from its authoritative history.
+ *
+ * @param deps - Supplies the event store.
+ * @param identityId - Which Identity.
+ * @returns Its state and the revision that state reflects.
+ */
 export async function loadIdentity(
   deps: AuthDependencies,
   identityId: string,

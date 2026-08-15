@@ -55,12 +55,25 @@ export const initialIdentityState: IdentityState = {
  * normalisation — stripping dots, cutting everything after a plus sign — is
  * provider-specific, and applying it universally silently merges addresses
  * that belong to different people.
+ *
+ * @param email - The address as given.
+ * @returns The form used to decide whether two addresses are the same one.
  */
 export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-/** Rebuild Identity state from its history. Pure, so replay is deterministic. */
+/**
+ * Rebuild Identity state from its history.
+ *
+ * Pure, so replay is deterministic.
+ *
+ * @param state - State so far.
+ * @param event - The next event.
+ * @returns The state after applying it. Unrecognised event types return the
+ *   state unchanged: history outlives code, and a stream may hold events
+ *   written by a newer deployment or by a feature since removed.
+ */
 export function evolveIdentity(state: IdentityState, event: IdentityEvent): IdentityState {
   switch (event.type) {
     case "IdentityCreated":
@@ -108,7 +121,13 @@ export function evolveIdentity(state: IdentityState, event: IdentityEvent): Iden
   }
 }
 
-/** Whether this Identity has proven control of an address. */
+/**
+ * Whether this Identity has proven control of an address.
+ *
+ * @param state - The Identity's current state.
+ * @param normalizedEmail - The address in its normalised form.
+ * @returns Whether that address is present and verified.
+ */
 export function hasVerifiedEmail(state: IdentityState, normalizedEmail: string): boolean {
   return state.emails.some((entry) => entry.normalizedEmail === normalizedEmail && entry.verified);
 }
@@ -127,11 +146,14 @@ export type IdentityRejection =
 /**
  * Create an Identity with its first email.
  *
- * Whether that address is already verified depends on how the Identity came to
- * exist, so the caller must say. Redeeming a magic link is itself proof of
- * control and arrives verified; registering with a password proves nothing
- * about the address yet, and must be confirmed before it can be used to sign
- * in (`authentication.md:240`).
+ * @param state - Must be the initial state; an existing Identity is refused.
+ * @param input - The new identifier, the address, whether control of it has
+ *   actually been proven, and the current instant.
+ * @returns The events to append, or a refusal. Whether the address arrives
+ *   verified depends on how the Identity came to exist, so the caller must
+ *   say: redeeming a magic link is itself proof of control, while registering
+ *   with a password proves nothing about the address yet
+ *   (`authentication.md:240`).
  */
 export function decideCreateIdentity(
   state: IdentityState,
@@ -168,10 +190,12 @@ export function decideCreateIdentity(
 /**
  * Record that a password credential was set.
  *
- * Setting a password over an existing one is legitimate — that is what a reset
- * and a change both are — so this does not refuse an Identity that already has
- * one. The hash is written to PostgreSQL by the handler; only the fact reaches
- * history.
+ * @param state - The Identity's current state.
+ * @param input - The algorithm used, why the password was set, and the current
+ *   instant. Never the hash: only the fact reaches history.
+ * @returns The event to append, or a refusal if the Identity does not exist.
+ *   Setting a password over an existing one is legitimate — that is what a
+ *   reset and a change both are — so an existing password is not a refusal.
  */
 export function decideSetPassword(
   state: IdentityState,
@@ -196,7 +220,14 @@ export function decideSetPassword(
   };
 }
 
-/** Add a further address to an existing Identity, unverified until proven. */
+/**
+ * Add a further address to an existing Identity, unverified until proven.
+ *
+ * @param state - The Identity's current state.
+ * @param input - The address to add.
+ * @returns The event to append, or a refusal if the Identity does not exist or
+ *   already holds that address.
+ */
 export function decideAddEmail(state: IdentityState, input: { email: string }): IdentityDecision {
   if (!state.exists) {
     return { ok: false, reason: "identity_not_found" };
@@ -214,7 +245,14 @@ export function decideAddEmail(state: IdentityState, input: { email: string }): 
   };
 }
 
-/** Record proven control of an address already claimed by this Identity. */
+/**
+ * Record proven control of an address already claimed by this Identity.
+ *
+ * @param state - The Identity's current state.
+ * @param input - The address and the instant control was proven.
+ * @returns The event to append, or a refusal if the Identity does not exist,
+ *   has not claimed that address, or has already verified it.
+ */
 export function decideVerifyEmail(
   state: IdentityState,
   input: { email: string; now: Date },

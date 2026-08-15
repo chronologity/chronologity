@@ -59,6 +59,9 @@ import {
  * Every failure reaching a client is a bare 401. Distinguishing "no such
  * account" from "wrong link" from "expired link" is the information an attacker
  * is enumerating for, and none of it helps a legitimate caller.
+ *
+ * @param deps - Everything the handlers need, plus optional rate limits.
+ * @returns A Fastify plugin registering the authentication endpoints.
  */
 export function authRoutes(deps: AuthDependencies) {
   const limits = deps.rateLimits ?? defaultAuthRateLimits;

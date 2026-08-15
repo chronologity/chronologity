@@ -50,6 +50,13 @@ export interface PublishResult {
 
 const DEFAULT_PUBLISHER_NAME = "eventstore-to-kafka";
 
+/**
+ * Read a publisher's checkpoint.
+ *
+ * @param pool - Read-only use.
+ * @param name - Which publisher.
+ * @returns Where it has reached, or undefined if it has never run.
+ */
 async function readPosition(pool: pg.Pool, name: string): Promise<bigint | undefined> {
   const { rows } = await pool.query<{ position: string }>(
     `SELECT position::text FROM publisher_checkpoints WHERE publisher_name = $1`,
@@ -64,6 +71,12 @@ async function readPosition(pool: pg.Pool, name: string): Promise<bigint | undef
  * Publish everything committed since the last checkpoint.
  *
  * One pass, so the caller decides the cadence and a test can call it directly.
+ *
+ * @param options - The event store, the database holding the checkpoint, the
+ *   producer, optional logger, which categories publish and to which boundary,
+ *   the publisher's name, and an optional cap on how many events one pass reads.
+ * @returns How many events were published, the position reached, and whether the
+ *   pass read to the end of history.
  */
 export async function publishPendingEvents({
   client,
@@ -185,6 +198,12 @@ export async function publishPendingEvents({
 
   return { published, position, reachedEnd };
 
+  /**
+   * Advance the publisher's checkpoint.
+   *
+   * @param value - The position now safely behind us.
+   * @returns Nothing.
+   */
   async function recordPosition(value: bigint): Promise<void> {
     await withTransaction(pool, async (tx) => {
       await tx.query(

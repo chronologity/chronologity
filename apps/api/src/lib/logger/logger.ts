@@ -15,6 +15,14 @@ export type Logger = FastifyBaseLogger;
  */
 // NonNullable: the repository compiles with exactOptionalPropertyTypes, so a
 // return type that includes undefined cannot be assigned to an optional field.
+/**
+ * Structured logging configuration.
+ *
+ * @param config - Supplies the level.
+ * @returns Logger options, including the redaction paths. Declaring redaction
+ *   here rather than at call sites matters: relying on every future caller to
+ *   remember not to log a token is not a control.
+ */
 export function loggerOptions(config: AppConfig): NonNullable<FastifyServerOptions["logger"]> {
   return {
     level: config.logLevel,

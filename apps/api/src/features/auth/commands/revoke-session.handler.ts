@@ -16,6 +16,14 @@ import type { RevokeSessionCommand } from "./revoke-session.command.js";
  *
  * A Session belonging to someone else is refused exactly as one that does not
  * exist, so this cannot be used to discover which session identifiers are real.
+ *
+ * @param deps - Event store, database, and clock.
+ * @param command - Which Session, who is asking, and why.
+ * @param context - Trace identifier and receipt time.
+ * @returns Nothing.
+ * @throws {UnauthenticatedError} If the Session does not exist or belongs to
+ *   someone else — reported identically, so this cannot be used to discover which
+ *   session identifiers are real.
  */
 export async function handleRevokeSession(
   deps: AuthDependencies,

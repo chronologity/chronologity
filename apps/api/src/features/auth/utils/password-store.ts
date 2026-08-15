@@ -9,7 +9,14 @@ import type { Transaction } from "../../../lib/database/transaction.js";
  * the stream exists.
  */
 
-/** Read the stored hash for an Identity, if it has one. */
+/**
+ * Read the stored hash for an Identity, if it has one.
+ *
+ * @param pool - Read-only use.
+ * @param identityId - Whose password.
+ * @returns The stored hash, or undefined if the Identity has none. Absence is a
+ *   valid state: magic link remains a way to sign in.
+ */
 export async function readPasswordHash(
   pool: pg.Pool,
   identityId: string,
@@ -27,6 +34,12 @@ export async function readPasswordHash(
  *
  * Upsert rather than insert: setting a password is the same operation whether
  * it is the first, a reset, or a change.
+ *
+ * @param tx - The caller's transaction.
+ * @param identityId - Whose password.
+ * @param passwordHash - The PHC-format hash to store.
+ * @returns Nothing. Upsert rather than insert: setting a password is the same
+ *   operation whether it is the first, a reset, or a change.
  */
 export async function writePasswordHash(
   tx: Transaction,

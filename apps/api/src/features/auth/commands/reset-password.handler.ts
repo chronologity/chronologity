@@ -33,6 +33,16 @@ import type { ResetPasswordCommand } from "./reset-password.command.js";
  * Redeeming the link also verifies the address, since receiving mail at it is
  * the same proof the verification link asks for. Someone who registered but
  * never confirmed can therefore recover without being stuck.
+ *
+ * @param deps - Event store, database, configuration, and clock.
+ * @param command - The token and the proposed new password.
+ * @param context - Trace identifier and receipt time.
+ * @returns Nothing. Every Session is revoked, and redeeming the link also
+ *   verifies the address, so someone who registered but never confirmed can still
+ *   recover.
+ * @throws {UnauthenticatedError} If the link cannot be used.
+ * @throws {ValidationError} If the new password fails policy. Checked after the
+ *   link is consumed, so a rejected password does not leave the link reusable.
  */
 export async function handleResetPassword(
   deps: AuthDependencies,

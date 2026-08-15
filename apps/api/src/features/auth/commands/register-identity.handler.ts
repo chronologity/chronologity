@@ -37,6 +37,15 @@ import type { RegisterIdentityCommand } from "./register-identity.command.js";
  * The password policy is checked before anything is written, and its failure
  * is the one thing here that *is* reported plainly: refusing a password
  * without saying why leaves someone guessing at rules they cannot see.
+ *
+ * @param deps - Event store, database, mail, configuration, and clock.
+ * @param command - The address and proposed password.
+ * @param context - Trace identifier and receipt time.
+ * @returns Nothing. An address that is already registered produces the same
+ *   result and notifies its owner instead of the caller.
+ * @throws {ValidationError} If the password fails policy. The one thing here
+ *   reported plainly: refusing without a reason leaves someone guessing at rules
+ *   they cannot see.
  */
 export async function handleRegisterIdentity(
   deps: AuthDependencies,

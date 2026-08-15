@@ -26,6 +26,11 @@ const ROUTES: Readonly<Record<string, string>> = {
 
 const POLL_INTERVAL_MS = 1_000;
 
+/**
+ * Run the publisher until asked to stop.
+ *
+ * @returns Nothing, once shutdown completes.
+ */
 async function main(): Promise<void> {
   const config = loadConfig();
   const database = createDatabase(config.database);

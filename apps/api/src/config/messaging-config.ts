@@ -6,6 +6,12 @@ export interface MessagingConfig {
   readonly clientId: string;
 }
 
+/**
+ * Derive Kafka settings from the environment.
+ *
+ * @param env - The validated environment.
+ * @returns Kafka connection settings.
+ */
 export function toMessagingConfig(env: Env): MessagingConfig {
   return {
     brokers: env.KAFKA_BROKERS.split(",").map((broker) => broker.trim()),

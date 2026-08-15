@@ -6,6 +6,14 @@ export type AuthenticateWithPasswordCommand = Command<
   { email: string; password: string; clientKind: string | undefined }
 >;
 
+/**
+ * Sign in with a password.
+ *
+ * @param email - The address as typed.
+ * @param password - The submitted plaintext.
+ * @param clientKind - A short description of the client, when it sent one.
+ * @returns The command.
+ */
 export function authenticateWithPassword(
   email: string,
   password: string,

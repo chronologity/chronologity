@@ -40,6 +40,10 @@ export interface BuildAppOptions {
  * Construction is separate from process startup so that integration tests use
  * Fastify injection instead of real sockets. A test suite that needs a free
  * port is a test suite that fails in parallel.
+ *
+ * @param options - Configuration, the infrastructure this instance depends on,
+ *   and optional authentication wiring.
+ * @returns The application, ready to inject into or to bind to a port.
  */
 export async function buildApp({
   config,

@@ -35,6 +35,13 @@ import type { CreateSessionCommand } from "./create-session.command.js";
  * Every way a link can fail — expired, already used, never issued — produces
  * the same refusal, because the differences are precisely what an attacker
  * probes for.
+ *
+ * @param deps - Event store, database, mail, configuration, and clock.
+ * @param command - The token and the kind of client redeeming it.
+ * @param context - Trace identifier and receipt time.
+ * @returns The new Session's credentials.
+ * @throws {UnauthenticatedError} If the link is expired, already used, of the
+ *   wrong purpose, or was never issued. All four are one refusal.
  */
 export async function handleCreateSession(
   deps: AuthDependencies,
@@ -143,6 +150,15 @@ export async function handleCreateSession(
  * The claim in `identity_emails` has already committed, so a conflict here
  * means the history exists — a retry, or a concurrent request whose claim lost
  * but whose append won. Either way the Identity is established.
+ *
+ * @param deps - Event store and logger.
+ * @param identityId - The Identity whose history is being written.
+ * @param email - The address it was created with.
+ * @param context - Trace identifier and receipt time.
+ * @param at - The creating instant.
+ * @returns Nothing. A concurrency conflict is swallowed: the claim already
+ *   committed, so a conflict means the history exists, whether from a retry or a
+ *   concurrent request whose claim lost but whose append won.
  */
 async function writeIdentityHistory(
   deps: AuthDependencies,

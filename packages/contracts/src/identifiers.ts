@@ -20,6 +20,10 @@ export type Identifier = z.infer<typeof identifierSchema>;
  *
  * Domain-specific identifiers are declared by the feature that owns them, as
  * that domain is implemented, rather than being enumerated here in advance.
+ *
+ * @returns A schema for a UUID branded as one kind of identifier, so a UserId
+ *   cannot be passed where a MomentId is expected. Nothing changes at runtime;
+ *   both are plain UUID strings once serialized.
  */
 export function brandedIdentifier<const Brand extends string>() {
   return identifierSchema.brand<Brand>();

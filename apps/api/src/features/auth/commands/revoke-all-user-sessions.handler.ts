@@ -13,6 +13,11 @@ import type { RevokeAllUserSessionsCommand } from "./revoke-all-user-sessions.co
  * knows what an Identity has open, and each one is then ended through its own
  * aggregate, which remains the authority. Reading a list from derived state is
  * safe; deciding validity from it would not be.
+ *
+ * @param deps - Event store and database.
+ * @param command - Whose Sessions, and why.
+ * @param context - Trace identifier and receipt time.
+ * @returns How many were revoked.
  */
 export async function handleRevokeAllUserSessions(
   deps: AuthDependencies,

@@ -24,6 +24,13 @@ export interface EventProducer {
   disconnect(): Promise<void>;
 }
 
+/**
+ * Build a producer for integration events.
+ *
+ * @param kafka - The client to produce through.
+ * @param logger - Optional.
+ * @returns A producer that validates every envelope before sending it.
+ */
 export function createEventProducer(kafka: Kafka, logger?: Logger): EventProducer {
   let producer: Producer | undefined;
 

@@ -44,6 +44,12 @@ export interface MigrationResult {
   readonly alreadyApplied: number;
 }
 
+/**
+ * Create the table that records which migrations have run.
+ *
+ * @param client - A connection already holding the advisory lock.
+ * @returns Nothing.
+ */
 async function ensureMigrationsTable(client: pg.PoolClient): Promise<void> {
   await client.query(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -53,6 +59,14 @@ async function ensureMigrationsTable(client: pg.PoolClient): Promise<void> {
   `);
 }
 
+/**
+ * Read the migrations directory.
+ *
+ * @returns Every migration on disk, in filename order.
+ * @throws {Error} If any filename departs from the convention. Refused rather
+ *   than tolerated: a name outside it sorts somewhere unintended, and a migration
+ *   applied out of order is not something a schema can be talked out of.
+ */
 async function readMigrations(): Promise<{ version: string; sql: string }[]> {
   const entries = await readdir(fileURLToPath(MIGRATIONS_DIRECTORY));
 
@@ -84,6 +98,12 @@ async function readMigrations(): Promise<{ version: string; sql: string }[]> {
  * An already-applied migration is never re-run and never re-checked: editing
  * a migration that has shipped is a schema change of its own and needs a new
  * file, not an edit.
+ *
+ * @param pool - The database to migrate.
+ * @param logger - Optional; each applied migration is announced through it.
+ * @returns Which migrations were applied, and how many had already been.
+ * @throws {Error} If a migration fails, after rolling that migration back. The
+ *   ones before it stay applied, since each commits with its own record.
  */
 export async function migrate(pool: pg.Pool, logger?: Logger): Promise<MigrationResult> {
   const client = await pool.connect();

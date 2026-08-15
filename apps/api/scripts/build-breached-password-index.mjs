@@ -33,6 +33,13 @@ const SOURCE_SHA256 = "c2e5696882c603b76bb67a47ee970897e5a76fc4c3f5547abe3d0ca34
 const PREFIX_BYTES = 8;
 const OUTPUT = new URL("../data/breached-passwords.bin", import.meta.url);
 
+/**
+ * Read the wordlist, from disk or from the source URL.
+ *
+ * @param argument - A local path, or undefined to download.
+ * @returns The list as text.
+ * @throws {Error} If the download fails.
+ */
 async function readSource(argument) {
   if (argument !== undefined) {
     return readFile(argument, "utf8");

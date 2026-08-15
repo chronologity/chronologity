@@ -40,6 +40,15 @@ export interface AuthAuditRecord {
   readonly context?: Record<string, unknown> | undefined;
 }
 
+/**
+ * Append an audit record.
+ *
+ * @param tx - Written inside the caller's transaction, so the record commits
+ *   with the change it describes rather than surviving one that rolled back.
+ * @param record - What happened, to whom, and whether it succeeded. Must carry
+ *   no credential: identifiers, outcomes, and reasons only.
+ * @returns Nothing.
+ */
 export async function recordAuthAudit(tx: Transaction, record: AuthAuditRecord): Promise<void> {
   await tx.query(
     `INSERT INTO auth_audit_events
@@ -58,7 +67,16 @@ export async function recordAuthAudit(tx: Transaction, record: AuthAuditRecord):
   );
 }
 
-/** Read recent audit records for an Identity. Used by security tooling and tests. */
+/**
+ * Read recent audit records for an Identity.
+ *
+ * Used by security tooling and tests.
+ *
+ * @param pool - Read-only use; no transaction required.
+ * @param identityId - Whose records to read.
+ * @param limit - How many, most recent first.
+ * @returns The event type, outcome, and reason of each record.
+ */
 export async function readAuthAudit(
   pool: pg.Pool,
   identityId: string,

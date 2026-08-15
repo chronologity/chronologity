@@ -13,6 +13,12 @@ export interface Database extends HealthCheckable {
   close(): Promise<void>;
 }
 
+/**
+ * Build the API's PostgreSQL boundary.
+ *
+ * @param config - Host, port, database, and credentials.
+ * @returns The pool, a health check that performs a real query, and a close.
+ */
 export function createDatabase(config: DatabaseConfig): Database {
   const pool = new pg.Pool({
     host: config.host,

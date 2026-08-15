@@ -42,6 +42,13 @@ export interface EnqueueOptions {
  *
  * Takes a `Transaction`, not a pool, so it is impossible to enqueue outside
  * the transaction the state change belongs to.
+ *
+ * @param tx - The transaction carrying the state change this event describes.
+ *   Taking a transaction rather than a pool makes it impossible to enqueue
+ *   outside it.
+ * @param options - Topic, partition key, event type and version, payload, and
+ *   metadata.
+ * @returns The new message's identifier.
  */
 export async function enqueueOutboxMessage(
   tx: Transaction,
@@ -75,6 +82,11 @@ export async function enqueueOutboxMessage(
  * Ordering is by creation time so a partition's events keep their sequence.
  *
  * Must be called inside a transaction: the lock lasts only as long as it.
+ *
+ * @param tx - Must be a transaction: the row locks last only as long as it.
+ * @param limit - How many messages to take at most.
+ * @returns The claimed messages, oldest first, locked against other publishers
+ *   until the transaction ends.
  */
 export async function claimOutboxBatch(tx: Transaction, limit: number): Promise<OutboxMessage[]> {
   const { rows } = await tx.query<{
@@ -106,7 +118,14 @@ export async function claimOutboxBatch(tx: Transaction, limit: number): Promise<
   }));
 }
 
-/** Mark messages published. Called after Kafka has acknowledged them. */
+/**
+ * Mark messages published. Called after Kafka has acknowledged them.
+ *
+ * @param tx - The transaction that claimed them.
+ * @param ids - Which messages the broker has acknowledged. An empty list is a
+ *   no-op.
+ * @returns Nothing.
+ */
 export async function markPublished(tx: Transaction, ids: readonly string[]): Promise<void> {
   if (ids.length === 0) {
     return;
@@ -123,6 +142,13 @@ export async function markPublished(tx: Transaction, ids: readonly string[]): Pr
  * The message stays unpublished and will be retried. The attempt count and
  * last error exist so a message failing forever is visible as such, rather
  * than looking like a queue that is merely slow.
+ *
+ * @param tx - The caller's transaction.
+ * @param id - Which message failed.
+ * @param error - Why, truncated. The message stays unpublished and will be
+ *   retried; the count and reason exist so a message failing forever is visible
+ *   as such rather than looking like a slow queue.
+ * @returns Nothing.
  */
 export async function markFailed(tx: Transaction, id: string, error: string): Promise<void> {
   await tx.query(
@@ -134,7 +160,13 @@ export async function markFailed(tx: Transaction, id: string, error: string): Pr
   );
 }
 
-/** Count unpublished messages. Publication backlog is an operational signal. */
+/**
+ * Count unpublished messages. Publication backlog is an operational signal.
+ *
+ * @param pool - Read-only use.
+ * @returns How many messages are waiting. Publication backlog is an operational
+ *   signal.
+ */
 export async function countPending(pool: pg.Pool): Promise<number> {
   const { rows } = await pool.query<{ count: string }>(
     `SELECT count(*)::text AS count FROM outbox_messages WHERE published_at IS NULL`,

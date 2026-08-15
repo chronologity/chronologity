@@ -21,7 +21,14 @@ export interface Checkpoint {
   readonly position: bigint;
 }
 
-/** Read a projection's position. Absent means it has never run. */
+/**
+ * Read a projection's position. Absent means it has never run.
+ *
+ * @param pool - Read-only use.
+ * @param projectionName - Carries the projection's version, so a rebuilt version
+ *   tracks its own progress beside the one still serving reads.
+ * @returns Where the projection has reached, or undefined if it has never run.
+ */
 export async function readCheckpoint(
   pool: pg.Pool,
   projectionName: string,
@@ -50,6 +57,14 @@ export async function readCheckpoint(
  * Record progress.
  *
  * Takes a transaction so it commits with the read-model changes it describes.
+ *
+ * @param tx - The transaction carrying the read-model changes this position
+ *   describes. A checkpoint that commits separately from the state it describes
+ *   is a checkpoint that will eventually lie.
+ * @param projectionName - Which projection.
+ * @param source - Where the events came from.
+ * @param position - How far it has now processed.
+ * @returns Nothing.
  */
 export async function writeCheckpoint(
   tx: Transaction,
@@ -75,6 +90,13 @@ export async function writeCheckpoint(
  * the check, so two workers racing on the same event cannot both win: the
  * primary key decides, not a preceding read that either of them could have
  * made before the other's write.
+ *
+ * @param tx - The transaction the projection's own effect will commit in.
+ * @param projectionName - Which projection is claiming.
+ * @param eventId - The event being claimed.
+ * @returns Whether this caller won the claim. The insert is the check, so two
+ *   workers racing on one event cannot both win: the primary key decides, not a
+ *   preceding read either of them could have made first.
  */
 export async function claimEvent(
   tx: Transaction,
@@ -96,6 +118,12 @@ export async function claimEvent(
  *
  * Clears the processed-event record too: a rebuild that remembered what it had
  * already applied would skip the very events it is being rebuilt to reapply.
+ *
+ * @param tx - The caller's transaction.
+ * @param projectionName - Which projection to rewind.
+ * @returns Nothing. Clears the processed-event record as well as the checkpoint:
+ *   a rebuild that remembered what it had applied would skip the very events it
+ *   is being rebuilt to reapply.
  */
 export async function resetProjection(tx: Transaction, projectionName: string): Promise<void> {
   await tx.query(`DELETE FROM projection_checkpoints WHERE projection_name = $1`, [projectionName]);

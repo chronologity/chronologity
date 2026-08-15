@@ -25,10 +25,17 @@ export interface ResolvedIdentity {
 /**
  * Find the Identity for an address, claiming it if unclaimed.
  *
- * `verified` says whether control of the address has actually been proven.
- * Redeeming a magic link proves it; registering with a password does not, and
- * recording an unproven address as verified would let anyone claim someone
- * else's address by typing it.
+ * @param tx - The caller's transaction. The unique constraint decides the
+ *   winner when two first sign-ins race, which is why this must not be split
+ *   into a read and a later write.
+ * @param input - The address, the current instant, and whether control of the
+ *   address has actually been proven. Redeeming a magic link proves it;
+ *   registering with a password does not, and recording an unproven address as
+ *   verified would let anyone claim someone else's by typing it.
+ * @returns The owning Identity, and whether this call created the claim.
+ * @throws {Error} If the conflicting row disappears between the insert and the
+ *   read that follows it. Failing is correct: guessing an Identity here would
+ *   attach a Session to the wrong account.
  */
 export async function resolveIdentityForEmail(
   tx: Transaction,
@@ -74,7 +81,13 @@ export async function resolveIdentityForEmail(
   return { identityId: row.identity_id, created: false };
 }
 
-/** Look up an Identity by address without claiming it. */
+/**
+ * Look up an Identity by address without claiming it.
+ *
+ * @param tx - The caller's transaction.
+ * @param email - The address, in any casing.
+ * @returns The owning Identity, or undefined if the address is unclaimed.
+ */
 export async function findIdentityByEmail(
   tx: Transaction,
   email: string,
@@ -92,6 +105,11 @@ export async function findIdentityByEmail(
  *
  * Idempotent, and it keeps the original timestamp: verifying twice does not
  * move the moment control was first demonstrated.
+ *
+ * @param tx - The caller's transaction.
+ * @param normalizedEmail - The address in its normalised form.
+ * @param at - When control was proven.
+ * @returns The owning Identity, or undefined if no such address is claimed.
  */
 export async function markEmailVerified(
   tx: Transaction,
@@ -109,7 +127,15 @@ export async function markEmailVerified(
   return rows[0]?.identity_id;
 }
 
-/** Whether an address has been proven. Password sign-in requires it. */
+/**
+ * Whether an address has been proven.
+ *
+ * Password sign-in requires it; magic-link sign-in proves it by definition.
+ *
+ * @param tx - The caller's transaction.
+ * @param normalizedEmail - The address in its normalised form.
+ * @returns Whether it is claimed and verified.
+ */
 export async function isEmailVerified(tx: Transaction, normalizedEmail: string): Promise<boolean> {
   const { rows } = await tx.query<{ verified_at: Date | null }>(
     `SELECT verified_at FROM identity_emails WHERE normalized_email = $1`,

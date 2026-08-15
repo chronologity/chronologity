@@ -31,6 +31,13 @@ export interface AuthConfig {
   readonly passwordPolicy: PasswordPolicyConfig;
 }
 
+/**
+ * Derive authentication settings from the environment.
+ *
+ * @param env - The validated environment.
+ * @returns Authentication settings. The signing secret is held as bytes rather
+ *   than a string so it is never accidentally interpolated into a log line.
+ */
 export function toAuthConfig(env: Env): AuthConfig {
   return {
     jwtSecret: new TextEncoder().encode(env.AUTH_JWT_SECRET),

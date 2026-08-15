@@ -16,7 +16,14 @@ export interface RequestContext {
   readonly receivedAt: Date;
 }
 
-/** Context for work the system initiates itself, such as a scheduled rebuild. */
+/**
+ * Context for work the system initiates itself, such as a scheduled rebuild.
+ *
+ * @param traceId - Correlates the work across services and logs.
+ * @param receivedAt - When the work was accepted.
+ * @returns Context for work the system initiates itself, which has no request and
+ *   no actor to inherit from.
+ */
 export function systemContext(traceId: string, receivedAt: Date): RequestContext {
   return { traceId, actor: undefined, receivedAt };
 }

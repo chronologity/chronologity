@@ -26,6 +26,14 @@ const CATEGORY_PATTERN = /^[a-z][a-z0-9_]*$/;
  */
 const AGGREGATE_ID_PATTERN = /^[A-Za-z0-9_.:-]+$/;
 
+/**
+ * Build a stream name from a category and an aggregate identifier.
+ *
+ * @param category - Lowercase, no hyphens: the first hyphen is the separator.
+ * @param aggregateId - The domain identifier, typically a UUID.
+ * @returns The stream name.
+ * @throws {ValidationError} If either part could break the naming scheme.
+ */
 export function streamName(category: string, aggregateId: string): string {
   if (!CATEGORY_PATTERN.test(category)) {
     throw new ValidationError(
@@ -41,7 +49,13 @@ export function streamName(category: string, aggregateId: string): string {
   return `${category}-${aggregateId}`;
 }
 
-/** The category projection stream for a category, e.g. `$ce-moment`. */
+/**
+ * The category projection stream for a category, e.g. `$ce-moment`.
+ *
+ * @param category - The category.
+ * @returns The built-in category projection stream for it.
+ * @throws {ValidationError} If the category is malformed.
+ */
 export function categoryStream(category: string): string {
   if (!CATEGORY_PATTERN.test(category)) {
     throw new ValidationError(`Invalid stream category`, { category });
@@ -55,6 +69,11 @@ export function categoryStream(category: string): string {
  *
  * Only the first hyphen separates: an aggregate identifier may contain
  * hyphens, and a UUID always does.
+ *
+ * @param name - A stream name.
+ * @returns Its category and aggregate identifier, split on the first hyphen only,
+ *   since an aggregate identifier contains hyphens of its own.
+ * @throws {ValidationError} If the name does not follow the convention.
  */
 export function parseStreamName(name: string): { category: string; aggregateId: string } {
   const separator = name.indexOf("-");
@@ -76,6 +95,9 @@ export function parseStreamName(name: string): { category: string; aggregateId: 
  * written by other tools, by tests, or under an older convention. Anything
  * reading `$all` must be able to ignore what it does not recognise: a single
  * unparseable name should not be able to halt publication forever.
+ *
+ * @param name - A stream name.
+ * @returns Its parts, or undefined if it does not follow the convention.
  */
 export function tryParseStreamName(
   name: string,

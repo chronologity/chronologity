@@ -27,6 +27,12 @@ export class ConcurrencyConflictError extends DomainError {
 /** Where a stream is expected to be when appending. */
 export type ExpectedRevision = bigint | "no_stream" | "stream_exists" | "any";
 
+/**
+ * Translate an expected revision into the client's representation.
+ *
+ * @param expected - The revision the decision was made against.
+ * @returns The equivalent value for the event-store client.
+ */
 function toClientRevision(expected: ExpectedRevision): AppendExpectedRevision {
   if (expected === "no_stream") return NO_STREAM;
   if (expected === "stream_exists") return STREAM_EXISTS;
@@ -54,6 +60,12 @@ export interface AppendOptions {
  *
  * Each event carries its own identifier, which is what makes a retried append
  * detectable rather than silently duplicated.
+ *
+ * @param options - The client, the stream, the events, the metadata to record
+ *   alongside them, and the revision the decision was made against.
+ * @returns The stream's revision after the append.
+ * @throws {ConcurrencyConflictError} If the stream moved since that revision.
+ * @throws {Error} If asked to append nothing, which is always a caller mistake.
  */
 export async function appendEvents({
   client,

@@ -6,6 +6,13 @@ export type RevokeAllUserSessionsCommand = Command<
   { identityId: string; reason: string }
 >;
 
+/**
+ * End every Session an Identity has open.
+ *
+ * @param identityId - Whose Sessions to end.
+ * @param reason - Why.
+ * @returns The command.
+ */
 export function revokeAllUserSessions(
   identityId: string,
   reason: string,

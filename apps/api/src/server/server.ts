@@ -25,6 +25,10 @@ const SHUTDOWN_TIMEOUT_MS = 15_000;
  * Shutdown order is deliberate: stop accepting connections, let in-flight
  * requests finish, then close infrastructure. Closing a connection pool while
  * requests still hold it turns a clean deploy into a burst of errors.
+ *
+ * @param options - The application, its configuration, and the resources to
+ *   close during shutdown.
+ * @returns Nothing, once the server is listening.
  */
 export async function startServer({ app, config, resources }: StartServerOptions): Promise<void> {
   let shuttingDown = false;

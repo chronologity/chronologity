@@ -15,6 +15,11 @@ import type { RequestMagicLinkCommand } from "./request-magic-link.command.js";
  * Existing unconsumed links for the address are left alone: invalidating them
  * would let anyone cancel someone else's pending sign-in by requesting a new
  * one.
+ *
+ * @param deps - Database, mail, configuration, and clock.
+ * @param command - The address to send to.
+ * @param context - Trace identifier and receipt time, recorded in the audit trail.
+ * @returns Nothing, whether or not the address is known.
  */
 export async function handleRequestMagicLink(
   deps: AuthDependencies,

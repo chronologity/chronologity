@@ -7,6 +7,11 @@ import type { Transaction } from "../../../lib/database/transaction.js";
  * asynchronous projection, so a session appears in the list immediately after
  * signing in. Safe to write here precisely because this table decides nothing:
  * a lost write costs a row in a list, never an access decision.
+ *
+ * @param tx - The caller's transaction.
+ * @param input - The Session, whose it is, when it began and expires, and the
+ *   kind of client.
+ * @returns Nothing.
  */
 export async function recordSessionCreated(
   tx: Transaction,
@@ -32,6 +37,14 @@ export async function recordSessionCreated(
   );
 }
 
+/**
+ * Record that a Session was refreshed.
+ *
+ * @param tx - The caller's transaction.
+ * @param sessionId - Which Session.
+ * @param at - When it was refreshed.
+ * @returns Nothing.
+ */
 export async function recordSessionRefreshed(
   tx: Transaction,
   sessionId: string,
@@ -49,6 +62,14 @@ export async function recordSessionRefreshed(
  * `COALESCE` keeps the first revocation: the reason a session ended is the one
  * that ended it, and a later logout should not overwrite evidence of a
  * suspected credential theft.
+ *
+ * @param tx - The caller's transaction.
+ * @param sessionId - Which Session.
+ * @param reason - Why it ended.
+ * @param at - When.
+ * @returns Nothing. The first revocation wins: the reason a Session ended is the
+ *   one that ended it, and a later logout must not overwrite evidence of a
+ *   suspected theft.
  */
 export async function recordSessionRevoked(
   tx: Transaction,

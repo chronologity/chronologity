@@ -5,6 +5,12 @@ export interface EventStoreConfig {
   readonly connectionString: string;
 }
 
+/**
+ * Derive EventStoreDB settings from the environment.
+ *
+ * @param env - The validated environment.
+ * @returns EventStoreDB connection settings.
+ */
 export function toEventStoreConfig(env: Env): EventStoreConfig {
   return { connectionString: env.EVENTSTOREDB_URL };
 }

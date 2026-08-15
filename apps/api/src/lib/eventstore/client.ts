@@ -13,6 +13,12 @@ export interface EventStore extends HealthCheckable {
   close(): Promise<void>;
 }
 
+/**
+ * Build the API's EventStoreDB boundary.
+ *
+ * @param config - The connection string.
+ * @returns The client, a health check that performs a real read, and a close.
+ */
 export function createEventStore(config: EventStoreConfig): EventStore {
   const client = EventStoreDBClient.connectionString(config.connectionString);
 

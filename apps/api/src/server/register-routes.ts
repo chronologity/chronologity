@@ -8,6 +8,10 @@ import { healthRoutes } from "../features/health/index.js";
  *
  * Individual operations are registered by the feature that owns them; this
  * file only decides which features are mounted, and where.
+ *
+ * @param app - The instance to mount on.
+ * @param auth - Authentication wiring; when absent the auth routes are skipped.
+ * @returns Nothing.
  */
 export async function registerRoutes(
   app: FastifyInstance,

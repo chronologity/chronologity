@@ -14,6 +14,11 @@ import type { ValidateSessionQuery, ValidatedSession } from "./validate-session.
  * Runs on every authenticated request, so it is the obvious candidate if
  * request latency ever needs attention — but caching it would need explicit
  * freshness semantics (ADR-043), not a convenient TTL.
+ *
+ * @param deps - Event store and clock.
+ * @param query - Which Session to judge.
+ * @returns The Identity it belongs to, or undefined if it cannot authenticate a
+ *   request right now.
  */
 export async function handleValidateSession(
   deps: AuthDependencies,

@@ -34,8 +34,13 @@ export interface ConsumedMagicLink {
  * Issue a link token for an address.
  *
  * Existing unconsumed tokens for the address are left alone: invalidating them
- * would let anyone log someone else's pending link out from under them by
- * requesting a new one.
+ * would let anyone cancel someone else's pending link by requesting a new one.
+ *
+ * @param tx - The caller's transaction, so the token commits with whatever
+ *   else the request records.
+ * @param input - The address, what the link is allowed to do, how long it
+ *   lives, and the issuing instant.
+ * @returns The token to email, and when it expires. Only its hash is stored.
  */
 export async function issueMagicLink(
   tx: Transaction,
@@ -60,10 +65,13 @@ export async function issueMagicLink(
  * been unconsumed happen in one statement, so two simultaneous redemptions of
  * the same link cannot both succeed — a read-then-write would let them.
  *
- * Expiry, purpose, and prior consumption are all evaluated in the same
- * predicate, and all of them produce the same undefined result: a caller
- * cannot tell an expired link from an already-used one from one that never
- * existed.
+ * @param tx - The caller's transaction; the row is locked only for its
+ *   duration.
+ * @param input - The raw token from the link, the purpose it must have been
+ *   issued for, and the current instant.
+ * @returns The address the link was issued for, or undefined when the token is
+ *   expired, already consumed, of the wrong purpose, or was never issued. All
+ *   four are deliberately indistinguishable to the caller.
  */
 export async function consumeMagicLink(
   tx: Transaction,
@@ -83,7 +91,16 @@ export async function consumeMagicLink(
   return rows[0];
 }
 
-/** Remove expired and consumed tokens. Operational hygiene, not correctness. */
+/**
+ * Remove expired tokens.
+ *
+ * Operational hygiene rather than correctness: an expired token is already
+ * refused by {@link consumeMagicLink}.
+ *
+ * @param tx - The caller's transaction.
+ * @param now - Anything expiring before this is deleted.
+ * @returns How many rows were removed.
+ */
 export async function purgeExpiredMagicLinks(tx: Transaction, now: Date): Promise<number> {
   const result = await tx.query(`DELETE FROM magic_link_tokens WHERE expires_at < $1`, [
     now.toISOString(),

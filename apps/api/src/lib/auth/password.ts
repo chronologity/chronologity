@@ -17,9 +17,14 @@ import type { PasswordHashingConfig } from "../../config/auth-config.js";
  */
 
 /**
- * Argon2id is this package's default and is asserted by a test, rather than
+ * Translate configured cost into the hashing library's options.
+ *
+ * Argon2id is this package's default and is asserted by a test rather than
  * named here: its `Algorithm` enum is an ambient const enum, which cannot be
  * imported as a value while `verbatimModuleSyntax` is on.
+ *
+ * @param config - Memory, time, and parallelism cost.
+ * @returns Options for the hashing library.
  */
 function toOptions(config: PasswordHashingConfig) {
   return {
@@ -29,7 +34,15 @@ function toOptions(config: PasswordHashingConfig) {
   };
 }
 
-/** Hash a password for storage. The salt is generated per call by Argon2. */
+/**
+ * Hash a password for storage.
+ *
+ * @param config - Cost parameters. Recorded inside the returned hash, which is
+ *   what lets cost be raised later without invalidating anyone.
+ * @param password - The plaintext, exactly as typed. Never trimmed or
+ *   normalised: doing so would silently shrink the space someone chose from.
+ * @returns A PHC-format hash, salted per call.
+ */
 export async function hashPassword(
   config: PasswordHashingConfig,
   password: string,
@@ -40,9 +53,12 @@ export async function hashPassword(
 /**
  * Check a password against a stored hash.
  *
- * Returns false rather than throwing on a malformed or unreadable hash: a
- * corrupt row must fail the login, not the request, and certainly must not
- * surface a parser error to a caller probing with nonsense.
+ * @param storedHash - The PHC-format hash held for this Identity.
+ * @param password - The plaintext to check.
+ * @returns Whether they match. A malformed or unreadable hash returns false
+ *   rather than throwing: a corrupt row must fail the sign-in, not the
+ *   request, and must not surface a parser error to someone probing with
+ *   nonsense.
  */
 export async function verifyPassword(storedHash: string, password: string): Promise<boolean> {
   try {
@@ -53,18 +69,27 @@ export async function verifyPassword(storedHash: string, password: string): Prom
 }
 
 /**
- * A hash used only to spend the same time as a real verification.
+ * Dummy hashes, one per parameter set.
  *
- * Skipping the hash when an address is unknown returns measurably sooner and
- * turns login into an account-existence oracle. Callers verify against this
- * instead, so both paths cost the same.
- *
- * Cached per parameter set, because computing it costs exactly as much as the
- * hashing it is imitating and doing that on every unknown-address attempt
- * would hand out a denial-of-service lever.
+ * Cached because computing one costs exactly as much as the hashing it
+ * imitates, and doing that on every unknown-address attempt would hand out a
+ * denial-of-service lever.
  */
 const dummyHashes = new Map<string, Promise<string>>();
 
+/**
+ * Spend the same time as a real verification, then fail.
+ *
+ * Skipping the hash when an address is unknown returns measurably sooner and
+ * turns sign-in into an account-existence oracle. Callers verify against this
+ * instead, so both paths cost the same.
+ *
+ * @param config - Cost parameters, matched to the real path so the timing
+ *   matches too.
+ * @param password - The submitted plaintext. Checked against a hash no account
+ *   has, purely to spend the time.
+ * @returns Always false.
+ */
 export async function verifyDummyPassword(
   config: PasswordHashingConfig,
   password: string,
@@ -97,6 +122,10 @@ export interface StoredHashParameters {
  *
  * Argon2 encodes them in the hash itself — `$argon2id$v=19$m=19456,t=2,p=1$…` —
  * which is what allows cost to be raised without a migration.
+ *
+ * @param storedHash - The stored hash.
+ * @returns The algorithm and cost it was produced with, or undefined if the
+ *   string is not a PHC-format Argon2 hash.
  */
 export function parseHashParameters(storedHash: string): StoredHashParameters | undefined {
   const match = /^\$(argon2(?:id|i|d))\$v=\d+\$m=(\d+),t=(\d+),p=(\d+)\$/.exec(storedHash);
@@ -114,12 +143,14 @@ export function parseHashParameters(storedHash: string): StoredHashParameters | 
 }
 
 /**
- * Whether a stored hash should be replaced on next successful login.
+ * Whether a stored hash should be replaced on next successful sign-in.
  *
- * True when the hash is weaker than current configuration, or was made by a
- * different algorithm. Deliberately not true when it is *stronger*: lowering
- * configured cost should not trigger a fleet-wide downgrade of everyone's
- * stored password.
+ * @param config - Current cost parameters.
+ * @param storedHash - The hash held for this Identity.
+ * @returns True when the stored hash is weaker than current configuration, was
+ *   made by another algorithm, or cannot be read. Deliberately false when it is
+ *   *stronger*: lowering configured cost must not downgrade everyone's stored
+ *   password.
  */
 export function needsRehash(config: PasswordHashingConfig, storedHash: string): boolean {
   const stored = parseHashParameters(storedHash);

@@ -6,6 +6,16 @@ export type RevokeSessionCommand = Command<
   { sessionId: string; identityId: string; reason: string }
 >;
 
+/**
+ * End one Session.
+ *
+ * @param sessionId - Which Session to end.
+ * @param identityId - Who is asking; a Session belonging to someone else is
+ *   refused as though it did not exist.
+ * @param reason - Recorded, because a logout and a suspected theft end the same
+ *   way but mean different things afterwards.
+ * @returns The command.
+ */
 export function revokeSession(
   sessionId: string,
   identityId: string,

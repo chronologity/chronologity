@@ -44,6 +44,11 @@ export class ConfigurationError extends Error {
   override readonly name = "ConfigurationError";
   readonly issues: readonly string[];
 
+  /**
+   * Build a configuration error.
+   *
+   * @param issues - Every problem found, one per line in the message.
+   */
   constructor(issues: readonly string[]) {
     super(`Invalid configuration:\n${issues.map((issue) => `  - ${issue}`).join("\n")}`);
     this.issues = issues;
@@ -60,6 +65,13 @@ export class ConfigurationError extends Error {
  * Error messages name the offending variable but never echo its value, since
  * the values most likely to be malformed are also the ones most likely to be
  * secret.
+ *
+ * @param schema - What this application requires of its environment.
+ * @param source - Where to read from. Defaults to the process environment.
+ * @returns The parsed, typed configuration.
+ * @throws {ConfigurationError} If anything is missing or invalid, listing every
+ *   problem at once rather than the first: a developer fixing local configuration
+ *   should see the whole list, not discover it one restart at a time.
  */
 export function parseEnv<Schema extends z.ZodType>(
   schema: Schema,
@@ -85,6 +97,11 @@ export function parseEnv<Schema extends z.ZodType>(
  * Production must state its configuration explicitly. A convenience default
  * that silently survives into production is how a service ends up pointed at
  * the wrong database.
+ *
+ * @param nodeEnv - Which environment this is.
+ * @returns Whether convenience defaults may apply. Production must state its
+ *   configuration explicitly: a default that silently survives into production is
+ *   how a service ends up pointed at the wrong database.
  */
 export function allowsDevelopmentDefaults(nodeEnv: NodeEnv): boolean {
   return nodeEnv !== "production";

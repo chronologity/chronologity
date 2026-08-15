@@ -26,6 +26,14 @@ import type { AuthenticateWithPasswordCommand } from "./authenticate-with-passwo
  * Timing is part of that. An unknown address still performs a full Argon2id
  * verification against a dummy hash, because returning early is measurable and
  * turns this endpoint into an account-existence oracle.
+ *
+ * @param deps - Event store, database, configuration, and clock.
+ * @param command - The address, the submitted password, and the kind of client.
+ * @param context - Trace identifier and receipt time.
+ * @returns The new Session's credentials.
+ * @throws {UnauthenticatedError} If the address is unknown, has no password, is
+ *   unverified, or the password is wrong. All four are one refusal, and the
+ *   unknown-address path still spends the time a real verification would.
  */
 export async function handleAuthenticateWithPassword(
   deps: AuthDependencies,
@@ -90,6 +98,15 @@ export async function handleAuthenticateWithPassword(
   });
 }
 
+/**
+ * Record a refused sign-in.
+ *
+ * @param deps - Database.
+ * @param context - Trace identifier.
+ * @param identityId - Whose attempt, when known.
+ * @param reason - Why it was refused. Recorded for investigation; never returned.
+ * @returns Nothing.
+ */
 async function recordRejection(
   deps: AuthDependencies,
   context: RequestContext,

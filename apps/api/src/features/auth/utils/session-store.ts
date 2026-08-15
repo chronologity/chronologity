@@ -21,6 +21,11 @@ export interface LoadedSession {
  * including request authentication. Deliberately not served from the `sessions`
  * table: a lagging read model would leave a revoked Session working, and
  * revocation that takes effect eventually is not revocation.
+ *
+ * @param deps - Supplies the event store.
+ * @param sessionId - Which Session.
+ * @returns Its state and the revision that state reflects, so a decision made
+ *   from it can be appended against the same revision.
  */
 export async function loadSession(
   deps: AuthDependencies,

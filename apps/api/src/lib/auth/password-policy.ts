@@ -86,7 +86,13 @@ const LEET_SUBSTITUTIONS: Readonly<Record<string, string>> = {
   "2": "z",
 };
 
-/** Normalised for comparison only. The password itself is never altered. */
+/**
+ * Reduce a password to letters and digits for comparison.
+ *
+ * @param password - The plaintext.
+ * @returns Lowercased, trimmed, with everything but letters and digits
+ *   removed. Used for comparison only; the password itself is never altered.
+ */
 function normalizeForComparison(password: string): string {
   return password
     .trim()
@@ -94,7 +100,13 @@ function normalizeForComparison(password: string): string {
     .replaceAll(/[^a-z0-9]/g, "");
 }
 
-/** The same, after undoing common character substitutions. */
+/**
+ * The same, after undoing common character substitutions.
+ *
+ * @param password - The plaintext.
+ * @returns The normalised form with substitutions reversed, so "P@ssw0rd"
+ *   becomes "password".
+ */
 function deleetify(password: string): string {
   const substituted = password
     .trim()
@@ -111,6 +123,9 @@ function deleetify(password: string): string {
  *
  * Trailing digits are the other common decoration, and they add almost
  * nothing: "password123" falls about as fast as "password".
+ *
+ * @param password - The plaintext.
+ * @returns Each distinct comparison form, empty strings excluded.
  */
 function comparisonForms(password: string): string[] {
   const forms = new Set<string>();
@@ -140,6 +155,9 @@ function comparisonForms(password: string): string[] {
  * far less entropy than its length suggests, and no wordlist needs to contain
  * it for it to fall quickly. NIST permits blocking repetitive and sequential
  * strings; this is not a composition rule, since nothing is *required*.
+ *
+ * @param password - The plaintext.
+ * @returns Whether it is all digits or a single character repeated.
  */
 function isTrivialPattern(password: string): boolean {
   const trimmed = password.trim();
@@ -154,9 +172,13 @@ function isTrivialPattern(password: string): boolean {
 /**
  * Decide whether a password is acceptable.
  *
- * Returns a reason rather than throwing, because the caller decides what to
- * tell whom: registration can explain the problem, while a reset flow may need
- * to stay quieter.
+ * @param config - Length bounds.
+ * @param password - The proposed plaintext.
+ * @param email - The address it will protect, when known. Its local part is
+ *   among the first things guessed for the account it belongs to.
+ * @returns Acceptance, or the reason for refusal. A reason rather than a throw,
+ *   because the caller decides what to tell whom: registration can explain the
+ *   problem, while a reset flow may need to stay quieter.
  */
 export function checkPassword(
   config: PasswordPolicyConfig,
@@ -198,7 +220,13 @@ export function checkPassword(
   return { ok: true };
 }
 
-/** What to tell someone whose password was refused. */
+/**
+ * What to tell someone whose password was refused.
+ *
+ * @param reason - Why it was refused.
+ * @param config - Length bounds, so the message can quote the actual numbers.
+ * @returns A sentence safe to show the person who chose the password.
+ */
 export function describeRejection(reason: PasswordRejection, config: PasswordPolicyConfig): string {
   switch (reason) {
     case "too_short":

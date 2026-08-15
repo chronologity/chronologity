@@ -68,9 +68,14 @@ A Moment is an experience, not a media file, and not every Moment is public. Chr
 - Domain logic must not instantiate infrastructure clients directly
 - Use runtime validation at untrusted boundaries
 - Prefer explicit domain concepts over generic abstractions
-- Add documentation comments to all functions
+- Add JSDoc documentation comments to all functions
+- Each requires a description, `@param` for every parameter, `@returns`, and `@throws` for every error a caller can encounter
+- Do not write types in tags; TypeScript already states them, and a tag that repeats a type can only disagree with it
+- Tags should carry what the signature cannot: constraints, units, ownership, which failures throw, and what an ambiguous return value means
 - Documentation comments should explain purpose, important inputs/outputs, invariants, side effects, and non-obvious behavior where applicable
 - Do not add comments that merely restate the implementation
+- Tests are exempt: a test's name is its description
+- `eslint-plugin-jsdoc` enforces this, including that `@param` names match the signature
 
 ## Testing
 

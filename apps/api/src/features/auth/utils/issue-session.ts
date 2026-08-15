@@ -27,6 +27,13 @@ import { recordSessionCreated } from "./session-read-model.js";
  *
  * The caller is responsible for having actually verified the Identity. This
  * function grants a Session; it does not decide whether one is deserved.
+ *
+ * @param deps - Event store, database, configuration, and clock.
+ * @param input - Whose Session, the kind of client, which proof was accepted, the
+ *   request context, and the issuing instant.
+ * @returns The new Session's credentials.
+ * @throws {Error} If the Session already exists, which can only mean a generated
+ *   identifier collided.
  */
 export async function issueSessionFor(
   deps: AuthDependencies,

@@ -9,6 +9,12 @@ export interface DatabaseConfig {
   readonly password: string;
 }
 
+/**
+ * Derive PostgreSQL settings from the environment.
+ *
+ * @param env - The validated environment.
+ * @returns PostgreSQL connection settings.
+ */
 export function toDatabaseConfig(env: Env): DatabaseConfig {
   return {
     host: env.POSTGRES_HOST,
