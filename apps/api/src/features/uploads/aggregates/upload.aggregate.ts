@@ -1,6 +1,7 @@
-import type { MediaKind } from "@chronologity/contracts";
+import type { DerivativeKind, MediaKind } from "@chronologity/contracts";
 import type { UploadChecked } from "../events/upload-checked.event.js";
 import type { UploadDeleted } from "../events/upload-deleted.event.js";
+import type { UploadDerivativesProduced } from "../events/upload-derivatives-produced.event.js";
 import type { UploadFailed } from "../events/upload-failed.event.js";
 import type { UploadReceived } from "../events/upload-received.event.js";
 import type { UploadRegistered } from "../events/upload-registered.event.js";
@@ -37,13 +38,20 @@ export interface UploadState {
   readonly declaredByteSize: number | undefined;
   /** Where the bytes were put. Established at registration and never changes. */
   readonly storageKey: string | undefined;
+  /** What has been produced for showing this media. */
+  readonly derivatives: readonly DerivativeKind[];
   readonly status: UploadStatus;
   /** After this instant a registration can no longer be finalized. */
   readonly expiresAt: string | undefined;
 }
 
 export type UploadEvent =
-  UploadRegistered | UploadReceived | UploadChecked | UploadFailed | UploadDeleted;
+  | UploadRegistered
+  | UploadReceived
+  | UploadChecked
+  | UploadDerivativesProduced
+  | UploadFailed
+  | UploadDeleted;
 
 export const initialUploadState: UploadState = {
   exists: false,
@@ -53,6 +61,7 @@ export const initialUploadState: UploadState = {
   declaredContentType: undefined,
   declaredByteSize: undefined,
   storageKey: undefined,
+  derivatives: [],
   status: "registered",
   expiresAt: undefined,
 };
@@ -91,6 +100,14 @@ export function evolveUpload(state: UploadState, event: UploadEvent): UploadStat
       // that from here the recorded kind is the measured one.
       return { ...state, status: "ready", kind: event.payload.kind };
 
+    case "UploadDerivativesProduced":
+      // Union rather than replacement: a second pass after a partial failure
+      // adds what was missing rather than forgetting what already exists.
+      return {
+        ...state,
+        derivatives: [...new Set([...state.derivatives, ...event.payload.derivatives])],
+      };
+
     case "UploadFailed":
       return { ...state, status: "failed" };
 
@@ -103,6 +120,7 @@ export function evolveUpload(state: UploadState, event: UploadEvent): UploadStat
 }
 
 export type UploadRejection =
+  | "nothing_to_produce"
   | "upload_already_exists"
   | "upload_not_found"
   | "not_owner"
@@ -288,6 +306,40 @@ export function decideCheck(
           hasAudio: input.hasAudio,
           checkedAt: input.now.toISOString(),
         },
+      },
+    ],
+  };
+}
+
+/**
+ * Record the files produced for showing this media.
+ *
+ * @param state - The Upload's current state.
+ * @param input - What was produced, and the instant.
+ * @returns The event to append, or a refusal. Producing nothing new is
+ *   refused rather than recorded: the same note arrives twice eventually, and
+ *   history should say what happened rather than that a worker ran again.
+ */
+export function decideDerivativesProduced(
+  state: UploadState,
+  input: { derivatives: readonly DerivativeKind[]; now: Date },
+): UploadDecision {
+  if (!state.exists || state.status === "deleted") {
+    return { ok: false, reason: "upload_not_found" };
+  }
+
+  const added = input.derivatives.filter((kind) => !state.derivatives.includes(kind));
+
+  if (added.length === 0) {
+    return { ok: false, reason: "nothing_to_produce" };
+  }
+
+  return {
+    ok: true,
+    events: [
+      {
+        type: "UploadDerivativesProduced",
+        payload: { derivatives: added, producedAt: input.now.toISOString() },
       },
     ],
   };

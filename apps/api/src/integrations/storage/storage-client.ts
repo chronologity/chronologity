@@ -2,6 +2,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   S3Client,
   type S3ClientConfig,
 } from "@aws-sdk/client-s3";
@@ -66,6 +67,31 @@ export interface StorageClient {
    * @returns What storage holds, or undefined if there is nothing there.
    */
   head(key: string): Promise<StoredObject | undefined>;
+  /**
+   * Store an object directly.
+   *
+   * Unlike `presignUpload`, which authorises someone else to write, this
+   * writes. Derivatives are produced by the server and never travel through a
+   * client, so there is nobody to hand a link to.
+   *
+   * @param key - Where to store it. Server-generated, as always.
+   * @param body - The bytes.
+   * @param contentType - What it is. Set by us rather than declared by anyone,
+   *   so unlike an upload it can be trusted.
+   * @returns Nothing.
+   */
+  put(key: string, body: Uint8Array, contentType: string): Promise<void>;
+  /**
+   * List every object under a prefix.
+   *
+   * Used when removing an upload: its derivatives are stored alongside the
+   * original, and deleting only what is recorded would leave behind anything
+   * written by a version of the code that recorded it differently.
+   *
+   * @param prefix - The key prefix to list.
+   * @returns Every matching key.
+   */
+  list(prefix: string): Promise<readonly string[]>;
   /**
    * Remove an object.
    *
@@ -141,6 +167,45 @@ export function createStorageClient(config: StorageConfig): StorageClient {
 
         throw error;
       }
+    },
+
+    async put(key, body, contentType) {
+      await client.send(
+        new PutObjectCommand({
+          Bucket: config.bucket,
+          Key: key,
+          Body: body,
+          ContentType: contentType,
+        }),
+      );
+    },
+
+    async list(prefix) {
+      const keys: string[] = [];
+      let token: string | undefined;
+
+      // Paginated because a listing is capped by the service, and an upload
+      // with many derivatives must not be half-deleted because the first page
+      // was all anyone looked at.
+      do {
+        const response = await client.send(
+          new ListObjectsV2Command({
+            Bucket: config.bucket,
+            Prefix: prefix,
+            ...(token === undefined ? {} : { ContinuationToken: token }),
+          }),
+        );
+
+        for (const object of response.Contents ?? []) {
+          if (object.Key !== undefined) {
+            keys.push(object.Key);
+          }
+        }
+
+        token = response.NextContinuationToken;
+      } while (token !== undefined);
+
+      return keys;
     },
 
     async remove(key) {

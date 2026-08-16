@@ -1,6 +1,7 @@
 import type { EventStoreDBClient } from "@eventstore/db-client";
 import type pg from "pg";
 import type { UploadLimits } from "../../config/storage-config.js";
+import type { DerivativeClient } from "../../integrations/metadata/derivative-client.js";
 import type { MetadataClient } from "../../integrations/metadata/metadata-client.js";
 import type { StorageClient } from "../../integrations/storage/storage-client.js";
 import type { Logger } from "../../lib/logger/logger.js";
@@ -22,6 +23,13 @@ export interface UploadDependencies {
    * and verifies uploads without ever opening one.
    */
   readonly metadata: MetadataClient;
+  /**
+   * Produces the files that make media showable.
+   *
+   * Only the checker needs it: authorising and verifying an upload never
+   * transforms one.
+   */
+  readonly derivatives: DerivativeClient;
   readonly limits: UploadLimits;
   readonly logger?: Logger;
   /** Injected so tests can move time without waiting. */

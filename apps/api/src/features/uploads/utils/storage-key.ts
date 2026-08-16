@@ -1,3 +1,5 @@
+import type { DerivativeKind } from "@chronologity/contracts";
+
 /**
  * Where an upload's bytes live.
  *
@@ -21,5 +23,52 @@
  *   orphan existing objects.
  */
 export function originalKey(ownerUserId: string, uploadId: string): string {
-  return `uploads/${ownerUserId}/${uploadId}/original`;
+  return `${uploadPrefix(ownerUserId, uploadId)}/original`;
+}
+
+/**
+ * Everything belonging to one upload.
+ *
+ * The original and its derivatives share a prefix so that removing an upload
+ * is one listing and a delete of what it finds, rather than a list of key
+ * shapes that has to be kept in step with whatever the code writes.
+ *
+ * @param ownerUserId - Who the upload belongs to.
+ * @param uploadId - The upload's identifier.
+ * @returns The prefix every object for this upload sits under.
+ */
+export function uploadPrefix(ownerUserId: string, uploadId: string): string {
+  return `uploads/${ownerUserId}/${uploadId}`;
+}
+
+export type { DerivativeKind };
+
+/** What each derivative is stored as. */
+const DERIVATIVE_FILES: Readonly<Record<DerivativeKind, { name: string; contentType: string }>> = {
+  thumbnail: { name: "thumbnail.jpg", contentType: "image/jpeg" },
+  poster: { name: "poster.jpg", contentType: "image/jpeg" },
+  faststart: { name: "faststart.mp4", contentType: "video/mp4" },
+};
+
+/**
+ * Where a derivative is stored.
+ *
+ * @param ownerUserId - Who the upload belongs to.
+ * @param uploadId - The upload's identifier.
+ * @param kind - Which derivative.
+ * @returns The object key.
+ */
+export function derivativeKey(ownerUserId: string, uploadId: string, kind: DerivativeKind): string {
+  return `${uploadPrefix(ownerUserId, uploadId)}/${DERIVATIVE_FILES[kind].name}`;
+}
+
+/**
+ * What a derivative is, as a media type.
+ *
+ * @param kind - Which derivative.
+ * @returns Its content type. Set by us rather than declared by anyone, so
+ *   unlike an uploaded file's declared type this can be trusted.
+ */
+export function derivativeContentType(kind: DerivativeKind): string {
+  return DERIVATIVE_FILES[kind].contentType;
 }

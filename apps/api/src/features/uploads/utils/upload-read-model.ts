@@ -1,4 +1,4 @@
-import type { MediaKind, Upload, UploadState } from "@chronologity/contracts";
+import type { DerivativeKind, MediaKind, Upload, UploadState } from "@chronologity/contracts";
 import type pg from "pg";
 import type { Transaction } from "../../../lib/database/transaction.js";
 
@@ -21,6 +21,7 @@ interface UploadRow {
   checksum: string | null;
   failure_reason: string | null;
   media_kind: string | null;
+  derivatives: string[] | null;
   width: number | null;
   height: number | null;
   duration_seconds: string | null;
@@ -51,6 +52,7 @@ function toUpload(row: UploadRow): Upload {
     checksum: row.checksum,
     failureReason: row.failure_reason,
     mediaKind: row.media_kind === null ? null : (row.media_kind as MediaKind),
+    derivatives: (row.derivatives ?? []) as DerivativeKind[],
     width: row.width,
     height: row.height,
     // numeric arrives as a string, since it can hold more precision than a
@@ -64,7 +66,7 @@ function toUpload(row: UploadRow): Upload {
 
 const COLUMNS = `upload_id, kind, state, declared_content_type, declared_byte_size,
                  byte_size, content_type, checksum, failure_reason,
-                 media_kind, width, height, duration_seconds,
+                 media_kind, derivatives, width, height, duration_seconds,
                  registered_at, expires_at, received_at`;
 
 /**
@@ -178,6 +180,28 @@ export async function recordUploadChecked(
       input.hasAudio,
       input.checkedAt.toISOString(),
     ],
+  );
+}
+
+/**
+ * Record what was produced for showing this media.
+ *
+ * @param tx - The caller's transaction.
+ * @param uploadId - Which upload.
+ * @param derivatives - Everything that now exists, not only what was just made.
+ * @param at - When they were produced.
+ * @returns Nothing.
+ */
+export async function recordDerivatives(
+  tx: Transaction,
+  uploadId: string,
+  derivatives: readonly DerivativeKind[],
+  at: Date,
+): Promise<void> {
+  await tx.query(
+    `UPDATE uploads SET derivatives = $2, derived_at = $3, updated_at = now()
+      WHERE upload_id = $1`,
+    [uploadId, derivatives, at.toISOString()],
   );
 }
 

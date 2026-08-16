@@ -3,7 +3,13 @@ import { appendEvents } from "../../../lib/eventstore/append-events.js";
 import { streamName } from "../../../lib/eventstore/stream-name.js";
 import { NotFoundError } from "../../../lib/errors/not-found-error.js";
 import type { RequestContext } from "../../../types/request-context.js";
-import { decideCheck, decideFail, UPLOAD_CATEGORY } from "../aggregates/upload.aggregate.js";
+import {
+  decideCheck,
+  decideDerivativesProduced,
+  decideFail,
+  UPLOAD_CATEGORY,
+} from "../aggregates/upload.aggregate.js";
+import { derivativesFor } from "../derivative-policy.js";
 import { clockFor, type UploadDependencies } from "../dependencies.js";
 import {
   checkMedia,
@@ -16,9 +22,11 @@ import { uploadEventMetadata } from "../utils/event-metadata.js";
 import {
   countAttempt,
   readStorageKey,
+  recordDerivatives,
   recordUploadChecked,
   recordUploadFailed,
 } from "../utils/upload-read-model.js";
+import { derivativeContentType, derivativeKey } from "../utils/storage-key.js";
 import { loadUpload } from "../utils/upload-store.js";
 import type { CheckUploadCommand } from "./check-upload.command.js";
 
@@ -28,6 +36,10 @@ import type { CheckUploadCommand } from "./check-upload.command.js";
  * This is where a claim becomes a fact. Everything before it recorded what the
  * uploader said; this reads the bytes and records what they are. An upload only
  * becomes usable here.
+ *
+ * The files needed to show the media are produced in the same pass, before the
+ * upload is marked usable. Ordered that way so nothing can ever see an upload
+ * claiming a preview that does not exist.
  *
  * Run from a queue, so it must survive being asked twice — at-least-once
  * delivery makes that ordinary rather than exceptional. Being asked to check a
@@ -143,6 +155,36 @@ export async function handleCheckUpload(
     return decision.reason === "already_checked";
   }
 
+  // Produced before anything is recorded as usable. A failure here leaves the
+  // upload unchecked and retriable, which is recoverable; the reverse would
+  // leave something claiming a preview it does not have.
+  let produced: readonly ("thumbnail" | "poster" | "faststart")[];
+
+  try {
+    produced = await produceDerivatives(deps, uploadId, storageKey, verdict.kind, state);
+  } catch (error) {
+    const category = classifyProcessingError(error);
+
+    if (category === "transient") {
+      throw error;
+    }
+
+    // Describable but not processable: a file the decoder could read enough of
+    // to measure, and could not re-encode. Permanent, because a second attempt
+    // reaches the same answer.
+    await refuse(
+      deps,
+      uploadId,
+      context,
+      revision,
+      "That file could not be prepared for display",
+      category,
+      attempt,
+    );
+
+    return false;
+  }
+
   await withTransaction(deps.pool, async (tx) => {
     await recordUploadChecked(tx, {
       uploadId,
@@ -155,17 +197,74 @@ export async function handleCheckUpload(
       hasAudio: probe.hasAudio,
       checkedAt: at,
     });
+
+    await recordDerivatives(tx, uploadId, produced, at);
   });
+
+  const derived = decideDerivativesProduced(state, { derivatives: produced, now: at });
 
   await appendEvents({
     client: deps.client,
     streamName: streamName(UPLOAD_CATEGORY, uploadId),
-    events: decision.events,
+    // Both facts in one append, so history cannot show a checked upload whose
+    // derivatives went missing between two writes.
+    events: derived.ok ? [...decision.events, ...derived.events] : decision.events,
     metadata: uploadEventMetadata(context, undefined),
     expectedRevision: revision,
   });
 
   return true;
+}
+
+/**
+ * Produce and store everything needed to show a piece of media.
+ *
+ * @param deps - Storage, the derivative tools, and the clock.
+ * @param uploadId - Which upload.
+ * @param storageKey - Where the original lives.
+ * @param kind - What the file actually is, as measured.
+ * @param state - The Upload, for its owner and what already exists.
+ * @returns Everything that now exists, including anything produced earlier.
+ * @throws {Error} If a derivative could not be produced or stored.
+ */
+async function produceDerivatives(
+  deps: UploadDependencies,
+  uploadId: string,
+  storageKey: string,
+  kind: "image" | "video",
+  state: { ownerUserId: string | undefined; derivatives: readonly string[] },
+): Promise<readonly ("thumbnail" | "poster" | "faststart")[]> {
+  const owner = state.ownerUserId ?? "";
+  const wanted = derivativesFor(kind);
+  const existing = new Set(state.derivatives);
+
+  // One link for all of them. Each tool reads the original independently, and
+  // signing once keeps the number of signatures proportional to uploads rather
+  // than to derivatives.
+  const url = await deps.storage.presignDownload(storageKey);
+
+  for (const derivative of wanted) {
+    if (existing.has(derivative)) {
+      continue;
+    }
+
+    const bytes =
+      derivative === "thumbnail"
+        ? await deps.derivatives.thumbnail(url)
+        : derivative === "poster"
+          ? await deps.derivatives.poster(url)
+          : await deps.derivatives.faststart(url);
+
+    await deps.storage.put(
+      derivativeKey(owner, uploadId, derivative),
+      bytes,
+      derivativeContentType(derivative),
+    );
+
+    existing.add(derivative);
+  }
+
+  return [...existing] as readonly ("thumbnail" | "poster" | "faststart")[];
 }
 
 /**

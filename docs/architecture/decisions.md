@@ -2336,3 +2336,37 @@ Feedback on integration behaviour arrives in minutes rather than seconds, and wo
 CI becomes load-bearing, so it must be maintained as real infrastructure: it needs every system dependency the application has, and a failure in it blocks work rather than being noise to route around.
 
 Running a single suite locally while iterating remains worthwhile and is not discouraged. The claim being retired is that a developer machine should be able to run everything at once.
+
+---
+
+# ADR-089 — Produce Three Derivatives, and Defer the Encoding Ladder
+
+**Status:** Accepted
+
+## Decision
+
+Checking a file also produces what is needed to show it: a preview image for photographs, a still frame for videos, and a repackaged copy of each video whose playback information sits at the front so a player can begin without downloading the whole file.
+
+Multiple display sizes and multiple video qualities for adaptive streaming are deliberately not produced.
+
+## Alternatives Considered
+
+Generating a full ladder of display sizes and streaming renditions, which `docs/architecture/media.md:282-296` lists among possible derivatives.
+
+## Rationale
+
+Every size in a ladder is a guess until a client asks for a specific one, and no client exists: nothing in the repository referenced a thumbnail before this phase. The architecture is explicit that the encoding ladder "belongs in media technical specifications", and that a streaming protocol should be chosen on mobile compatibility and CDN support — none of which is decided.
+
+What makes deferring cheap is that derivatives are regenerable. The original is always retained and never altered, so producing more later is a matter of running the work again rather than of having lost anything. That is the property that makes guessing unnecessary.
+
+The three that ship are not guesses. A preview is a preview whatever the client turns out to be, a video needs something to show before it plays, and the repackaging is required by a product decision already taken: the product expects videos to autoplay, and a video that must download in full before it starts cannot.
+
+The repackaging copies rather than re-encodes, so it costs no quality and little time — three hundred milliseconds for the test fixture, reading over the network.
+
+## Consequences
+
+Derivatives are produced in the same pass as checking, from the same message. The file is already being read, and there is one retry story rather than two. A slow video occupies one worker for its duration, which is acceptable while several workers share a consumer group.
+
+They are written before the upload is marked usable, so nothing can observe an upload claiming a preview that does not exist. A file that passes checking but cannot be processed fails permanently: a file that cannot be re-encoded will not re-encode differently on a second attempt.
+
+Deleting an upload lists everything under its prefix rather than removing a known set of keys. Deleted media that is still being served is among the worst failures available here, and a list of key shapes would fall out of step with what the code writes.

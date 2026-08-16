@@ -17,6 +17,17 @@ import { timestampSchema } from "./time.js";
 /** The media Chronologity accepts. Anything else needs a product decision. */
 export const mediaKindSchema = z.enum(["image", "video"]);
 
+/**
+ * The files produced from an upload so it can be shown.
+ *
+ * `thumbnail` is a small preview of a photograph. `poster` is a still frame
+ * from a video, shown before it plays. `faststart` is a video repackaged so a
+ * player can begin without downloading the whole file first.
+ */
+export const derivativeKindSchema = z.enum(["thumbnail", "poster", "faststart"]);
+
+export type DerivativeKind = z.infer<typeof derivativeKindSchema>;
+
 export type MediaKind = z.infer<typeof mediaKindSchema>;
 
 /**
@@ -110,6 +121,14 @@ export const uploadSchema = z.object({
   height: z.number().int().positive().nullable(),
   /** Null for a photograph, which has no length. */
   durationSeconds: z.number().nonnegative().nullable(),
+  /**
+   * What has been produced for showing this media.
+   *
+   * A preview for photographs; a still frame and an immediately-playable copy
+   * for videos. Derivatives are delivery conveniences, never authoritative:
+   * the original is always kept, so these can be produced again.
+   */
+  derivatives: z.array(derivativeKindSchema),
   /** Why an upload failed, in terms safe to show its owner. */
   failureReason: z.string().nullable(),
   registeredAt: timestampSchema,

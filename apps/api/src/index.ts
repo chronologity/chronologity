@@ -5,6 +5,7 @@ import { createEventStore } from "./lib/eventstore/client.js";
 import { createMessaging } from "./lib/messaging/kafka.js";
 import { createEmailClient } from "./integrations/email/email-client.js";
 import { createStorageClient } from "./integrations/storage/storage-client.js";
+import { createDerivativeClient } from "./integrations/metadata/derivative-client.js";
 import { createMetadataClient } from "./integrations/metadata/metadata-client.js";
 import { loadBreachedPasswordIndex } from "./lib/auth/breached-passwords.js";
 import { buildApp } from "./server/app.js";
@@ -59,6 +60,7 @@ async function main(): Promise<void> {
       pool: database.pool,
       storage,
       metadata,
+      derivatives: createDerivativeClient(),
       limits: config.uploadLimits,
     },
   });

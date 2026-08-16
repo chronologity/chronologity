@@ -107,12 +107,14 @@ export {
   type UploadReceivedPayload,
 } from "./media-events.js";
 export {
+  derivativeKindSchema,
   mediaKindSchema,
   registerUploadRequestSchema,
   uploadAuthorizationSchema,
   uploadListSchema,
   uploadSchema,
   uploadStateSchema,
+  type DerivativeKind,
   type MediaKind,
   type RegisterUploadRequest,
   type Upload,

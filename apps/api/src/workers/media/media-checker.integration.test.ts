@@ -14,6 +14,7 @@ import { handleRegisterUpload } from "../../features/uploads/commands/register-u
 import type { UploadDependencies } from "../../features/uploads/dependencies.js";
 import { uploadRoute } from "../../features/uploads/integration-events.js";
 import { readUpload } from "../../features/uploads/utils/upload-read-model.js";
+import { createDerivativeClient } from "../../integrations/metadata/derivative-client.js";
 import { createMetadataClient } from "../../integrations/metadata/metadata-client.js";
 import { createStorageClient } from "../../integrations/storage/storage-client.js";
 import { migrate } from "../../lib/database/migrations.js";
@@ -96,6 +97,7 @@ describe("checking media", () => {
       pool: database.pool,
       storage: createStorageClient(storageConfig),
       metadata: createMetadataClient(),
+      derivatives: createDerivativeClient(),
       limits: {
         registrationTtlSeconds: 3_600,
         maxImageBytes: 26_214_400,
@@ -268,6 +270,7 @@ describe("handling a note from the queue", () => {
       pool: database.pool,
       storage: createStorageClient(storageConfig),
       metadata: createMetadataClient(),
+      derivatives: createDerivativeClient(),
       limits: {
         registrationTtlSeconds: 3_600,
         maxImageBytes: 26_214_400,

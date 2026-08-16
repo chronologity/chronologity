@@ -7,17 +7,22 @@ import { decideDelete, UPLOAD_CATEGORY } from "../aggregates/upload.aggregate.js
 import { clockFor, type UploadDependencies } from "../dependencies.js";
 import { uploadEventMetadata } from "../utils/event-metadata.js";
 import { readStorageKey, recordUploadDeleted } from "../utils/upload-read-model.js";
+import { uploadPrefix } from "../utils/storage-key.js";
 import { loadUpload } from "../utils/upload-store.js";
 import type { DeleteUploadCommand } from "./delete-upload.command.js";
 
 /**
  * Remove an upload and the object behind it.
  *
- * The stored object is deleted after the domain transition commits. Ordered
- * that way deliberately: an object removed before the transition would leave a
+ * The stored objects are deleted after the domain transition commits. Ordered
+ * that way deliberately: objects removed before the transition would leave a
  * failure looking like an upload that still exists but has no bytes, which is
- * the harder state to recover from. This way a failure leaves an object nobody
+ * the harder state to recover from. This way a failure leaves objects nobody
  * references, which is reclaimable.
+ *
+ * Everything under the upload's prefix goes, not only the original — a
+ * photograph has a preview and a video has two derivatives, and leaving those
+ * behind would mean deleted media still being served.
  *
  * @param deps - Event store, database, storage, and clock.
  * @param command - Which upload, and who is deleting it.
@@ -63,6 +68,20 @@ export async function handleDeleteUpload(
     metadata: uploadEventMetadata(context, actorUserId),
     expectedRevision: revision,
   });
+
+  // Listed rather than reconstructed. Deleting a fixed set of key shapes would
+  // leave behind anything written by a version of the code that named things
+  // differently, and deleted media that is still there is the worst kind of
+  // bug to find later.
+  const owner = state.ownerUserId;
+
+  if (owner !== undefined) {
+    for (const key of await deps.storage.list(uploadPrefix(owner, uploadId))) {
+      await deps.storage.remove(key);
+    }
+
+    return;
+  }
 
   if (storageKey !== undefined) {
     await deps.storage.remove(storageKey);
