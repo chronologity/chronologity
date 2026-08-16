@@ -1152,34 +1152,22 @@ They must not change Moment occurrence time or become authoritative historical s
 
 ## `features/timelines`
 
-The canonical API tree contains a Timeline aggregate/lifecycle feature.
+`features/timelines/` owns no aggregate, no commands, and no events (ADR-084).
 
-This feature requires careful interpretation.
+The finalized product model establishes that the Timeline is a derived historical representation rather than an arbitrary user-created container. A derived representation has nothing to create, rename, archive, or delete: it changes when the history beneath it changes.
 
-The finalized product model establishes that the Timeline is a derived historical representation rather than an arbitrary user-created container.
-
-Therefore the existence of:
+The feature owns the projections that maintain Timeline read models, and nothing else:
 
 ```text
 features/timelines/
+    projections/   Timeline read models
+    schemas/
+    utils/         cursor encoding
 ```
 
-must not be interpreted as permission to model every Timeline as CRUD-managed user content.
+It must **not** own high-volume Timeline composition. That belongs to `apps/feed-aggregator`, which also owns the Timeline query handlers.
 
-The API Timeline feature may legitimately own authoritative state such as:
-
-- persisted Timeline definitions/scopes where the product requires them;
-- configuration of historically meaningful Timeline views;
-- lifecycle state for explicitly defined Timeline resources;
-- commands whose effects alter how an authoritative Timeline scope is defined.
-
-It must **not** own high-volume Timeline composition.
-
-That belongs to `apps/feed-aggregator`.
-
-Before implementation, the exact semantic purpose of each Timeline aggregate/command in the canonical tree must be validated against `docs/product/timeline.md` and `docs/product/timelines.md`.
-
-If a lifecycle command has no product-semantic justification after that review, it should be removed rather than implemented ceremonially.
+The earlier canonical tree carried a Timeline aggregate and five lifecycle commands. Each was reviewed against `docs/product/timeline.md` and `docs/product/timelines.md`, none had a product-semantic justification, and all were removed rather than implemented ceremonially.
 
 ---
 
@@ -1819,7 +1807,6 @@ Before Chronologity's initial release, `apps/api` must support:
 - unlimited product-level media membership through bounded upload operations;
 - per-video 90-second validation;
 - Reaction lifecycle;
-- authoritative Timeline definition behavior that survives semantic revalidation;
 - notification state and workflows required by launch;
 - moderation/report/enforcement behavior;
 - EventStoreDB aggregate persistence where selected;
@@ -1847,7 +1834,6 @@ The following questions must be resolved in focused architecture documents befor
 - Is `Upload` event sourced?
 - Is `Moment` event sourced?
 - Is `Reaction` event sourced?
-- What exactly is the authoritative role of the API Timeline aggregate?
 - Is Notification event sourced or relational/operational?
 - Is Moderation case/enforcement state event sourced?
 - Which aggregates need snapshots as streams grow?

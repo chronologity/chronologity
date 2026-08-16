@@ -1336,9 +1336,9 @@ or equivalent Sub-Moment hierarchy semantics.
 
 Timeline events require semantic discipline.
 
-If authoritative Timeline definition/configuration exists, events may describe changes to that definition.
+There are no authoritative Timeline Domain Events. The Timeline is derived, so a Timeline change is always a consequence of some other event — a Moment created, its occurrence corrected, its visibility changed, or the account behind it deactivated (ADR-084).
 
-High-volume Timeline read-model changes should be Integration/derived events, not authoritative Timeline Domain Events.
+High-volume Timeline read-model changes are Integration/derived events.
 
 ---
 

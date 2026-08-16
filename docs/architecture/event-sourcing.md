@@ -773,11 +773,7 @@ Therefore:
 Timeline read state
 ```
 
-must not be event sourced merely because the canonical API contains a Timeline aggregate.
-
-Only authoritative Timeline definitions/configuration that genuinely exist as domain resources should have event streams.
-
-The high-volume Timeline composition itself remains derived.
+must not be event sourced. There is no Timeline aggregate and no authoritative Timeline definition to source (ADR-084): every scope is derived from facts owned elsewhere, and the high-volume composition is derived in turn.
 
 ---
 
@@ -2038,10 +2034,7 @@ If a candidate is ultimately relational-authoritative, the canonical monorepo sh
 
 ## Timeline
 
-- Which Timeline state is truly authoritative?
-- Are Timeline definitions persistent domain resources?
-- Which existing lifecycle commands survive product-semantic validation?
-- If no authoritative Timeline aggregate remains, should the canonical tree remove it?
+Settled (ADR-084). No Timeline state is authoritative, Timeline definitions are not persistent domain resources, no lifecycle command survived product-semantic validation, and the canonical tree no longer contains a Timeline aggregate.
 
 ## Notification
 

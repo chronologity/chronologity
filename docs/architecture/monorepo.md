@@ -504,10 +504,7 @@ apps/
             │   │   ├── moment-deleted.handler.ts
             │   │   └── moment-restored.handler.ts
             │   ├── projections/
-            │   │   ├── moment-read-model.projection.ts
-            │   │   ├── timeline-by-time.projection.ts
-            │   │   ├── timeline-by-location.projection.ts
-            │   │   └── timeline-by-user.projection.ts
+            │   │   └── moment-read-model.projection.ts
             │   ├── queries/
             │   │   ├── get-moment-by-id.query.ts
             │   │   ├── get-moment-by-id.handler.ts
@@ -577,61 +574,15 @@ apps/
             │       └── normalize-reaction-type.ts
             ├── timelines/
             │   ├── index.ts
-            │   ├── aggregates/
-            │   │   ├── timeline.aggregate.ts
-            │   │   └── timeline.aggregate.test.ts
-            │   ├── commands/
-            │   │   ├── create-timeline.command.ts
-            │   │   ├── create-timeline.handler.ts
-            │   │   ├── update-timeline-definition.command.ts
-            │   │   ├── update-timeline-definition.handler.ts
-            │   │   ├── archive-timeline.command.ts
-            │   │   ├── archive-timeline.handler.ts
-            │   │   ├── restore-timeline.command.ts
-            │   │   ├── restore-timeline.handler.ts
-            │   │   ├── delete-timeline.command.ts
-            │   │   └── delete-timeline.handler.ts
-            │   ├── events/
-            │   │   ├── timeline-created.event.ts
-            │   │   ├── timeline-definition-updated.event.ts
-            │   │   ├── timeline-archived.event.ts
-            │   │   ├── timeline-restored.event.ts
-            │   │   └── timeline-deleted.event.ts
-            │   ├── event-handlers/
-            │   │   ├── timeline-created.handler.ts
-            │   │   ├── timeline-definition-updated.handler.ts
-            │   │   └── timeline-deleted.handler.ts
             │   ├── projections/
-            │   │   ├── timeline-definition.projection.ts
-            │   │   ├── timeline-scope.projection.ts
-            │   │   ├── timeline-head.projection.ts
-            │   │   ├── timeline-slice.projection.ts
+            │   │   ├── timeline-by-time.projection.ts
+            │   │   ├── timeline-by-location.projection.ts
+            │   │   ├── timeline-by-user.projection.ts
             │   │   ├── timeline-by-tag.projection.ts
             │   │   ├── timeline-by-network.projection.ts
-            │   │   └── timeline-stats.projection.ts
-            │   ├── queries/
-            │   │   ├── get-timeline-by-id.query.ts
-            │   │   ├── get-timeline-by-id.handler.ts
-            │   │   ├── get-timeline-head.query.ts
-            │   │   ├── get-timeline-head.handler.ts
-            │   │   ├── get-timeline-slice.query.ts
-            │   │   ├── get-timeline-slice.handler.ts
-            │   │   ├── get-timeline-around-moment.query.ts
-            │   │   ├── get-timeline-around-moment.handler.ts
-            │   │   ├── get-timeline-by-location.query.ts
-            │   │   ├── get-timeline-by-location.handler.ts
-            │   │   ├── get-timeline-by-user.query.ts
-            │   │   ├── get-timeline-by-user.handler.ts
-            │   │   ├── get-timeline-by-tag.query.ts
-            │   │   ├── get-timeline-by-tag.handler.ts
-            │   │   ├── get-timeline-by-network.query.ts
-            │   │   ├── get-timeline-by-network.handler.ts
-            │   │   ├── get-timeline-stats.query.ts
-            │   │   └── get-timeline-stats.handler.ts
-            │   ├── routes/
-            │   │   └── timelines.routes.ts
+            │   │   ├── timeline-head.projection.ts
+            │   │   └── timeline-slice.projection.ts
             │   ├── schemas/
-            │   │   ├── timeline.schema.ts
             │   │   └── timeline-slice.schema.ts
             │   └── utils/
             │       ├── encode-cursor.ts
@@ -1736,7 +1687,7 @@ The finalized product specifications govern the structure. In particular, Moment
 
 The API includes a dedicated `features/authorization/` module that owns role assignment, permission policy, authorization read state, and privileged role-management boundaries. Scene-detection integration has been removed because it has no remaining product responsibility.
 
-Timeline lifecycle files remain subject to the finalized Timeline semantics: their presence must not be interpreted as making every Timeline an arbitrary user-created container. The current `feed-aggregator` repository name also remains unchanged until an explicit rename decision is made.
+`features/timelines/` owns no aggregate, no commands, and no events. The Timeline is derived, so there is nothing to create, rename, archive, or delete: the module exists to maintain the read models that Timeline navigation is composed from, and its absence of a write side is deliberate rather than an omission (ADR-084). The current `feed-aggregator` repository name remains unchanged until an explicit rename decision is made.
 
 # Adding New Applications
 
@@ -1867,7 +1818,7 @@ A full consumer Timeline implementation should not appear in Gatsby incidentally
 15. Shared packages must represent genuine shared ownership rather than convenience.
 16. A Moment's unlimited media semantics must not be replaced by a structural media-count limit.
 17. Recursive Sub-Moment hierarchies are prohibited by the finalized product model and must not appear in the canonical repository structure.
-18. Timeline CRUD/aggregate artifacts require semantic revalidation against the finalized derived-Timeline model.
+18. The Timeline has no aggregate and no lifecycle commands; `features/timelines/` owns Timeline read models, and read composition belongs to `apps/feed-aggregator`.
 19. `feed-aggregator` remains the canonical repository name until explicitly renamed.
 20. New applications and datastores require architectural justification rather than stylistic preference.
 

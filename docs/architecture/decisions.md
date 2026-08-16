@@ -2170,3 +2170,39 @@ Uniqueness belongs to the database because the alternative is a race. Two people
 ## Consequences
 
 A handle can be unavailable without being held by anyone, and the refusal does not distinguish that from taken or reserved — which of the three it is would map out the reserved list. Stable identity is the user id throughout, so a handle change alters presentation only and breaks no authorship, relationship, or history.
+
+---
+
+# ADR-084 — Remove the Timeline Write Side From the Canonical Structure
+
+**Status:** Accepted
+
+## Decision
+
+The Timeline has no aggregate, no lifecycle commands, and no events. `timeline.aggregate.ts`, the `create-timeline`, `update-timeline-definition`, `archive-timeline`, `restore-timeline`, and `delete-timeline` commands, their five events, and their event handlers are removed from the canonical structure.
+
+No Timeline scope has an authoritative persisted definition. `timeline-definition.projection.ts` and `timeline-scope.projection.ts` go with them.
+
+`apps/api/src/features/timelines/` keeps its name and becomes the module that maintains Timeline read models. Its Timeline query handlers are removed, because `apps/feed-aggregator/src/timelines/` already owns them. The duplicated `timeline-by-time`, `timeline-by-location`, and `timeline-by-user` projections are removed from `features/moments/`, leaving Timeline read models one home.
+
+## Alternatives Considered
+
+Keeping the commands and leaving them unimplemented, which is what the structure effectively did. Implementing them as written, on the grounds that the canonical structure is canonical.
+
+## Rationale
+
+Two canonical documents disagreed. The structure described create, rename, archive, and delete operations; `docs/product/timelines.md` names `TimelineCreated`, `TimelineRenamed`, `TimelineDeleted`, `AddMomentToTimeline`, `TimelineOwner`, and `TimelineMembers` specifically, and says they "should not be introduced merely because they are convenient nouns for implementation." Its invariants add that users create Moments rather than Timeline containers, that the Timeline is not an independently owned aggregate, and that it has no independent creation, rename, or deletion lifecycle.
+
+The product document is more specific and refuses the concept outright, so it governs. A Timeline is a view of history that already exists, in the way a search result is a view: there is nothing to create because it is computed, and nothing to delete because deleting it would mean deleting the history underneath.
+
+Removing rather than deferring matters. Files left in a canonical structure get built eventually, by whoever reads the structure and not the product specification — which is precisely the mistake this phase existed to prevent before Moments arrive.
+
+"Where justified" permitted an authoritative definition for some scope. Nothing justifies one: every candidate scope is grounded in a fact with an existing owner, so a definition would restate what another aggregate already holds and add a second thing to keep correct.
+
+## Consequences
+
+Timeline behaviour is now entirely a consequence of Moments and their occurrence, visibility, and existence, which is what the product specification describes. Anything that later feels like it needs a Timeline aggregate should be read as a signal that a different product concept is missing — an explicitly user-created historical container would be a new concept with its own name, not a revival of this one.
+
+The producer and consumer of Timeline read models are now named for what they do: `apps/api/src/features/timelines/` writes them, `apps/feed-aggregator/src/timelines/` reads them. Neither list of files duplicates the other.
+
+Which scopes ship at launch remains open, and is answered when Moments exist to judge it against.

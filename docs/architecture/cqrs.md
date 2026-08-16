@@ -775,7 +775,7 @@ Conceptually:
 
 ```text
 API
-  → authoritative Timeline definition/configuration
+  → Moments and the domain facts Timelines derive from
 
 Projection system
   → Timeline read models
@@ -1470,12 +1470,11 @@ Queries:
 
 Commands:
 
-- only authoritative Timeline definition/lifecycle operations validated by finalized product semantics.
+- none. The Timeline has no lifecycle of its own; it changes when the Moments beneath it change (ADR-084).
 
 Queries:
 
-- API operational definition queries where needed;
-- feed-aggregator Timeline composition.
+- feed-aggregator Timeline composition. The API owns no Timeline query handlers.
 
 ## Notifications
 
