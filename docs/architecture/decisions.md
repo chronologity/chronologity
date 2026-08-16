@@ -1989,6 +1989,8 @@ The built-in runner works, and its zero-dependency argument is real. What it cos
 
 `node:assert/strict` stays because migrating the assertions would weaken them. `assert.deepStrictEqual` distinguishes a property explicitly set to `undefined` from a property that is absent; `expect(...).toEqual` does not. Several tests here assert on payloads where that distinction is the point, and a mechanical conversion would have quietly loosened them. Vitest reports diffs for assertion errors carrying `actual` and `expected`, which Node's `AssertionError` does, so the reporting improves regardless.
 
+Integration tests are named `*.integration.test.ts`. They are tests, and the suffix should say so: anything globbing `*.test.ts` finds them, which means the unit configuration has to exclude them deliberately rather than miss them by accident.
+
 The integration configuration loads the root `.env` itself rather than relying on the shell. A missing `POSTGRES_PORT` does not fail loudly — it connects to whatever else is listening on 5432 — and that has already cost one debugging session.
 
 ## Consequences

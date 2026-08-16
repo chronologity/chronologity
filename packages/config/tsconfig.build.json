@@ -5,5 +5,5 @@
     "dist. Vitest runs them from source, so nothing needs them there."
   ],
   "extends": "./tsconfig.json",
-  "exclude": ["src/**/*.test.ts", "src/**/*.integration.ts"]
+  "exclude": ["src/**/*.test.ts"]
 }
