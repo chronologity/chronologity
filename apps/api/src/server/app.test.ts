@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { after, describe, it } from "node:test";
+import { describe, it, onTestFinished } from "vitest";
 import type { AppConfig } from "../config/app-config.js";
 import { NotFoundError } from "../lib/errors/not-found-error.js";
 import { UnauthorizedError } from "../lib/errors/unauthorized-error.js";
@@ -55,7 +55,7 @@ describe("liveness", () => {
     // Liveness must not depend on a database: a dependency outage should stop
     // traffic being routed here, not have the process killed and restarted.
     const app = await appWith([failing("postgres", "down")]);
-    after(() => app.close());
+    onTestFinished(() => app.close());
 
     const response = await app.inject({ method: "GET", url: "/health/live" });
 
@@ -67,7 +67,7 @@ describe("liveness", () => {
 describe("readiness", () => {
   it("is ready when every dependency answers", async () => {
     const app = await appWith([healthy("postgres"), healthy("eventstore"), healthy("kafka")]);
-    after(() => app.close());
+    onTestFinished(() => app.close());
 
     const response = await app.inject({ method: "GET", url: "/health/ready" });
 
@@ -81,7 +81,7 @@ describe("readiness", () => {
       failing("eventstore", "connection refused"),
       healthy("kafka"),
     ]);
-    after(() => app.close());
+    onTestFinished(() => app.close());
 
     const response = await app.inject({ method: "GET", url: "/health/ready" });
     const body = response.json();
@@ -110,7 +110,7 @@ describe("readiness", () => {
         },
       },
     ]);
-    after(() => app.close());
+    onTestFinished(() => app.close());
 
     await app.inject({ method: "GET", url: "/health/ready" });
     await app.inject({ method: "GET", url: "/health/ready" });
@@ -122,7 +122,7 @@ describe("readiness", () => {
 describe("request context", () => {
   it("echoes a trace identifier on every response", async () => {
     const app = await appWith([]);
-    after(() => app.close());
+    onTestFinished(() => app.close());
 
     const response = await app.inject({ method: "GET", url: "/health/live" });
 
@@ -131,7 +131,7 @@ describe("request context", () => {
 
   it("honours an inbound trace identifier so a trace survives the hop", async () => {
     const app = await appWith([]);
-    after(() => app.close());
+    onTestFinished(() => app.close());
 
     const response = await app.inject({
       method: "GET",
@@ -146,7 +146,7 @@ describe("request context", () => {
 describe("error handling", () => {
   it("returns the stable envelope for an unknown route", async () => {
     const app = await appWith([]);
-    after(() => app.close());
+    onTestFinished(() => app.close());
 
     const response = await app.inject({ method: "GET", url: "/nope" });
     const body = response.json();
@@ -161,7 +161,7 @@ describe("error handling", () => {
     app.get("/denied", async () => {
       throw new UnauthorizedError("Not permitted");
     });
-    after(() => app.close());
+    onTestFinished(() => app.close());
 
     const response = await app.inject({ method: "GET", url: "/denied" });
 
@@ -175,7 +175,7 @@ describe("error handling", () => {
     app.get("/missing", async () => {
       throw new NotFoundError("No such Moment", { momentId: "abc" });
     });
-    after(() => app.close());
+    onTestFinished(() => app.close());
 
     const response = await app.inject({ method: "GET", url: "/missing" });
 
@@ -187,7 +187,7 @@ describe("error handling", () => {
     app.get("/boom", async () => {
       throw new Error("connection to 10.0.0.4 failed: password authentication failed for pg_admin");
     });
-    after(() => app.close());
+    onTestFinished(() => app.close());
 
     const response = await app.inject({ method: "GET", url: "/boom" });
     const body = response.json();
@@ -204,7 +204,7 @@ describe("error handling", () => {
     app.get("/boom", async () => {
       throw new Error("internal");
     });
-    after(() => app.close());
+    onTestFinished(() => app.close());
 
     const response = await app.inject({
       method: "GET",

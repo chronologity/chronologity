@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { ValidationError } from "../errors/validation-error.js";
 import { categoryStream, parseStreamName, streamName } from "./stream-name.js";
 

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { z } from "zod";
 import { errorCodeSchema, isRetryable } from "./errors.js";
 import { envelopeOf, eventEnvelopeSchema } from "./event-envelope.js";

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { after, before, describe, it } from "node:test";
+import { afterAll, beforeAll, describe, it } from "vitest";
 import type { EventMetadata } from "../../types/domain-event.js";
 import type { Projection, ProjectionEvent } from "../../types/projection.js";
 import { migrate } from "../../lib/database/migrations.js";
@@ -87,7 +87,7 @@ describe("asynchronous publication path", () => {
   let messaging: Messaging;
   let producer: EventProducer;
 
-  before(async () => {
+  beforeAll(async () => {
     database = createDatabase(databaseConfig);
     eventStore = createEventStore({
       connectionString: process.env.EVENTSTOREDB_URL ?? "esdb://localhost:2113?tls=false",
@@ -112,7 +112,7 @@ describe("asynchronous publication path", () => {
     await producer.connect();
   });
 
-  after(async () => {
+  afterAll(async () => {
     await producer.disconnect();
     await messaging.close();
     await eventStore.close();
@@ -252,7 +252,7 @@ describe("projection foundation", () => {
   let database: Database;
   let eventStore: EventStore;
 
-  before(async () => {
+  beforeAll(async () => {
     database = createDatabase(databaseConfig);
     eventStore = createEventStore({
       connectionString: process.env.EVENTSTOREDB_URL ?? "esdb://localhost:2113?tls=false",
@@ -260,7 +260,7 @@ describe("projection foundation", () => {
     await migrate(database.pool);
   });
 
-  after(async () => {
+  afterAll(async () => {
     await eventStore.close();
     await database.close();
   });

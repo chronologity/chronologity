@@ -17,13 +17,14 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc --build",
-    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "build": "tsc --build tsconfig.build.json",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo tsconfig.build.tsbuildinfo",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "typecheck": "tsc --noEmit",
-    "test": "node --test \"dist/**/*.test.js\"",
-    "test:unit": "node --test \"dist/**/*.test.js\""
+    "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@chronologity/contracts": "workspace:*",
@@ -32,6 +33,7 @@
   "devDependencies": {
     "@chronologity/tsconfig": "workspace:*",
     "@types/node": "^24.0.0",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
   }
 }

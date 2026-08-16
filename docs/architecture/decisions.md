@@ -1968,3 +1968,29 @@ Refusing implicit hierarchy follows `authorization.md:176-184`: explicit permiss
 ## Consequences
 
 `moderator` grants nothing until moderation ships in a later phase. The role boundary exists so that privileged capability has somewhere to land that is not `administrator`, which is the point of defining it now rather than the cost.
+
+---
+
+# ADR-076 — Use Vitest as the Test Runner
+
+**Status:** Accepted
+
+## Decision
+
+Vitest runs unit and integration tests across every TypeScript package, from source. `node:assert/strict` remains the assertion library. Tests are excluded from the compiled build through a per-package `tsconfig.build.json`.
+
+## Alternatives Considered
+
+Node's built-in test runner, which is what the repository actually used through Phases 0A to 5C. That was a default rather than a decision, and it contradicted `docs/architecture/testing.md`, which names Vitest without an ADR ever recording a departure.
+
+## Rationale
+
+The built-in runner works, and its zero-dependency argument is real. What it cost was ergonomic and paid on every iteration: tests ran from `dist`, so a one-line change required a full compile before an assertion could run, and every stack trace pointed at generated JavaScript. Running from source removes both.
+
+`node:assert/strict` stays because migrating the assertions would weaken them. `assert.deepStrictEqual` distinguishes a property explicitly set to `undefined` from a property that is absent; `expect(...).toEqual` does not. Several tests here assert on payloads where that distinction is the point, and a mechanical conversion would have quietly loosened them. Vitest reports diffs for assertion errors carrying `actual` and `expected`, which Node's `AssertionError` does, so the reporting improves regardless.
+
+The integration configuration loads the root `.env` itself rather than relying on the shell. A missing `POSTGRES_PORT` does not fail loudly — it connects to whatever else is listening on 5432 — and that has already cost one debugging session.
+
+## Consequences
+
+Test files no longer reach `dist`, so integration tests exercise source rather than the shipped artifact; the build is still verified by `build` and `typecheck` on every run. Turbo's `test` tasks no longer depend on a package's own build, only on its dependencies'. `pnpm test:watch` now exists. Mobile will use its own runner when that phase begins — `jest-expo` is what the Expo toolchain expects — so this decision covers the TypeScript backend and shared packages, not the whole repository.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { after, before, describe, it } from "node:test";
+import { afterAll, beforeAll, describe, it } from "vitest";
 import type { EventMetadata } from "../../types/domain-event.js";
 import { createEventStore, type EventStore } from "../eventstore/client.js";
 import { ConcurrencyConflictError } from "../eventstore/append-events.js";
@@ -60,13 +60,13 @@ describe("event-sourced aggregate against real EventStoreDB", () => {
   let eventStore: EventStore;
   let store: AggregateStore<CounterState, CounterEvent>;
 
-  before(async () => {
+  beforeAll(async () => {
     eventStore = createEventStore({ connectionString });
     await eventStore.checkHealth();
     store = defineAggregate(definition, eventStore.client);
   });
 
-  after(async () => {
+  afterAll(async () => {
     await eventStore.close();
   });
 

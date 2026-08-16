@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { NotFoundError } from "./not-found-error.js";
 import { UnauthenticatedError, UnauthorizedError } from "./unauthorized-error.js";
 import { toErrorResponse } from "./to-error-response.js";

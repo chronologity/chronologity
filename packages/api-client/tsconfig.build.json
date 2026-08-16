@@ -1,0 +1,9 @@
+{
+  "_comment": [
+    "The shipped build. Tests are colocated with the code they cover, which is",
+    "deliberate (ADR-062) but means the default project would compile them into",
+    "dist. Vitest runs them from source, so nothing needs them there."
+  ],
+  "extends": "./tsconfig.json",
+  "exclude": ["src/**/*.test.ts", "src/**/*.integration.ts"]
+}

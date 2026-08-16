@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { after, before, describe, it } from "node:test";
+import { afterAll, beforeAll, describe, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { AppConfig } from "../../config/app-config.js";
 import { createEmailClient } from "../../integrations/email/email-client.js";
@@ -75,7 +75,7 @@ describe("authorization", () => {
   let users: UserDependencies;
   let authorization: AuthorizationDependencies;
 
-  before(async () => {
+  beforeAll(async () => {
     database = createDatabase(config.database);
     eventStore = createEventStore(config.eventStore);
     await migrate(database.pool);
@@ -105,7 +105,7 @@ describe("authorization", () => {
     app = await buildApp({ config, dependencies: [], auth, users, authorization });
   });
 
-  after(async () => {
+  afterAll(async () => {
     await app.close();
     await auth.email.close();
     await eventStore.close();

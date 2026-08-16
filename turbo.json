@@ -20,13 +20,14 @@
       "dependsOn": ["^typecheck"]
     },
     "test": {
-      "dependsOn": ["build", "^build"]
+      "dependsOn": ["^build"]
     },
     "test:unit": {
-      "dependsOn": ["build", "^build"]
+      "dependsOn": ["^build"]
     },
     "test:integration": {
       "cache": false,
+      "dependsOn": ["^build"],
       "env": [
         "NODE_ENV",
         "LOG_LEVEL",
@@ -47,6 +48,11 @@
     },
     "//#lint:root:fix": {
       "cache": false
+    },
+    "test:watch": {
+      "cache": false,
+      "persistent": true,
+      "dependsOn": ["^build"]
     }
   }
 }

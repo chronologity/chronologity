@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import type { PasswordPolicyConfig } from "../../config/auth-config.js";
 import { checkPassword, describeRejection } from "./password-policy.js";
 

@@ -19,6 +19,7 @@
     "test": "turbo run test",
     "test:unit": "turbo run test:unit",
     "test:integration": "turbo run test:integration",
+    "test:watch": "turbo run test:watch",
     "clean": "turbo run clean",
     "lint:root": "eslint eslint.config.js prettier.config.js",
     "lint:root:fix": "eslint eslint.config.js prettier.config.js --fix",

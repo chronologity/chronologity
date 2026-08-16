@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { after, before, beforeEach, describe, it } from "node:test";
+import { afterAll, beforeAll, beforeEach, describe, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { AppConfig } from "../../config/app-config.js";
 import { createEmailClient } from "../../integrations/email/email-client.js";
@@ -98,7 +98,7 @@ describe("authentication", () => {
   let deps: AuthDependencies;
   let clock = () => new Date();
 
-  before(async () => {
+  beforeAll(async () => {
     database = createDatabase(config.database);
     eventStore = createEventStore(config.eventStore);
     await migrate(database.pool);
@@ -123,7 +123,7 @@ describe("authentication", () => {
     app = await buildApp({ config, dependencies: [], auth: deps });
   });
 
-  after(async () => {
+  afterAll(async () => {
     await app.close();
     await deps.email.close();
     await eventStore.close();

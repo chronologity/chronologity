@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { PERMISSIONS, roleSchema, type Permission } from "@chronologity/contracts";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { effectiveRoles, permissionsFor, ROLE_PERMISSIONS } from "./role-permissions.js";
 
 describe("ROLE_PERMISSIONS", () => {

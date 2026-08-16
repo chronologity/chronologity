@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { after, before, beforeEach, describe, it } from "node:test";
+import { afterAll, beforeAll, beforeEach, describe, it } from "vitest";
 import type { EventMetadata } from "../../types/domain-event.js";
 import { migrate } from "./migrations.js";
 import {
@@ -35,13 +35,13 @@ const metadata = (traceId = randomUUID()): EventMetadata => ({
 describe("PostgreSQL foundation against a real database", () => {
   let database: Database;
 
-  before(async () => {
+  beforeAll(async () => {
     database = createDatabase(config);
     await database.checkHealth();
     await migrate(database.pool);
   });
 
-  after(async () => {
+  afterAll(async () => {
     await database.pool.query("DELETE FROM outbox_messages");
     await database.close();
   });
