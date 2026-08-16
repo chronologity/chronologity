@@ -13,6 +13,7 @@ import { createMessaging, type Messaging } from "../../lib/messaging/kafka.js";
 import { createEventProducer, type EventProducer } from "../../lib/messaging/producer.js";
 import { createEventConsumer } from "../../lib/messaging/consumer.js";
 import { topicName } from "../../lib/messaging/topics.js";
+import { writeCheckpoint } from "../../lib/projections/checkpoint-store.js";
 import { rebuildProjection, runProjection } from "../../lib/projections/runner.js";
 import { publishPendingEvents } from "./publish-events.js";
 
@@ -265,6 +266,40 @@ describe("projection foundation", () => {
     await database.close();
   });
 
+  /**
+   * Where `$all` currently ends.
+   *
+   * These tests assert behaviour, not scale, but a projection reading `$all`
+   * from the start replays every event the local event store has ever held —
+   * thousands, after a few runs, at one transaction each. Starting from here
+   * means a test sees only the events it appends itself, so its cost stays the
+   * same on a developer's tenth run as on a fresh database.
+   */
+  const currentEnd = async (): Promise<bigint> => {
+    let position = 0n;
+
+    // Consumed to the end rather than broken out of. Abandoning a `readAll`
+    // leaves its gRPC call open, and closing the client then waits on it —
+    // which is a sixty-second hook timeout, not an error anyone would connect
+    // to a helper that read one event.
+    for await (const resolved of eventStore.client.readAll({
+      direction: "backwards",
+      fromPosition: "end",
+      maxCount: 1,
+    })) {
+      position = resolved.commitPosition ?? resolved.event?.position?.commit ?? position;
+    }
+
+    return position;
+  };
+
+  /** Start a projection from a position rather than from the beginning. */
+  const startFrom = async (name: string, position: bigint): Promise<void> => {
+    await withTransaction(database.pool, (tx) =>
+      writeCheckpoint(tx, name, "eventstoredb:$all", position),
+    );
+  };
+
   const collectingProjection = (name: string) => {
     const seen: ProjectionEvent[] = [];
     const projection: Projection = {
@@ -279,6 +314,8 @@ describe("projection foundation", () => {
   it("applies each event once, even when the same event is delivered again", async () => {
     const name = `proj-${randomUUID()}`;
     const { projection, seen } = collectingProjection(name);
+    const start = await currentEnd();
+    await startFrom(name, start);
 
     await appendEvents({
       client: eventStore.client,
@@ -290,15 +327,13 @@ describe("projection foundation", () => {
 
     await runProjection({ projection, client: eventStore.client, pool: database.pool });
     const afterFirstPass = seen.length;
-    assert.ok(afterFirstPass > 0);
+    assert.equal(afterFirstPass, 1, "the appended event was not applied");
 
-    // Rewind the checkpoint to force redelivery of everything, exactly as an
-    // at-least-once source would after a crash between processing and commit.
-    await withTransaction(database.pool, async (tx) => {
-      await tx.query(`UPDATE projection_checkpoints SET position = 0 WHERE projection_name = $1`, [
-        name,
-      ]);
-    });
+    // Rewind to before this test's own event, forcing its redelivery exactly as
+    // an at-least-once source would after a crash between processing and
+    // commit. Rewinding to zero would prove the same thing while replaying
+    // every event the local store has ever held.
+    await startFrom(name, start);
 
     const replayed = await runProjection({
       projection,
@@ -322,7 +357,18 @@ describe("projection foundation", () => {
       expectedRevision: "no_stream",
     });
 
-    await runProjection({ projection, client: eventStore.client, pool: database.pool });
+    // Bounded, and both passes read the same slice. A rebuild discards its
+    // checkpoint by definition, so unlike the test above this one cannot start
+    // partway through history — but what it asserts is that a rebuild reapplies
+    // rather than skips, and that is true of any slice.
+    const slice = 25;
+
+    await runProjection({
+      projection,
+      client: eventStore.client,
+      pool: database.pool,
+      maxEvents: slice,
+    });
     const afterBuild = seen.length;
     assert.ok(afterBuild > 0);
 
@@ -334,6 +380,7 @@ describe("projection foundation", () => {
       projection,
       client: eventStore.client,
       pool: database.pool,
+      maxEvents: slice,
     });
 
     assert.equal(seen.length, afterBuild);
@@ -343,9 +390,21 @@ describe("projection foundation", () => {
   it("resumes from its checkpoint on the next pass", async () => {
     const name = `proj-${randomUUID()}`;
     const { projection, seen } = collectingProjection(name);
+    await startFrom(name, await currentEnd());
 
+    await appendEvents({
+      client: eventStore.client,
+      streamName: streamName(PROJECTION_CATEGORY, randomUUID()),
+      events: [{ type: "Resumable", payload: { n: 1 } }],
+      metadata: metadata(randomUUID()),
+      expectedRevision: "no_stream",
+    });
+
+    // The first pass must reach the end of history for the second to have
+    // nothing to do, which is only affordable if it starts near the end.
     await runProjection({ projection, client: eventStore.client, pool: database.pool });
     const afterFirst = seen.length;
+    assert.equal(afterFirst, 1, "the appended event was not applied");
 
     const second = await runProjection({
       projection,

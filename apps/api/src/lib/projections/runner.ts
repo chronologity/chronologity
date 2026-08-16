@@ -7,6 +7,7 @@ import type { Logger } from "../logger/logger.js";
 import {
   claimEvent,
   readCheckpoint,
+  readProcessedEvents,
   resetProjection,
   writeCheckpoint,
 } from "./checkpoint-store.js";
@@ -43,6 +44,15 @@ export interface ProjectionRunResult {
 const SOURCE = "eventstoredb:$all";
 
 /**
+ * How many events to check for prior application at a time.
+ *
+ * Large enough that replaying seen history costs a handful of queries rather
+ * than thousands, small enough that a crash mid-pass discards little work and
+ * the identifier list stays a reasonable query parameter.
+ */
+const CLAIM_LOOKAHEAD = 500;
+
+/**
  * Process everything the projection has not yet seen, then return.
  *
  * A single pass rather than a daemon: the caller decides whether this runs once
@@ -67,6 +77,80 @@ export async function runProjection({
   let applied = 0;
   let skipped = 0;
   let position = fromPosition;
+
+  /**
+   * Events read but not yet decided on.
+   *
+   * Buffered so that "has this already been applied" can be asked about many
+   * events in one query. Redelivery and rebuild both walk history the
+   * projection has already seen, and asking per event turns that walk into one
+   * transaction per event — which is what made a replay over five thousand
+   * events take a hundred seconds.
+   */
+  let pending: { id: string; event: ProjectionEvent }[] = [];
+
+  /**
+   * Decide a buffered batch.
+   *
+   * Events already applied cost nothing beyond the batch's single query and one
+   * checkpoint write at the end. Events that still need applying keep their own
+   * transaction: the effect and its claim must commit together, or a crash
+   * between them loses the event or applies it twice.
+   *
+   * @returns Nothing.
+   */
+  const flush = async (): Promise<void> => {
+    if (pending.length === 0) {
+      return;
+    }
+
+    const batch = pending;
+    pending = [];
+
+    const alreadyApplied = await readProcessedEvents(
+      pool,
+      projection.name,
+      batch.map((item) => item.id),
+    );
+
+    // The furthest position covered by an unbroken run of skipped events. One
+    // checkpoint write covers the whole run; an applied event's own
+    // transaction already records a later position, which clears it.
+    let skippedThrough: bigint | undefined;
+
+    for (const { id, event } of batch) {
+      if (alreadyApplied.has(id)) {
+        skipped += 1;
+        skippedThrough = event.position;
+        position = event.position;
+        continue;
+      }
+
+      await withTransaction(pool, async (tx) => {
+        const claimed = await claimEvent(tx, projection.name, id);
+
+        if (claimed) {
+          await projection.apply(event);
+          applied += 1;
+        } else {
+          // Another worker applied it between the read above and this write.
+          // The insert is the authority, and it says no.
+          skipped += 1;
+        }
+
+        await writeCheckpoint(tx, projection.name, SOURCE, event.position);
+      });
+
+      skippedThrough = undefined;
+      position = event.position;
+    }
+
+    if (skippedThrough !== undefined) {
+      const through = skippedThrough;
+
+      await withTransaction(pool, (tx) => writeCheckpoint(tx, projection.name, SOURCE, through));
+    }
+  };
 
   const stream = client.readAll({
     direction: "forwards",
@@ -108,24 +192,14 @@ export async function runProjection({
       revision: event.revision,
     };
 
-    await withTransaction(pool, async (tx) => {
-      const claimed = await claimEvent(tx, projection.name, event.id);
+    pending.push({ id: event.id, event: projectionEvent });
 
-      if (!claimed) {
-        // Already applied on an earlier delivery. Advancing the checkpoint is
-        // still correct and stops the same event being reconsidered forever.
-        skipped += 1;
-        await writeCheckpoint(tx, projection.name, SOURCE, commitPosition);
-        return;
-      }
-
-      await projection.apply(projectionEvent);
-      await writeCheckpoint(tx, projection.name, SOURCE, commitPosition);
-      applied += 1;
-    });
-
-    position = commitPosition;
+    if (pending.length >= CLAIM_LOOKAHEAD) {
+      await flush();
+    }
   }
+
+  await flush();
 
   logger?.info({ projection: projection.name, applied, skipped }, "Projection pass complete");
 

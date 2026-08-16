@@ -114,6 +114,43 @@ export async function claimEvent(
 }
 
 /**
+ * Which of these events a projection has already applied.
+ *
+ * An optimisation, not a safety mechanism: `claimEvent` remains the authority,
+ * because only an insert can decide a race. This exists so that a replay over
+ * history a projection has already seen — every redelivery, and every rebuild
+ * that reaches events it has processed — costs one query per batch instead of
+ * one transaction per event.
+ *
+ * Reading it is safe in the direction that matters. A row is written only in
+ * the transaction that applies the event, so "present" always means "applied".
+ * The reverse is racy and harmless: an event this reports as unseen still goes
+ * through `claimEvent`, which refuses it if another worker got there first.
+ *
+ * @param pool - Read-only use.
+ * @param projectionName - Which projection.
+ * @param eventIds - The candidates to check.
+ * @returns The subset already applied.
+ */
+export async function readProcessedEvents(
+  pool: pg.Pool,
+  projectionName: string,
+  eventIds: readonly string[],
+): Promise<ReadonlySet<string>> {
+  if (eventIds.length === 0) {
+    return new Set();
+  }
+
+  const { rows } = await pool.query<{ event_id: string }>(
+    `SELECT event_id FROM projection_processed_events
+      WHERE projection_name = $1 AND event_id = ANY($2::uuid[])`,
+    [projectionName, eventIds],
+  );
+
+  return new Set(rows.map((row) => row.event_id));
+}
+
+/**
  * Discard a projection's progress so it can be rebuilt from the beginning.
  *
  * Clears the processed-event record too: a rebuild that remembered what it had

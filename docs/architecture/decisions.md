@@ -1996,3 +1996,27 @@ The integration configuration loads the root `.env` itself rather than relying o
 ## Consequences
 
 Test files no longer reach `dist`, so integration tests exercise source rather than the shipped artifact; the build is still verified by `build` and `typecheck` on every run. Turbo's `test` tasks no longer depend on a package's own build, only on its dependencies'. `pnpm test:watch` now exists. Mobile will use its own runner when that phase begins — `jest-expo` is what the Expo toolchain expects — so this decision covers the TypeScript backend and shared packages, not the whole repository.
+
+---
+
+# ADR-077 — Run Verification in CI Before Choosing a Deployment Platform
+
+**Status:** Accepted
+
+## Decision
+
+A GitHub Actions workflow runs lint, typecheck, build, unit tests, and integration tests against the same `docker/compose.yaml` used locally, on every push to `main` and `development` and on every pull request. It deploys nothing.
+
+## Alternatives Considered
+
+Waiting for the production-infrastructure phase, which is where the roadmap places the CI/CD platform decision, and continuing to rely on tests being run by hand before merging.
+
+## Rationale
+
+The roadmap defers CI/CD because choosing a deployment pipeline early tends to decide the deployment platform by accident. That reasoning applies to deployment; it does not apply to verification. "Everything passed before this merged" needs a home that is not one person's terminal, and a workflow that runs `pnpm` commands against a compose file commits to nothing about where the software eventually runs.
+
+Reusing the local compose file rather than declaring service containers in the workflow keeps one definition of what the stack is. A drift between the services CI runs and the services a developer runs would show up as a test that passes in one place and not the other, which is the least useful failure available.
+
+## Consequences
+
+Integration tests now run against a database created fresh for each run, which removes the accumulation problem that made local runs slow, and means CI catches anything depending on pre-existing local state. Choosing a deployment platform remains open. If it eventually brings its own CI, this workflow is small enough to discard.

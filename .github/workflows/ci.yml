@@ -1,0 +1,73 @@
+name: CI
+
+# Verification, not deployment. Where Chronologity eventually deploys is an open
+# question the roadmap leaves to the production-infrastructure phase; where its
+# tests run should not wait on that answer.
+
+on:
+  push:
+    branches: [main, development]
+  pull_request:
+
+# A superseded run proves nothing about the commit that replaced it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Before setup-node, which needs pnpm present to resolve its cache.
+      - name: Enable corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Narrowest and fastest first, so an obvious failure reports in a minute
+      # rather than after the infrastructure has finished starting.
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+
+      - name: Unit tests
+        run: pnpm test
+
+      # PostgreSQL, EventStoreDB, Kafka, ClickHouse, and Mailpit, from the same
+      # compose file used locally. `--wait` blocks until every healthcheck
+      # passes, so a test failing here is a real failure rather than a service
+      # that had not finished starting. The script seeds .env from .env.example,
+      # whose defaults match the compose file.
+      - name: Start infrastructure
+        run: pnpm infra:up
+
+      - name: Integration tests
+        run: pnpm test:integration
+
+      # Only on failure: a passing run's logs are noise, and a failing one is
+      # usually a service that refused a connection for a reason it recorded.
+      - name: Infrastructure logs
+        if: failure()
+        run: bash scripts/compose.sh ps && bash scripts/compose.sh logs --tail 200
+
+      - name: Stop infrastructure
+        if: always()
+        run: pnpm infra:down
