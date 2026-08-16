@@ -30,7 +30,12 @@ import type { UserDependencies } from "../users/dependencies.js";
  */
 
 const MAILPIT = `http://127.0.0.1:${process.env.MAILPIT_UI_PORT ?? "8025"}`;
-const BUCKET = `test-${randomUUID().slice(0, 8)}`;
+// One bucket, reused. A bucket per run reads as careful and is a disk leak:
+// SeaweedFS reserves storage files per bucket and never reclaims them, so a
+// few runs consumed 29GB and filled this machine's Docker disk. Runs are
+// already isolated by key — every upload gets a fresh identifier, so no two
+// runs can collide on an object.
+const BUCKET = process.env.S3_BUCKET ?? "chronologity-media";
 const ENDPOINT = process.env.S3_ENDPOINT ?? "http://127.0.0.1:8333";
 
 // Small enough to keep the suite quick, large enough that "over the limit"
@@ -104,7 +109,7 @@ describe("uploads", () => {
     eventStore = createEventStore(config.eventStore);
     await migrate(database.pool);
 
-    // A bucket per run, so one run's objects cannot be mistaken for another's.
+    // Created if absent, tolerated if present: the bucket is shared across runs.
     const admin = new S3Client({
       endpoint: config.storage.endpoint,
       region: config.storage.region,
@@ -114,7 +119,18 @@ describe("uploads", () => {
         secretAccessKey: config.storage.secretAccessKey,
       },
     });
-    await admin.send(new CreateBucketCommand({ Bucket: BUCKET }));
+    try {
+      await admin.send(new CreateBucketCommand({ Bucket: BUCKET }));
+    } catch (error) {
+      // Already there, which is the normal case after the first run. Both
+      // names are accepted: AWS answers BucketAlreadyOwnedByYou, SeaweedFS
+      // answers BucketAlreadyExists, and either means the bucket is ready.
+      const name = (error as { name?: string }).name;
+
+      if (name !== "BucketAlreadyOwnedByYou" && name !== "BucketAlreadyExists") {
+        throw error;
+      }
+    }
     admin.destroy();
 
     storage = createStorageClient(config.storage);

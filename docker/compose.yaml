@@ -104,8 +104,13 @@ services:
           "CMD-SHELL",
           "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1",
         ]
-      interval: 10s
-      timeout: 10s
+      # Generous because this check starts a JVM. Ten seconds was enough on an
+      # idle machine and not enough on a busy one, which made a working broker
+      # report unhealthy — the check was measuring JVM startup rather than
+      # Kafka. Asking the broker for its API versions is still the right
+      # question; it just needs room to answer.
+      interval: 15s
+      timeout: 30s
       retries: 20
       start_period: 20s
 
@@ -197,6 +202,16 @@ services:
       - -s3
       - -s3.config=/etc/seaweedfs/s3.json
       - -dir=/data
+      # Sized for a laptop rather than a deployment. Left at its defaults,
+      # SeaweedFS creates up to eight volumes per bucket and lets each grow
+      # toward 30GB, and `-volume.max` auto-configures from free disk space —
+      # so a handful of test buckets filled this machine's Docker disk and
+      # took Kafka down with it. Test media is a few kilobytes.
+      - -master.volumeSizeLimitMB=64
+      - -volume.max=4
+      # Explicit rather than assumed: never reserve a volume's space up front.
+      # A local volume should cost what it holds.
+      - -master.volumePreallocate=false
     ports:
       - "${S3_PORT:-8333}:8333"
     volumes:
