@@ -2020,3 +2020,153 @@ Reusing the local compose file rather than declaring service containers in the w
 ## Consequences
 
 Integration tests now run against a database created fresh for each run, which removes the accumulation problem that made local runs slow, and means CI catches anything depending on pre-existing local state. Choosing a deployment platform remains open. If it eventually brings its own CI, this workflow is small enough to discard.
+
+---
+
+# ADR-078 — Make the Session the Revocation Boundary, Decided From Its Aggregate
+
+**Status:** Accepted
+
+## Decision
+
+A Session, not an access token, is what can be revoked. Every authenticated request validates against the Session aggregate in EventStoreDB rather than against the `sessions` table, which exists to render a devices screen and decides nothing.
+
+## Alternatives Considered
+
+Treating the access token as the unit of authority and accepting any unexpired, correctly signed token. Alternatively, validating against the `sessions` read model, which is one indexed lookup instead of a short stream read.
+
+## Rationale
+
+A signed token is a bearer credential that nothing can withdraw before it expires. Making the Session the boundary means revocation has somewhere to take effect, and it gives "sign out everywhere" and account deactivation a single mechanism instead of one each.
+
+Reading from the read model would have been cheaper and wrong in the case that matters. A projection that lags by even a second leaves a revoked Session authenticating requests for that second, and revocation that takes effect eventually is not revocation. The stream is short by construction — a Session accumulates a handful of events over its life — so the authoritative read is affordable.
+
+## Consequences
+
+Every authenticated request reads a stream. That cost is bounded by Session history rather than by account history, and it is the price of revocation meaning what it says. The `sessions` table must never acquire an authorization responsibility; if a future surface needs faster validation, that is a caching decision requiring its own measurement and its own record.
+
+---
+
+# ADR-079 — Revoke the Entire Session When a Refresh Credential Is Reused
+
+**Status:** Accepted
+
+## Decision
+
+Refresh credentials rotate on every use. Presenting one that has already been rotated revokes the whole Session, ending both the legitimate holder's access and the attacker's.
+
+`docs/architecture/authentication.md` requires rotation and leaves the response to reuse undefined. This defines it.
+
+## Alternatives Considered
+
+Refusing the reused credential while leaving the Session alive, which is the gentler behaviour and the more common default.
+
+## Rationale
+
+Reuse of a rotated credential has two possible causes: a stolen copy, or a client that lost the response to its own refresh. The two are indistinguishable at the moment they happen, and only one is dangerous.
+
+Refusing the request while leaving the Session usable optimises for the harmless case. It also leaves whoever holds a stolen credential free to keep trying, and leaves the account's real owner unaware that anything happened. Ending the Session optimises for the dangerous case: the legitimate holder signs in again, which they can do, and the attacker's copy is worthless.
+
+## Consequences
+
+A client that races two refreshes against itself signs its user out. Clients must serialise refresh, which is a requirement worth stating in the client contract rather than a bug to work around server-side. The revocation is recorded in the audit trail with its reason, so a support question about an unexpected sign-out has an answer.
+
+---
+
+# ADR-080 — Never Write Secrets or Erasable Personal Data to Event History
+
+**Status:** Accepted
+
+## Decision
+
+Event streams carry no credential and no personal data subject to erasure. Magic-link tokens, refresh credentials, and password hashes are stored as rows in PostgreSQL; dates of birth are stored in `user_restricted_data`. Events reference these by identifier, or record only that something happened.
+
+## Alternatives Considered
+
+Recording hashed credentials in events, on the grounds that a hash is not a secret. Recording a birthdate in `UserCreated`, where it would sit beside the other facts established at account creation.
+
+## Rationale
+
+Event history is permanent by design — that is what makes it authoritative and replayable. Permanence is exactly wrong for these two categories.
+
+A credential written to history can never be rotated away. A hash is not a secret today, but it is a hash under today's parameters, and the whole point of storing cost parameters alongside a hash is that today's parameters will one day be inadequate.
+
+Personal data subject to erasure cannot be erased from an append-only stream. `docs/architecture/privacy.md` requires that replay not resurrect erased data; the reliable way to honour that is for the data never to enter the stream. A relational row can be deleted, and a rebuild that reads history will not bring it back.
+
+## Consequences
+
+Some facts live in two places: the event records that an account was created, and a relational row holds the restricted detail. Erasure work must therefore enumerate those rows explicitly rather than relying on a cascade from history — which is a requirement on Phase 5R, recorded here so it is not discovered there. Every new event type must be checked against this rule when it is designed, since the cost of noticing afterwards is a stream that cannot be corrected.
+
+---
+
+# ADR-081 — Make Authentication Failures Indistinguishable, Including in Timing
+
+**Status:** Accepted
+
+## Decision
+
+Every way an authentication attempt can fail produces one response. An expired link, a consumed link, and a link that never existed are one refusal. Requesting a sign-in link answers identically whether or not the address is known. A password sign-in for an unknown address still performs a full Argon2id verification against a cached dummy hash before refusing. Registering an address that already exists answers as though it succeeded and tells the owner by mail.
+
+## Alternatives Considered
+
+Specific errors, which are considerably kinder to someone who has genuinely mistyped an address or let a link expire.
+
+## Rationale
+
+Any difference an unauthenticated caller can observe between "this account exists" and "it does not" is an account-existence oracle, and an oracle is enumerable. Chronologity holds private personal history, so membership itself is information worth protecting — knowing that an address has an account here is a fact about a person.
+
+Timing is such a difference. Returning early for an unknown address is measurably faster than verifying a password, and the gap is wide enough to measure remotely because Argon2id is deliberately slow. Equalising it requires doing the work anyway, against a dummy hash computed once per parameter set.
+
+## Consequences
+
+Diagnosing a genuine sign-in problem is harder, and support cannot ask the API whether an address is registered. The audit trail carries the specific reason, so the information exists where it is safe. Every future authentication surface inherits this obligation, including any OAuth path: an endpoint that distinguishes cases undoes the guarantee everywhere else maintains.
+
+---
+
+# ADR-082 — Create the User Through an Explicit Onboarding Step
+
+**Status:** Accepted
+
+## Decision
+
+Authenticating creates an Identity and nothing else. The User is created by an explicit request supplying a handle, display name, and date of birth. Routes needing a User refuse an authenticated caller who has none with `ONBOARDING_REQUIRED`, distinct from both unauthenticated and forbidden.
+
+## Alternatives Considered
+
+Creating the User as a side effect of first sign-in, with a generated handle the person could change afterwards.
+
+## Rationale
+
+`docs/product/identity.md` treats the handle as chosen rather than assigned, and a generated handle is a name given to someone by a system. It would also make the first thing a new account does be a rename, and it would leave a supply of abandoned generated handles that the retention rules must then protect.
+
+The cost is a real intermediate state: authenticated, not yet a User. That state exists either way — the alternative merely hides it behind a fabricated handle — so it is better named than papered over. `ONBOARDING_REQUIRED` tells a client to send someone to onboarding rather than to sign in again, which is a different repair.
+
+## Consequences
+
+Clients must handle a third authentication outcome. The access token gains a `userId` claim only once a User exists, so the guard falls back to a lookup for tokens issued before onboarding rather than forcing an immediate re-authentication. Anything that assumes an authenticated request has a User must say so through `requireUser`.
+
+---
+
+# ADR-083 — Retain Released Handles for a Configurable Cooldown
+
+**Status:** Accepted
+
+## Decision
+
+A handle given up is retained, marked released, and reserved for its former owner for a configurable cooldown, defaulting to thirty days. Its original holder may reclaim it at any point during that period. Uniqueness is enforced by a PostgreSQL constraint on the normalised handle, never by checking availability and then inserting.
+
+## Alternatives Considered
+
+Releasing a handle immediately, and retaining it permanently.
+
+## Rationale
+
+`docs/product/identity.md` warns that immediate reassignment invites impersonation and breaks references, and leaves the retention period open. Someone who takes a recognisable handle the day it is freed inherits whatever recognition it carried.
+
+Permanent retention avoids that and creates a different problem: handles are a finite namespace, and one abandoned account would hold a name forever. A cooldown is the compromise, and its length is a product judgement rather than a technical one, so it is configuration.
+
+Uniqueness belongs to the database because the alternative is a race. Two people claiming the same handle simultaneously both pass an availability check; only one can win an insert against a unique index.
+
+## Consequences
+
+A handle can be unavailable without being held by anyone, and the refusal does not distinguish that from taken or reserved — which of the three it is would map out the reserved list. Stable identity is the user id throughout, so a handle change alters presentation only and breaks no authorship, relationship, or history.
