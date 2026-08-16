@@ -101,6 +101,12 @@ export {
   type UserRoles,
 } from "./authorization.js";
 export {
+  MEDIA_BOUNDARY,
+  uploadReceivedEventSchema,
+  uploadReceivedPayloadSchema,
+  type UploadReceivedPayload,
+} from "./media-events.js";
+export {
   mediaKindSchema,
   registerUploadRequestSchema,
   uploadAuthorizationSchema,

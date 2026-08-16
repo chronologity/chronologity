@@ -4,7 +4,8 @@ import { createDatabase } from "../../lib/database/postgres.js";
 import { createEventStore } from "../../lib/eventstore/client.js";
 import { createMessaging } from "../../lib/messaging/kafka.js";
 import { createEventProducer } from "../../lib/messaging/producer.js";
-import { publishPendingEvents } from "./publish-events.js";
+import { uploadRoute } from "../../features/uploads/integration-events.js";
+import { publishPendingEvents, type Route } from "./publish-events.js";
 
 /**
  * The event-publisher worker.
@@ -19,9 +20,15 @@ import { publishPendingEvents } from "./publish-events.js";
  * doubles their work for no benefit.
  */
 
-/** Stream categories that publish, and the boundary topic each publishes to. */
-const ROUTES: Readonly<Record<string, string>> = {
-  // Populated as domains arrive in Phase 5. Publication is opt-in.
+/**
+ * Which stream categories publish, and how their history becomes a message.
+ *
+ * A feature declares its own route, because what a feature is willing to
+ * promise the outside world is the feature's decision rather than the
+ * publisher's. Categories absent here publish nothing.
+ */
+const ROUTES: Readonly<Record<string, Route>> = {
+  upload: uploadRoute,
 };
 
 const POLL_INTERVAL_MS = 1_000;

@@ -8,8 +8,9 @@ import type { UploadRegistered } from "../events/upload-registered.event.js";
  * Upload — media on its way in.
  *
  * The aggregate owns the lifecycle: authorised, arrived, refused, removed. It
- * does not own the bytes, and it holds no storage key, because a key is
- * infrastructure that the read model can carry (`media.md:166`).
+ * does not own the bytes, but it does remember where they were put: an
+ * arrival event that could not say which object arrived would force every
+ * reader to replay the stream to find out.
  *
  * An Upload belongs to a User rather than to a Moment. Media exists before
  * publication (`media.md:456`), and binding an Upload to a Moment at this
@@ -31,6 +32,8 @@ export interface UploadState {
   readonly kind: MediaKind | undefined;
   readonly declaredContentType: string | undefined;
   readonly declaredByteSize: number | undefined;
+  /** Where the bytes were put. Established at registration and never changes. */
+  readonly storageKey: string | undefined;
   readonly status: UploadStatus;
   /** After this instant a registration can no longer be finalized. */
   readonly expiresAt: string | undefined;
@@ -45,6 +48,7 @@ export const initialUploadState: UploadState = {
   kind: undefined,
   declaredContentType: undefined,
   declaredByteSize: undefined,
+  storageKey: undefined,
   status: "registered",
   expiresAt: undefined,
 };
@@ -69,6 +73,7 @@ export function evolveUpload(state: UploadState, event: UploadEvent): UploadStat
         kind: event.payload.kind,
         declaredContentType: event.payload.declaredContentType,
         declaredByteSize: event.payload.declaredByteSize,
+        storageKey: event.payload.storageKey,
         status: "registered",
         expiresAt: event.payload.expiresAt,
       };
@@ -196,6 +201,10 @@ export function decideFinalize(
       {
         type: "UploadReceived",
         payload: {
+          uploadId: state.uploadId ?? "",
+          ownerUserId: state.ownerUserId ?? "",
+          kind: state.kind ?? "image",
+          storageKey: state.storageKey ?? "",
           byteSize: input.byteSize,
           contentType: input.contentType,
           checksum: input.checksum,

@@ -1,5 +1,6 @@
 import {
   DeleteObjectCommand,
+  GetObjectCommand,
   HeadObjectCommand,
   S3Client,
   type S3ClientConfig,
@@ -46,6 +47,18 @@ export interface StorageClient {
    * @returns A URL permitting one PUT to that key until it expires.
    */
   presignUpload(key: string, contentType: string): Promise<string>;
+  /**
+   * Authorise reading one object for a short while.
+   *
+   * Needed because the media checker does not hold storage credentials of its
+   * own — it points a decoder at a URL, and the decoder asks for whichever
+   * ranges of the file it needs.
+   *
+   * @param key - The object to read.
+   * @param expiresInSeconds - How long the link works. Short by intent.
+   * @returns A URL permitting reads of that one object until it expires.
+   */
+  presignDownload(key: string, expiresInSeconds?: number): Promise<string>;
   /**
    * Ask storage what is actually at a key.
    *
@@ -99,6 +112,12 @@ export function createStorageClient(config: StorageConfig): StorageClient {
       });
 
       return getSignedUrl(client, command, { expiresIn: config.uploadUrlTtlSeconds });
+    },
+
+    async presignDownload(key, expiresInSeconds = config.uploadUrlTtlSeconds) {
+      return getSignedUrl(client, new GetObjectCommand({ Bucket: config.bucket, Key: key }), {
+        expiresIn: expiresInSeconds,
+      });
     },
 
     async head(key) {

@@ -29,10 +29,33 @@ export interface PublisherOptions {
   readonly pool: pg.Pool;
   readonly producer: EventProducer;
   readonly logger?: Logger;
-  /** Which stream categories publish, and to which boundary topic. */
-  readonly routes: Readonly<Record<string, string>>;
+  /**
+   * Which stream categories publish, where to, and how.
+   *
+   * A route is not merely a destination: it carries the translation from
+   * internal history into the boundary contract. A category with no route
+   * publishes nothing, so publication stays opt-in.
+   */
+  readonly routes: Readonly<Record<string, Route>>;
   readonly publisherName?: string;
   readonly maxEvents?: number;
+}
+
+/**
+ * What a published message looks like for one stream category.
+ *
+ * The translator is the point. A domain event is internal aggregate history
+ * and belongs to the write side; an integration event is a promise to whoever
+ * consumes it. Copying one into the other couples every consumer to our
+ * internals, and publishes fields that exist in history for reasons no
+ * consumer needs — which is what ADR-014 asks us to avoid.
+ *
+ * Returning undefined publishes nothing, so a category can route some of its
+ * event types and stay silent about the rest.
+ */
+export interface Route {
+  readonly boundary: string;
+  translate(event: { type: string; payload: unknown }): unknown | undefined;
 }
 
 export interface PublishResult {
@@ -138,12 +161,22 @@ export async function publishPendingEvents({
     }
 
     const { category, aggregateId } = parsed;
-    const boundary = routes[category];
+    const route = routes[category];
 
     // A category with no route publishes nothing. Publication is opt-in: a new
     // aggregate should not start broadcasting its internal history to every
     // consumer merely because it was created.
-    if (boundary === undefined) {
+    if (route === undefined) {
+      position = commitPosition;
+      unrecordedSkip = commitPosition;
+      continue;
+    }
+
+    const translated = route.translate({ type: event.type, payload: event.data });
+
+    // A routed category may still decline an individual event type. Silence is
+    // a deliberate answer, not a gap.
+    if (translated === undefined) {
       position = commitPosition;
       unrecordedSkip = commitPosition;
       continue;
@@ -166,12 +199,12 @@ export async function publishPendingEvents({
       ...(metadata?.traceId === undefined ? {} : { correlationId: metadata.traceId }),
       ...(metadata?.causationId === undefined ? {} : { causationId: metadata.causationId }),
       ...(metadata?.actorUserId === undefined ? {} : { actor: { userId: metadata.actorUserId } }),
-      payload: event.data,
+      payload: translated,
     };
 
     await producer.publish([
       {
-        topic: topicName(boundary),
+        topic: topicName(route.boundary),
         partitionKey: partitionKeyForAggregate(aggregateId),
         envelope,
       },

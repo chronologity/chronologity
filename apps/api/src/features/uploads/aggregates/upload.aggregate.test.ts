@@ -30,6 +30,14 @@ const registered = (expiresAt = later): UploadEvent => ({
   },
 });
 
+/** The identity every UploadReceived now repeats from registration. */
+const identity = {
+  uploadId: "u1",
+  ownerUserId: OWNER,
+  kind: "image" as const,
+  storageKey: "uploads/owner-1/u1/original",
+};
+
 const stateAfter = (...events: UploadEvent[]): UploadState =>
   events.reduce(evolveUpload, initialUploadState);
 
@@ -53,6 +61,7 @@ describe("evolveUpload", () => {
     const state = stateAfter(registered(), {
       type: "UploadReceived",
       payload: {
+        ...identity,
         byteSize: 2048,
         contentType: "image/jpeg",
         checksum: "abc",
@@ -142,6 +151,19 @@ describe("decideFinalize", () => {
     assert.equal(decision.events[0]?.type, "UploadReceived");
   });
 
+  it("says which object arrived, so the event can be read on its own", () => {
+    const decision = decideFinalize(stateAfter(registered()), input);
+
+    assert.ok(decision.ok);
+
+    const event = decision.events[0];
+
+    assert.equal(event?.type, "UploadReceived");
+    assert.equal(event.payload.uploadId, "u1");
+    assert.equal(event.payload.ownerUserId, OWNER);
+    assert.equal(event.payload.storageKey, "uploads/owner-1/u1/original");
+  });
+
   it("records what storage reported, not what was declared", () => {
     const decision = decideFinalize(stateAfter(registered()), input);
 
@@ -199,6 +221,7 @@ describe("decideFinalize", () => {
     const state = stateAfter(registered(), {
       type: "UploadReceived",
       payload: {
+        ...identity,
         byteSize: 2048,
         contentType: "image/jpeg",
         checksum: "abc",
@@ -243,6 +266,7 @@ describe("decideFail", () => {
     const state = stateAfter(registered(), {
       type: "UploadReceived",
       payload: {
+        ...identity,
         byteSize: 2048,
         contentType: "image/jpeg",
         checksum: "abc",
@@ -284,6 +308,7 @@ describe("decideDelete", () => {
     const state = stateAfter(registered(), {
       type: "UploadReceived",
       payload: {
+        ...identity,
         byteSize: 2048,
         contentType: "image/jpeg",
         checksum: "abc",

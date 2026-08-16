@@ -41,6 +41,11 @@ const CATEGORY = `pubtest${RUN.replace(/-/g, "")}`;
 const BOUNDARY = `pubtest-${RUN}`;
 const TOPIC = topicName(BOUNDARY);
 
+// Publishes every event it is given, unchanged. These tests are about the
+// publisher's own machinery — checkpoints, ordering, delivery — not about any
+// feature's choice of what to promise, which each feature states for itself.
+const passthrough = { boundary: BOUNDARY, translate: (e: { payload: unknown }) => e.payload };
+
 /** The projection suite writes its own history, so it cannot disturb publication. */
 const PROJECTION_CATEGORY = `projtest${RUN.replace(/-/g, "")}`;
 
@@ -162,7 +167,7 @@ describe("asynchronous publication path", () => {
           client: eventStore.client,
           pool: database.pool,
           producer,
-          routes: { [CATEGORY]: BOUNDARY },
+          routes: { [CATEGORY]: passthrough },
           publisherName,
           maxEvents: 500,
         }),
@@ -210,7 +215,7 @@ describe("asynchronous publication path", () => {
 
   it("resumes from its checkpoint rather than republishing history", async () => {
     const publisherName = `test-${randomUUID()}`;
-    const routes = { [CATEGORY]: BOUNDARY };
+    const routes = { [CATEGORY]: passthrough };
 
     await appendEvents({
       client: eventStore.client,
