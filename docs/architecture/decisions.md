@@ -2302,3 +2302,37 @@ Making this real required `UploadReceived` to say which upload it concerned. It 
 ## Consequences
 
 Adding a field to an aggregate no longer risks publishing it. Publishing something new is an edit to a feature's own route, which is where the decision belongs.
+
+---
+
+# ADR-088 — Run Integration Tests in CI Rather Than on a Developer Machine
+
+**Status:** Accepted
+
+**Supersedes the local-first position taken when CI was introduced in ADR-077.**
+
+## Decision
+
+Integration tests are run and judged by CI. They remain runnable locally, and running a single suite while working on it is expected — but the full suite is not something a developer machine is required to carry, and CI's result is what decides whether a change is good.
+
+## Alternatives Considered
+
+Keeping the full suite local, which was the position held until now. Reducing what runs locally — making ClickHouse opt-in, capping container memory — which frees roughly a gigabyte inside the virtual machine.
+
+Switching container runtimes: Docker Desktop reserves its memory up front and cannot release it, so a laptop loses that allocation whether containers are busy or idle, while alternatives allocate dynamically.
+
+## Rationale
+
+Both alternatives treat the workload, and the workload is not the problem. Chronologity's stack is PostgreSQL, EventStoreDB, Kafka, object storage and a mail sink today; the roadmap adds four more workers, the feed aggregator, ClickHouse in earnest, and eventually mobile and web development servers. A developer machine runs out before that list does, and the next sub-phase — video transcoding — consumes whatever headroom a tuning change buys.
+
+What settled it is how the failures present. When object storage exhausted the container disk, half the suite reported as failed or skipped: suites that had passed minutes earlier, and whole files that never started. That is indistinguishable at a glance from a regression, and time spent deciding which it was is time the tests cost rather than save. A test environment that fails for reasons unrelated to the code under test is not a test environment.
+
+A CI run also starts from nothing every time, which removes accumulation as a category of problem. Two separate incidents came from state building up between runs: object storage growing by a gigabyte per run, and event history growing until a projection test took a hundred seconds.
+
+## Consequences
+
+Feedback on integration behaviour arrives in minutes rather than seconds, and work can be handed over having passed unit tests and typechecking but not yet the integration suite. That must be stated plainly when it happens rather than glossed as verified.
+
+CI becomes load-bearing, so it must be maintained as real infrastructure: it needs every system dependency the application has, and a failure in it blocks work rather than being noise to route around.
+
+Running a single suite locally while iterating remains worthwhile and is not discouraged. The claim being retired is that a developer machine should be able to run everything at once.

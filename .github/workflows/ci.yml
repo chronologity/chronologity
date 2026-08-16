@@ -1,8 +1,22 @@
 name: CI
 
-# Verification, not deployment. Where Chronologity eventually deploys is an open
-# question the roadmap leaves to the production-infrastructure phase; where its
-# tests run should not wait on that answer.
+# Where the test suite is decided.
+#
+# Integration tests run here rather than on a developer's machine, and that is
+# a deliberate reversal. Running the full stack locally means PostgreSQL,
+# EventStoreDB, Kafka, object storage and a mail sink competing with the editor
+# and the tests themselves; the roadmap adds four more workers, a second
+# application, and eventually ClickHouse on top of that. A laptop runs out
+# first, and when it does the failures look like code failures — as they did
+# when Docker exhausted its disk and half the suite reported as failed or
+# skipped.
+#
+# A run here starts from nothing every time, which also removes state
+# accumulating between runs as a category of problem.
+#
+# Verification, not deployment. Where Chronologity eventually deploys is an
+# open question the roadmap leaves to the production-infrastructure phase;
+# where its tests run should not wait on that answer.
 
 on:
   push:
@@ -34,6 +48,13 @@ jobs:
           node-version: 24
           cache: pnpm
 
+      # Media checking opens uploaded files with a decoder. It is a system
+      # dependency rather than a bundled package (ADR-086): it is pointed at
+      # files strangers upload, so it should be a version the operating system
+      # keeps patched.
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
       - name: Install
         run: pnpm install --frozen-lockfile
 
@@ -51,13 +72,18 @@ jobs:
       - name: Unit tests
         run: pnpm test
 
-      # PostgreSQL, EventStoreDB, Kafka, ClickHouse, and Mailpit, from the same
-      # compose file used locally. `--wait` blocks until every healthcheck
-      # passes, so a test failing here is a real failure rather than a service
-      # that had not finished starting. The script seeds .env from .env.example,
-      # whose defaults match the compose file.
+      # The same compose file used locally, so there is one definition of what
+      # the stack is. `--wait` blocks until every healthcheck passes, so a test
+      # failing here is a real failure rather than a service that had not
+      # finished starting. The script seeds .env from .env.example, whose
+      # defaults match the compose file.
       - name: Start infrastructure
         run: pnpm infra:up
+
+      # Proves the services are not merely running but actually working — a
+      # real write and read against each one, including a presigned upload.
+      - name: Validate infrastructure
+        run: pnpm infra:validate
 
       - name: Integration tests
         run: pnpm test:integration
