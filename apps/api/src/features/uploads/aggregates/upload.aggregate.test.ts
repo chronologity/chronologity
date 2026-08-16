@@ -75,7 +75,12 @@ describe("evolveUpload", () => {
   it("moves to failed", () => {
     const state = stateAfter(registered(), {
       type: "UploadFailed",
-      payload: { reason: "too large", failedAt: now.toISOString() },
+      payload: {
+        reason: "too large",
+        category: "permanent",
+        attempt: 1,
+        failedAt: now.toISOString(),
+      },
     });
 
     assert.equal(state.status, "failed");
@@ -235,7 +240,12 @@ describe("decideFinalize", () => {
   it("refuses to receive an upload already failed", () => {
     const state = stateAfter(registered(), {
       type: "UploadFailed",
-      payload: { reason: "too large", failedAt: now.toISOString() },
+      payload: {
+        reason: "too large",
+        category: "permanent",
+        attempt: 1,
+        failedAt: now.toISOString(),
+      },
     });
 
     assert.deepEqual(decideFinalize(state, input), { ok: false, reason: "already_failed" });
@@ -252,7 +262,13 @@ describe("decideFinalize", () => {
 });
 
 describe("decideFail", () => {
-  const input = { actorUserId: OWNER, reason: "That file is larger than the limit", now };
+  const input = {
+    actorUserId: OWNER,
+    reason: "That file is larger than the limit",
+    category: "permanent" as const,
+    attempt: 1,
+    now,
+  };
 
   it("refuses an upload", () => {
     const decision = decideFail(stateAfter(registered()), input);
@@ -280,7 +296,12 @@ describe("decideFail", () => {
   it("refuses to fail the same upload twice", () => {
     const state = stateAfter(registered(), {
       type: "UploadFailed",
-      payload: { reason: "too large", failedAt: now.toISOString() },
+      payload: {
+        reason: "too large",
+        category: "permanent",
+        attempt: 1,
+        failedAt: now.toISOString(),
+      },
     });
 
     assert.deepEqual(decideFail(state, input), { ok: false, reason: "already_failed" });

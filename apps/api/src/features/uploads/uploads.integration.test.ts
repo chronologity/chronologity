@@ -5,6 +5,7 @@ import { CreateBucketCommand, S3Client } from "@aws-sdk/client-s3";
 import type { FastifyInstance } from "fastify";
 import type { AppConfig } from "../../config/app-config.js";
 import { createEmailClient } from "../../integrations/email/email-client.js";
+import { createMetadataClient } from "../../integrations/metadata/metadata-client.js";
 import {
   createStorageClient,
   type StorageClient,
@@ -159,6 +160,7 @@ describe("uploads", () => {
       client: eventStore.client,
       pool: database.pool,
       storage,
+      metadata: createMetadataClient(),
       limits: config.uploadLimits,
     };
 

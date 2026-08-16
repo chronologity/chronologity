@@ -5,6 +5,7 @@ import { createEventStore } from "./lib/eventstore/client.js";
 import { createMessaging } from "./lib/messaging/kafka.js";
 import { createEmailClient } from "./integrations/email/email-client.js";
 import { createStorageClient } from "./integrations/storage/storage-client.js";
+import { createMetadataClient } from "./integrations/metadata/metadata-client.js";
 import { loadBreachedPasswordIndex } from "./lib/auth/breached-passwords.js";
 import { buildApp } from "./server/app.js";
 import { startServer } from "./server/server.js";
@@ -31,6 +32,9 @@ async function main(): Promise<void> {
 
   const email = createEmailClient(config.email);
   const storage = createStorageClient(config.storage);
+  // Built here so the wiring is uniform, though the HTTP process never opens a
+  // file: authorising and verifying an upload does not require reading it.
+  const metadata = createMetadataClient();
 
   const app = await buildApp({
     config,
@@ -54,6 +58,7 @@ async function main(): Promise<void> {
       client: eventStore.client,
       pool: database.pool,
       storage,
+      metadata,
       limits: config.uploadLimits,
     },
   });

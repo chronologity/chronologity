@@ -20,6 +20,10 @@ interface UploadRow {
   content_type: string | null;
   checksum: string | null;
   failure_reason: string | null;
+  media_kind: string | null;
+  width: number | null;
+  height: number | null;
+  duration_seconds: string | null;
   registered_at: Date;
   expires_at: Date;
   received_at: Date | null;
@@ -46,6 +50,12 @@ function toUpload(row: UploadRow): Upload {
     contentType: row.content_type,
     checksum: row.checksum,
     failureReason: row.failure_reason,
+    mediaKind: row.media_kind === null ? null : (row.media_kind as MediaKind),
+    width: row.width,
+    height: row.height,
+    // numeric arrives as a string, since it can hold more precision than a
+    // number. Durations never will, so converting here is safe.
+    durationSeconds: row.duration_seconds === null ? null : Number(row.duration_seconds),
     registeredAt: row.registered_at.toISOString(),
     expiresAt: row.expires_at.toISOString(),
     receivedAt: row.received_at?.toISOString() ?? null,
@@ -54,6 +64,7 @@ function toUpload(row: UploadRow): Upload {
 
 const COLUMNS = `upload_id, kind, state, declared_content_type, declared_byte_size,
                  byte_size, content_type, checksum, failure_reason,
+                 media_kind, width, height, duration_seconds,
                  registered_at, expires_at, received_at`;
 
 /**
@@ -127,22 +138,93 @@ export async function recordUploadReceived(
 }
 
 /**
+ * Record what opening the file established.
+ *
+ * @param tx - The caller's transaction.
+ * @param input - What the decoder found and when.
+ * @returns Nothing. The measured kind is written to `media_kind` rather than
+ *   over `kind`, which keeps what the uploader declared alongside what was
+ *   actually found.
+ */
+export async function recordUploadChecked(
+  tx: Transaction,
+  input: {
+    uploadId: string;
+    kind: MediaKind;
+    codec: string;
+    container: string;
+    width: number;
+    height: number;
+    durationSeconds: number | undefined;
+    hasAudio: boolean;
+    checkedAt: Date;
+  },
+): Promise<void> {
+  await tx.query(
+    `UPDATE uploads
+        SET state = 'ready', media_kind = $2, codec = $3, container = $4,
+            width = $5, height = $6, duration_seconds = $7, has_audio = $8,
+            checked_at = $9, failure_reason = NULL, failure_category = NULL,
+            updated_at = now()
+      WHERE upload_id = $1`,
+    [
+      input.uploadId,
+      input.kind,
+      input.codec,
+      input.container,
+      input.width,
+      input.height,
+      input.durationSeconds ?? null,
+      input.hasAudio,
+      input.checkedAt.toISOString(),
+    ],
+  );
+}
+
+/**
+ * Count an attempt at checking a file.
+ *
+ * Incremented before the work rather than after, so a checker that crashes
+ * mid-decode still leaves evidence it tried. Otherwise a file that reliably
+ * kills the decoder would be retried forever, each attempt leaving no trace.
+ *
+ * @param tx - The caller's transaction.
+ * @param uploadId - Which upload.
+ * @param at - When the attempt started.
+ * @returns How many attempts have now been made, including this one.
+ */
+export async function countAttempt(tx: Transaction, uploadId: string, at: Date): Promise<number> {
+  const { rows } = await tx.query<{ attempts: number }>(
+    `UPDATE uploads SET attempts = attempts + 1, last_attempt_at = $2, updated_at = now()
+      WHERE upload_id = $1
+      RETURNING attempts`,
+    [uploadId, at.toISOString()],
+  );
+
+  return rows[0]?.attempts ?? 0;
+}
+
+/**
  * Record a refused upload.
  *
  * @param tx - The caller's transaction.
  * @param uploadId - Which upload.
  * @param reason - Why, in terms safe to show its owner.
+ * @param category - Whether trying again could ever help. Recorded so that a
+ *   decision to stop retrying is auditable rather than re-derived.
  * @returns Nothing.
  */
 export async function recordUploadFailed(
   tx: Transaction,
   uploadId: string,
   reason: string,
+  category: "transient" | "permanent" = "permanent",
 ): Promise<void> {
   await tx.query(
-    `UPDATE uploads SET state = 'failed', failure_reason = $2, updated_at = now()
+    `UPDATE uploads
+        SET state = 'failed', failure_reason = $2, failure_category = $3, updated_at = now()
       WHERE upload_id = $1`,
-    [uploadId, reason],
+    [uploadId, reason, category],
   );
 }
 

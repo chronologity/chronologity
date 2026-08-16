@@ -16,6 +16,7 @@
     "migrate": "node dist/cli/migrate.js",
     "start": "node dist/index.js",
     "start:publisher": "node dist/workers/event-publisher/index.js",
+    "start:media": "node dist/workers/media/index.js",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:unit": "vitest run",

@@ -163,7 +163,15 @@ async function refuse(
   const { uploadId, actorUserId } = command.payload;
 
   const { state } = await loadUpload(deps, uploadId);
-  const decision = decideFail(state, { actorUserId, reason, now: at });
+  // Permanent, and attempt one: every refusal here is a statement about the
+  // object that arrived, and the object does not change.
+  const decision = decideFail(state, {
+    actorUserId,
+    reason,
+    category: "permanent",
+    attempt: 1,
+    now: at,
+  });
 
   if (!decision.ok) {
     return;

@@ -1,4 +1,5 @@
 import type { MediaKind } from "@chronologity/contracts";
+import type { UploadChecked } from "../events/upload-checked.event.js";
 import type { UploadDeleted } from "../events/upload-deleted.event.js";
 import type { UploadFailed } from "../events/upload-failed.event.js";
 import type { UploadReceived } from "../events/upload-received.event.js";
@@ -16,13 +17,15 @@ import type { UploadRegistered } from "../events/upload-registered.event.js";
  * publication (`media.md:456`), and binding an Upload to a Moment at this
  * point would make drafts and abandonment impossible to represent.
  *
- * This sub-phase models four states. The validating and processing states in
- * the canonical list arrive with the worker that moves through them.
+ * Arrival and readiness are deliberately different states. `received` means
+ * the bytes are there and their size was checked; `ready` means the file was
+ * opened and is what it claimed to be. Nothing should attach media to anything
+ * until `ready`, or a Moment could reference a file nobody has looked at.
  */
 
 export const UPLOAD_CATEGORY = "upload";
 
-export type UploadStatus = "registered" | "received" | "failed" | "deleted";
+export type UploadStatus = "registered" | "received" | "ready" | "failed" | "deleted";
 
 export interface UploadState {
   readonly exists: boolean;
@@ -39,7 +42,8 @@ export interface UploadState {
   readonly expiresAt: string | undefined;
 }
 
-export type UploadEvent = UploadRegistered | UploadReceived | UploadFailed | UploadDeleted;
+export type UploadEvent =
+  UploadRegistered | UploadReceived | UploadChecked | UploadFailed | UploadDeleted;
 
 export const initialUploadState: UploadState = {
   exists: false,
@@ -81,6 +85,12 @@ export function evolveUpload(state: UploadState, event: UploadEvent): UploadStat
     case "UploadReceived":
       return { ...state, status: "received" };
 
+    case "UploadChecked":
+      // The decoder's answer replaces the uploader's claim. A file declared as
+      // a photograph that turns out to be one is unremarkable; the point is
+      // that from here the recorded kind is the measured one.
+      return { ...state, status: "ready", kind: event.payload.kind };
+
     case "UploadFailed":
       return { ...state, status: "failed" };
 
@@ -98,6 +108,8 @@ export type UploadRejection =
   | "not_owner"
   | "registration_expired"
   | "already_received"
+  | "already_checked"
+  | "not_received"
   | "already_failed"
   | "already_deleted";
 
@@ -216,6 +228,72 @@ export function decideFinalize(
 }
 
 /**
+ * Record that a file was opened and found acceptable.
+ *
+ * The judgement itself happens outside: the decoder reports, the rules decide,
+ * and this records the outcome. Keeping them apart means the rules can be
+ * tested without a file and this can be tested without a decoder.
+ *
+ * @param state - The Upload's current state.
+ * @param input - What the decoder found, and the instant.
+ * @returns The event to append, or a refusal. Checking an upload that never
+ *   arrived is refused: there would be nothing to open. Checking one already
+ *   checked is refused as `already_checked`, which callers should treat as
+ *   success — at-least-once delivery means the same file will be offered
+ *   twice, and that is ordinary rather than exceptional.
+ */
+export function decideCheck(
+  state: UploadState,
+  input: {
+    kind: MediaKind;
+    codec: string;
+    container: string;
+    width: number;
+    height: number;
+    durationSeconds: number | undefined;
+    hasAudio: boolean;
+    now: Date;
+  },
+): UploadDecision {
+  if (!state.exists || state.status === "deleted") {
+    return { ok: false, reason: "upload_not_found" };
+  }
+
+  if (state.status === "ready") {
+    return { ok: false, reason: "already_checked" };
+  }
+
+  if (state.status === "failed") {
+    return { ok: false, reason: "already_failed" };
+  }
+
+  // Nothing has arrived, so there is nothing to open. Reachable if a note is
+  // delivered before the arrival it describes was recorded.
+  if (state.status !== "received") {
+    return { ok: false, reason: "not_received" };
+  }
+
+  return {
+    ok: true,
+    events: [
+      {
+        type: "UploadChecked",
+        payload: {
+          kind: input.kind,
+          codec: input.codec,
+          container: input.container,
+          width: input.width,
+          height: input.height,
+          durationSeconds: input.durationSeconds,
+          hasAudio: input.hasAudio,
+          checkedAt: input.now.toISOString(),
+        },
+      },
+    ],
+  };
+}
+
+/**
  * Refuse an upload.
  *
  * @param state - The Upload's current state.
@@ -227,7 +305,13 @@ export function decideFinalize(
  */
 export function decideFail(
   state: UploadState,
-  input: { actorUserId: string; reason: string; now: Date },
+  input: {
+    actorUserId: string;
+    reason: string;
+    category: "transient" | "permanent";
+    attempt: number;
+    now: Date;
+  },
 ): UploadDecision {
   const guard = guardOwnership(state, input.actorUserId);
 
@@ -244,7 +328,12 @@ export function decideFail(
     events: [
       {
         type: "UploadFailed",
-        payload: { reason: input.reason, failedAt: input.now.toISOString() },
+        payload: {
+          reason: input.reason,
+          category: input.category,
+          attempt: input.attempt,
+          failedAt: input.now.toISOString(),
+        },
       },
     ],
   };

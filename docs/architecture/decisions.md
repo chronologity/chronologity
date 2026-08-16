@@ -2240,3 +2240,65 @@ An Upload belongs to a User rather than a Moment, because media exists before pu
 Storage keys are recorded in `UploadRegistered` and read back rather than recomputed. A key derived by a rule would orphan every existing object the day the rule changed.
 
 An upload's bytes are the one thing here not covered by ADR-080's rule against personal data in event history: history holds the key, not the media, and deleting the object leaves history describing something that no longer exists — which is the intended shape for erasure.
+
+---
+
+# ADR-086 — Establish What a File Is by Opening It, Not by Asking
+
+**Status:** Accepted
+
+## Decision
+
+An uploaded file is opened by a decoder before it may be used. What the decoder finds — the kind of media, its dimensions, its length — is what gets recorded. What the uploader declared is kept alongside it as a claim, not as a fact.
+
+An upload therefore has two distinct states after arrival: `received`, meaning the bytes are present and their size was checked, and `ready`, meaning the file was opened and is what it claimed to be. **Nothing may attach media to a Moment before `ready`.**
+
+The ninety-second video limit is enforced against the measured length.
+
+## Alternatives Considered
+
+Trusting the content type storage reports, which is what ADR-085 had to settle for. The problem it left open was recorded honestly at the time: storage repeats the label the uploader attached, so a client that lies consistently is believed. That is closed here.
+
+## Rationale
+
+Asking storage what a file is amounts to asking the uploader to confirm their own story. Only a decoder can distinguish a photograph from a PDF named `photo.jpg`, and only a decoder can measure a video's length — which is why the ninety-second rule could not be enforced authoritatively until now.
+
+The checking happens in a separate process, fed by an integration event, because opening a file takes seconds and nobody should wait on that while uploading. That in turn is why arrival and readiness must be different states: an upload that has arrived is not yet known to be usable, and collapsing the two would let a Moment reference a file nobody has looked at.
+
+Two failure categories are recorded rather than inferred. Storage briefly unreachable resolves itself; a ninety-four-second video will be ninety-four seconds long forever, and retrying it burns capacity to reach the same answer. Attempts are counted before the work rather than after, so a file that reliably kills the decoder still leaves evidence it was tried.
+
+## Consequences
+
+Media processing requires ffprobe on the worker's PATH, installed by the operating system rather than bundled as a dependency: the decoder is pointed at files strangers upload, which makes it exposed enough to want a version that receives security updates.
+
+Phase 5H must require `ready` when attaching media to a Moment. This is the constraint that makes the state distinction worth having, and it is recorded here so it is not rediscovered there.
+
+Embedded GPS metadata is deliberately not extracted, even though the decoder could. Location data must pass through privacy rules and the owner's consent, neither of which exists until Phase 5F, and holding sensitive data with nowhere safe to put it is worse than not having it.
+
+---
+
+# ADR-087 — Translate Domain Events Into Integration Events Deliberately
+
+**Status:** Accepted
+
+## Decision
+
+Each feature declares what it publishes and what that message contains. A stream category with no declared route publishes nothing; a routed category may still decline individual event types.
+
+The Uploads feature publishes arrival only, carrying the upload's identifier, its owner, the declared kind, and where the bytes are. Registration, failure, and deletion stay internal.
+
+## Alternatives Considered
+
+Copying domain events onto the topic unchanged, which is what the publisher actually did. Its own header comment claimed the translation was "deliberate rather than a passthrough", and the code below set `payload: event.data`. Nobody noticed because no category was routed until this phase needed one.
+
+## Rationale
+
+A message on a topic becomes a contract the moment anything consumes it. Publishing internal history verbatim means every field added to an aggregate silently becomes public, and every consumer couples to the write side's internals — which ADR-014 asks us to avoid and which the comment claimed we were avoiding.
+
+What crosses the boundary is therefore chosen. An upload's declared size and content type exist in history so a mismatch between claim and object is answerable later; that is auditing, not something a consumer should act on, so it stays behind.
+
+Making this real required `UploadReceived` to say which upload it concerned. It previously carried only measurements, relying on the stream name for identity — a weakness independent of publishing, since an event that cannot be read on its own forces every reader to replay the stream to interpret it.
+
+## Consequences
+
+Adding a field to an aggregate no longer risks publishing it. Publishing something new is an edit to a feature's own route, which is where the decision belongs.

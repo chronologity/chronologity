@@ -22,11 +22,19 @@ export type MediaKind = z.infer<typeof mediaKindSchema>;
 /**
  * Where an Upload has got to.
  *
- * `registered` means authorised but not yet arrived; `received` means the
- * server has looked at the stored object and accepted it. The processing
- * states that sit between them arrive with the media worker.
+ * `registered` means authorised but not yet arrived. `received` means the
+ * bytes are there and their size was checked, but nobody has opened the file —
+ * so it is not yet safe to use. `ready` means the file was opened and is what
+ * it claimed to be. Nothing should attach media to anything until `ready`.
  */
-export const uploadStateSchema = z.enum(["registered", "received", "failed", "deleted"]);
+export const uploadStateSchema = z.enum([
+  "registered",
+  "received",
+  "checking",
+  "ready",
+  "failed",
+  "deleted",
+]);
 
 export type UploadState = z.infer<typeof uploadStateSchema>;
 
@@ -91,6 +99,17 @@ export const uploadSchema = z.object({
   byteSize: z.number().int().nonnegative().nullable(),
   contentType: z.string().nullable(),
   checksum: z.string().nullable(),
+  /**
+   * What opening the file established, once it has been opened.
+   *
+   * Distinct from the declared fields above, which are what the uploader said.
+   * These are what a decoder found, and they are the ones worth trusting.
+   */
+  mediaKind: mediaKindSchema.nullable(),
+  width: z.number().int().positive().nullable(),
+  height: z.number().int().positive().nullable(),
+  /** Null for a photograph, which has no length. */
+  durationSeconds: z.number().nonnegative().nullable(),
   /** Why an upload failed, in terms safe to show its owner. */
   failureReason: z.string().nullable(),
   registeredAt: timestampSchema,
