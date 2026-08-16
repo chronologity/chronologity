@@ -180,6 +180,24 @@ export async function findUserIdForIdentity(
 }
 
 /**
+ * Whether an account exists at all.
+ *
+ * Unlike `readPublicUser` this does not exclude deactivated accounts. Granting
+ * or removing a role on a deactivated account is a legitimate administrative
+ * act — a role should not silently survive because the account was dormant
+ * when someone tried to remove it.
+ *
+ * @param pool - Read-only use.
+ * @param userId - Which User.
+ * @returns True if there is such an account, in any state.
+ */
+export async function userExists(pool: pg.Pool, userId: string): Promise<boolean> {
+  const { rows } = await pool.query(`SELECT 1 FROM users WHERE user_id = $1`, [userId]);
+
+  return rows.length > 0;
+}
+
+/**
  * Read a User as anyone may see them.
  *
  * @param pool - Read-only use.

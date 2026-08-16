@@ -44,6 +44,10 @@ async function main(): Promise<void> {
       pool: database.pool,
       minimumAgeYears: config.minimumAgeYears,
     },
+    authorization: {
+      client: eventStore.client,
+      pool: database.pool,
+    },
   });
 
   await startServer({

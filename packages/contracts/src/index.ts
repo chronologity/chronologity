@@ -84,6 +84,23 @@ export {
   type UpdateProfileRequest,
 } from "./users.js";
 export {
+  capabilitiesSchema,
+  grantableRoleSchema,
+  permissionSchema,
+  PERMISSIONS,
+  roleAssignmentSchema,
+  roleChangeRequestSchema,
+  roleSchema,
+  userRolesSchema,
+  type Capabilities,
+  type GrantableRole,
+  type Permission,
+  type Role,
+  type RoleAssignment,
+  type RoleChangeRequest,
+  type UserRoles,
+} from "./authorization.js";
+export {
   actorSchema,
   envelopeOf,
   eventEnvelopeSchema,

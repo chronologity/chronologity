@@ -1892,3 +1892,79 @@ Refusals stay silent about the number because an age gate that states its own an
 ## Consequences
 
 Every account created from here carries a birthdate, and erasure work in Phase 5R must delete `user_restricted_data` explicitly rather than relying on a cascade from an event stream that never held it. Raising the minimum does not retroactively remove accounts admitted under a lower one; deciding what to do about them is a policy question this decision deliberately leaves open.
+
+---
+
+# ADR-073 — Read Roles Per Request Rather Than Carrying Them in Tokens
+
+**Status:** Accepted
+
+## Decision
+
+Access tokens carry no roles and no permissions. Every privileged check reads current roles from `authorization_user_roles` at the moment of the request.
+
+## Alternatives Considered
+
+Embedding roles as token claims, which `docs/architecture/authorization.md:446-457` permits provided claims expire quickly, sensitive actions re-evaluate, and the feed aggregator does not trust stale privilege indefinitely.
+
+## Rationale
+
+That permission comes with three conditions, and meeting all three costs more than the lookup it saves. With a ten-minute access token, a revoked moderator keeps their authority for up to ten minutes; narrowing that means shortening token life for every request, privileged or not. The alternative — re-querying for "sensitive" actions — reintroduces the lookup while leaving a second, staler path beside it, and requires someone to correctly classify every future action.
+
+The same document calls a token claim "a cache of authorization state, not the source of truth". The simplest way to honour that is not to cache it. One indexed lookup on a primary key, on requests that already make several, is not the bottleneck worth optimising before it is measured.
+
+## Consequences
+
+Revocation is immediate: removing a role stops the next request. Every privileged request costs one additional query, which is a cost to revisit if measurement ever shows it matters — bulk read authorization for Timeline queries will need a different representation regardless, and that is a separate decision.
+
+---
+
+# ADR-074 — Bootstrap the First Administrator Through a CLI Command
+
+**Status:** Accepted
+
+## Decision
+
+The first administrator is granted by `pnpm --filter @chronologity/api grant-role --handle <handle> --role administrator`, run against the database by whoever holds deployment access. The command uses the same aggregate, read model, and audit trail as the HTTP route, recording no acting User and a reason.
+
+## Alternatives Considered
+
+An environment variable naming an account to be promoted at startup, and a seeded administrator account created by a migration.
+
+## Rationale
+
+Role assignment requires `admin:user-role-manage`, which only an administrator holds, so the first one cannot be made through the permission system. Something outside it must act.
+
+A CLI locates that authority in database and deployment access — the same access that could rewrite the roles table by hand. It grants nothing that was not already possible. An environment variable instead makes a _running process_ capable of conferring privilege, so a leaked, mistyped, or stale value becomes a silent escalation that nobody performs and nobody reviews. A seeded account is worse: a known administrator identity exists before anyone has decided who should hold it.
+
+## Consequences
+
+Bootstrapping requires shell access to an environment that can reach the database, which is a deliberate constraint rather than an inconvenience to design around. The grant is audited like any other, with a null actor, so "who made the first administrator" is answerable even though no User did it.
+
+---
+
+# ADR-075 — Three Roles at Launch, With No Implicit Hierarchy
+
+**Status:** Accepted
+
+## Decision
+
+Chronologity launches with `user`, `moderator`, and `administrator`. `user` is every account's baseline and is never stored. An administrator does not implicitly hold moderator permissions; someone needing both is granted both.
+
+The canonical permission registry lives in `packages/contracts` and ships only permissions something enforces — at present `admin:user-role-manage`. The role-to-permission mapping stays server-side.
+
+## Alternatives Considered
+
+Also reserving `support` and `security` roles now, and registering the full permission vocabulary from `authorization.md:144-158` in advance.
+
+## Rationale
+
+`authorization.md:136-138` says to introduce a role only when a concrete responsibility requires it and to avoid role proliferation. Support and security have no responsibilities yet, so defining them now would mean inventing permissions nobody checks and boundaries nobody enforces.
+
+The same reasoning governs the registry. Its purpose is to stop identifiers drifting, and it does that whether it holds one entry or forty; registering `moment:create` before Moments exist would fix a name the implementing phase has not yet earned the right to choose. Each phase adds its own.
+
+Refusing implicit hierarchy follows `authorization.md:176-184`: explicit permission sets are safer than an inheritance chain the permission model has not defined.
+
+## Consequences
+
+`moderator` grants nothing until moderation ships in a later phase. The role boundary exists so that privileged capability has somewhere to land that is not `administrator`, which is the point of defining it now rather than the cost.

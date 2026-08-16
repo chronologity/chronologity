@@ -10,6 +10,7 @@
     "build": "tsc --build",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "dev": "node --watch dist/index.js",
+    "grant-role": "node dist/cli/grant-role.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "migrate": "node dist/cli/migrate.js",

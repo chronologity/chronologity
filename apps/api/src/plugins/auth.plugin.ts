@@ -1,9 +1,12 @@
+import type { Permission, Role } from "@chronologity/contracts";
 import fp from "fastify-plugin";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { handleValidateSession } from "../features/auth/queries/validate-session.handler.js";
 import type { AuthDependencies } from "../features/auth/dependencies.js";
+import { hasPermission } from "../features/authorization/policies/authorization-policy.js";
+import { readRolesFor } from "../features/authorization/utils/authorization-read-model.js";
 import { OnboardingRequiredError } from "../lib/errors/onboarding-required-error.js";
-import { UnauthenticatedError } from "../lib/errors/unauthorized-error.js";
+import { UnauthenticatedError, UnauthorizedError } from "../lib/errors/unauthorized-error.js";
 import { verifyAccessToken } from "../lib/auth/tokens.js";
 import { findUserIdForIdentity } from "../features/users/utils/user-read-model.js";
 
@@ -42,6 +45,8 @@ export const authPlugin = fp(async function authPlugin(app, options: { deps: Aut
   app.decorate("resolveUserId", (identityId: string) =>
     findUserIdForIdentity(options.deps.pool, identityId),
   );
+
+  app.decorate("readRoles", (userId: string) => readRolesFor(options.deps.pool, userId));
 
   // Declared here so every request object has the same shape, which keeps
   // Fastify's request allocation monomorphic. The value is only meaningful
@@ -86,6 +91,8 @@ declare module "fastify" {
     authenticate(request: FastifyRequest): Promise<void>;
     /** Resolves an Identity to its User, for tokens issued before onboarding. */
     resolveUserId(identityId: string): Promise<string | undefined>;
+    /** Reads current elevated roles. Never cached across requests. */
+    readRoles(userId: string): Promise<readonly Role[]>;
   }
 }
 
@@ -141,4 +148,34 @@ export async function requireUser(request: FastifyRequest, reply: FastifyReply):
   }
 
   request.user = { userId: resolved };
+}
+
+/**
+ * Route guard requiring a permission.
+ *
+ * Roles are read from the authorization read model on every call rather than
+ * taken from the token. A token claim is a cache of authorization state, not
+ * the source of truth (`authorization.md:457`), and the simplest way to honour
+ * that is not to cache it: removing someone's role stops their next request
+ * rather than their next token refresh. The cost is one indexed lookup on a
+ * request that already makes several.
+ *
+ * @param permission - What the route requires.
+ * @returns A preHandler that authenticates, resolves the User, and refuses
+ *   anyone whose roles do not confer the permission.
+ */
+export function requirePermission(permission: Permission) {
+  return async function guard(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    await requireUser(request, reply);
+
+    const roles = await request.server.readRoles(request.user.userId);
+
+    if (!hasPermission(roles, permission)) {
+      // Flat refusal, naming nothing. Which permission was missing is
+      // already knowable from the capabilities endpoint, but existence
+      // hiding for sensitive resources belongs to the features that own
+      // them, and this guard should not decide it on their behalf.
+      throw new UnauthorizedError("You do not have permission to do that");
+    }
+  };
 }
