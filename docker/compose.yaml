@@ -169,6 +169,55 @@ services:
       retries: 20
       start_period: 5s
 
+  # ───────────────────────────────────────────────────────────────
+  # SeaweedFS — S3-compatible object storage for media (Phase 5E).
+  #
+  # Media uploads go directly from the client to object storage rather than
+  # through the API (`media.md:184`), so what this service must get right is
+  # presigned-URL fidelity: a signature that authorises exactly one PUT to
+  # exactly one key.
+  #
+  # Pinned to 3.95 deliberately. 3.97's master never binds its gRPC listener,
+  # so raft elects no leader and the S3 gateway never starts. 3.95 was verified
+  # end to end before anything was built on it: presigned PUT, HEAD returning
+  # size and content type, deletion, and — the property that matters — a
+  # tampered key refused with 403.
+  #
+  # MinIO is deliberately absent: its repository was archived in February 2026
+  # and it stopped publishing images in October 2025.
+  #
+  # Development only. Production object storage is a later decision, and
+  # nothing above `integrations/storage/` knows which implementation is running.
+  # ───────────────────────────────────────────────────────────────
+  storage:
+    image: chrislusf/seaweedfs:3.95
+    restart: unless-stopped
+    command:
+      - server
+      - -s3
+      - -s3.config=/etc/seaweedfs/s3.json
+      - -dir=/data
+    ports:
+      - "${S3_PORT:-8333}:8333"
+    volumes:
+      - storage-data:/data
+      - ./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+    healthcheck:
+      # An unsigned request to the S3 endpoint answers 403 once the gateway is
+      # serving, which is a stronger signal than a TCP connect: it means the
+      # master elected a leader, the filer connected, and S3 is authenticating.
+      test:
+        [
+          "CMD-SHELL",
+          "wget --no-verbose --tries=1 --spider http://127.0.0.1:8333/ 2>&1 | grep -q '403' || exit 1",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      # Startup involves master election and filer connection, which takes
+      # about thirty seconds locally — far longer than the other services.
+      start_period: 40s
+
 volumes:
   postgres-data:
   eventstore-data:
@@ -176,3 +225,4 @@ volumes:
   kafka-data:
   clickhouse-data:
   clickhouse-logs:
+  storage-data:

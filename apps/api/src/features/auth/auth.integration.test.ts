@@ -55,6 +55,20 @@ const config: AppConfig = {
     passwordPolicy: { minimumLength: 12, maximumLength: 256 },
   },
   minimumAgeYears: 13,
+  storage: {
+    endpoint: process.env.S3_ENDPOINT ?? "http://127.0.0.1:8333",
+    region: process.env.S3_REGION ?? "us-east-1",
+    accessKeyId: process.env.S3_ACCESS_KEY_ID ?? "chronologity",
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? "chronologity-local-secret",
+    bucket: process.env.S3_BUCKET ?? "chronologity-media",
+    forcePathStyle: true,
+    uploadUrlTtlSeconds: 900,
+  },
+  uploadLimits: {
+    registrationTtlSeconds: 3_600,
+    maxImageBytes: 26_214_400,
+    maxVideoBytes: 524_288_000,
+  },
   email: {
     host: process.env.SMTP_HOST ?? "localhost",
     port: Number(process.env.SMTP_PORT ?? "1025"),

@@ -1,4 +1,4 @@
-import { logLevelSchema, nodeEnvSchema, portSchema } from "@chronologity/config";
+import { booleanSchema, logLevelSchema, nodeEnvSchema, portSchema } from "@chronologity/config";
 import { z } from "zod";
 
 /**
@@ -59,6 +59,23 @@ export const envSchema = z.object({
   SMTP_HOST: z.string().min(1),
   SMTP_PORT: portSchema,
   SMTP_FROM: z.email(),
+
+  S3_ENDPOINT: z.url(),
+  S3_REGION: z.string().min(1).default("us-east-1"),
+  S3_ACCESS_KEY_ID: z.string().min(1),
+  S3_SECRET_ACCESS_KEY: z.string().min(1),
+  S3_BUCKET: z.string().min(1),
+  // SeaweedFS and most S3-compatible servers address buckets by path; AWS does
+  // not, so this cannot be inferred from the endpoint.
+  S3_FORCE_PATH_STYLE: booleanSchema.default(true),
+
+  // A presigned URL authorises a write. Short-lived by intent, and bounded
+  // here so a deployment cannot quietly make it a day.
+  S3_UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().min(60).max(3_600).default(900),
+  UPLOAD_REGISTRATION_TTL_SECONDS: z.coerce.number().int().min(300).max(86_400).default(3_600),
+  // Per-file technical limits, not per-Moment media counts (`media.md:266`).
+  UPLOAD_MAX_IMAGE_BYTES: z.coerce.number().int().min(1).default(26_214_400),
+  UPLOAD_MAX_VIDEO_BYTES: z.coerce.number().int().min(1).default(524_288_000),
 });
 
 export type Env = z.infer<typeof envSchema>;

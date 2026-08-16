@@ -23,6 +23,7 @@ CLICKHOUSE_HTTP_PORT="${CLICKHOUSE_HTTP_PORT:-8123}"
 CLICKHOUSE_USERNAME="${CLICKHOUSE_USERNAME:-chronologity}"
 CLICKHOUSE_PASSWORD="${CLICKHOUSE_PASSWORD:-chronologity}"
 CLICKHOUSE_DATABASE="${CLICKHOUSE_DATABASE:-chronologity}"
+S3_PORT="${S3_PORT:-8333}"
 
 FAILURES=0
 RUN_ID="probe_$(date +%s)"
@@ -150,6 +151,73 @@ if ch_query "CREATE TABLE ${RUN_ID} (id UInt64, occurred_at DateTime64(3)) ENGIN
 else
   fail "could not complete a write/read cycle"
   ch_query "DROP TABLE IF EXISTS ${RUN_ID}" >/dev/null 2>&1
+fi
+
+# ─────────────────────────────────────────────────────────────────
+section "Object storage (localhost:${S3_PORT})"
+
+if host_can_reach 127.0.0.1 "$S3_PORT"; then
+  pass "TCP reachable from the host"
+else
+  fail "TCP unreachable from the host"
+fi
+
+# An unsigned request must be refused. A 403 proves the gateway is serving and
+# authenticating; anything else means it is not ready, or worse, is open.
+S3_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  "http://127.0.0.1:${S3_PORT}/" 2>/dev/null)"
+
+if [ "$S3_STATUS" = "403" ]; then
+  pass "S3 gateway serving and refusing unsigned requests"
+else
+  fail "S3 gateway answered ${S3_STATUS:-nothing}, expected 403"
+fi
+
+# A real round trip through a presigned URL, which is how media is actually
+# uploaded. Signing by hand in bash is not worth it, so this uses the SDK the
+# application uses, via the API workspace where it is installed.
+if S3_PROBE="$(cd "$ROOT/apps/api" && S3_PORT="$S3_PORT" node --input-type=module -e '
+import { S3Client, CreateBucketCommand, PutObjectCommand, HeadObjectCommand,
+         DeleteObjectCommand, DeleteBucketCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+
+const bucket = `probe-${Date.now()}`;
+const key = "uploads/probe/original";
+const client = new S3Client({
+  endpoint: `http://127.0.0.1:${process.env.S3_PORT}`,
+  region: process.env.S3_REGION ?? "us-east-1",
+  forcePathStyle: true,
+  credentials: {
+    accessKeyId: process.env.S3_ACCESS_KEY_ID ?? "chronologity",
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? "chronologity-local-secret",
+  },
+});
+
+await client.send(new CreateBucketCommand({ Bucket: bucket }));
+const url = await getSignedUrl(client,
+  new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: "image/jpeg" }),
+  { expiresIn: 120 });
+
+const put = await fetch(url, { method: "PUT", body: Buffer.from("probe"),
+  headers: { "content-type": "image/jpeg" } });
+if (!put.ok) throw new Error(`presigned PUT returned ${put.status}`);
+
+const head = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+if (head.ContentLength !== 5) throw new Error(`stored ${head.ContentLength} bytes, expected 5`);
+
+// The property the whole upload design rests on: one signature, one key.
+const tampered = url.replace("/original?", "/elsewhere?");
+const bad = await fetch(tampered, { method: "PUT", body: Buffer.from("probe"),
+  headers: { "content-type": "image/jpeg" } });
+if (bad.status !== 403) throw new Error(`a tampered key returned ${bad.status}, expected 403`);
+
+await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+await client.send(new DeleteBucketCommand({ Bucket: bucket }));
+client.destroy();
+' 2>&1)"; then
+  pass "presigned upload, verify, tamper-refusal, and delete"
+else
+  fail "presigned upload cycle failed: ${S3_PROBE}"
 fi
 
 # ─────────────────────────────────────────────────────────────────

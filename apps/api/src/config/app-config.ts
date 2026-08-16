@@ -5,6 +5,12 @@ import { toEmailConfig, type EmailConfig } from "./email-config.js";
 import { envSchema, type Env } from "./env.js";
 import { toEventStoreConfig, type EventStoreConfig } from "./eventstore-config.js";
 import { toMessagingConfig, type MessagingConfig } from "./messaging-config.js";
+import {
+  toStorageConfig,
+  toUploadLimits,
+  type StorageConfig,
+  type UploadLimits,
+} from "./storage-config.js";
 
 /**
  * The API's fully assembled configuration.
@@ -24,6 +30,8 @@ export interface AppConfig {
   /** Minimum age, in whole years, for creating an account. */
   readonly minimumAgeYears: number;
   readonly email: EmailConfig;
+  readonly storage: StorageConfig;
+  readonly uploadLimits: UploadLimits;
 }
 
 /**
@@ -53,5 +61,7 @@ export function loadConfig(source: Record<string, string | undefined> = process.
     auth: toAuthConfig(env),
     minimumAgeYears: env.USER_MINIMUM_AGE_YEARS,
     email: toEmailConfig(env),
+    storage: toStorageConfig(env),
+    uploadLimits: toUploadLimits(env),
   };
 }

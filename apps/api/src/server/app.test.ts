@@ -32,6 +32,20 @@ const config: AppConfig = {
     passwordPolicy: { minimumLength: 12, maximumLength: 256 },
   },
   minimumAgeYears: 13,
+  storage: {
+    endpoint: "http://127.0.0.1:8333",
+    region: "us-east-1",
+    accessKeyId: "unused",
+    secretAccessKey: "unused",
+    bucket: "unused",
+    forcePathStyle: true,
+    uploadUrlTtlSeconds: 900,
+  },
+  uploadLimits: {
+    registrationTtlSeconds: 3_600,
+    maxImageBytes: 26_214_400,
+    maxVideoBytes: 524_288_000,
+  },
   email: { host: "unused", port: 1025, from: "no-reply@chronologity.local" },
 };
 

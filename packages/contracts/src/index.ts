@@ -101,6 +101,20 @@ export {
   type UserRoles,
 } from "./authorization.js";
 export {
+  mediaKindSchema,
+  registerUploadRequestSchema,
+  uploadAuthorizationSchema,
+  uploadListSchema,
+  uploadSchema,
+  uploadStateSchema,
+  type MediaKind,
+  type RegisterUploadRequest,
+  type Upload,
+  type UploadAuthorization,
+  type UploadList,
+  type UploadState,
+} from "./uploads.js";
+export {
   actorSchema,
   envelopeOf,
   eventEnvelopeSchema,

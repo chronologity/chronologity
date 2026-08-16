@@ -6,6 +6,7 @@ import {
   type AuthorizationDependencies,
 } from "../features/authorization/index.js";
 import { healthRoutes } from "../features/health/index.js";
+import { uploadRoutes, type UploadDependencies } from "../features/uploads/index.js";
 import { userRoutes, type UserDependencies } from "../features/users/index.js";
 
 /**
@@ -19,6 +20,8 @@ import { userRoutes, type UserDependencies } from "../features/users/index.js";
  * @param users - User wiring; mounted only alongside auth.
  * @param authorization - Authorization wiring; mounted only alongside users,
  *   since every role belongs to a User.
+ * @param uploads - Upload wiring; mounted only alongside users, since every
+ *   upload belongs to a User.
  * @returns Nothing.
  */
 export async function registerRoutes(
@@ -26,6 +29,7 @@ export async function registerRoutes(
   auth?: AuthDependencies | undefined,
   users?: UserDependencies | undefined,
   authorization?: AuthorizationDependencies | undefined,
+  uploads?: UploadDependencies | undefined,
 ): Promise<void> {
   await app.register(healthRoutes);
 
@@ -39,6 +43,10 @@ export async function registerRoutes(
 
       if (authorization !== undefined) {
         await app.register(authorizationRoutes(authorization));
+      }
+
+      if (uploads !== undefined) {
+        await app.register(uploadRoutes(uploads));
       }
     }
   }

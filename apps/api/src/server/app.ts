@@ -5,6 +5,7 @@ import type { HealthCheckable } from "../lib/health.js";
 import { loggerOptions } from "../lib/logger/logger.js";
 import type { AuthDependencies } from "../features/auth/index.js";
 import type { AuthorizationDependencies } from "../features/authorization/index.js";
+import type { UploadDependencies } from "../features/uploads/index.js";
 import type { UserDependencies } from "../features/users/index.js";
 import { registerPlugins } from "./register-plugins.js";
 import { registerRoutes } from "./register-routes.js";
@@ -38,6 +39,8 @@ export interface BuildAppOptions {
   users?: UserDependencies | undefined;
   /** Authorization wiring. Mounted only alongside users. */
   authorization?: AuthorizationDependencies | undefined;
+  /** Upload wiring. Mounted only alongside users. */
+  uploads?: UploadDependencies | undefined;
 }
 
 /**
@@ -57,6 +60,7 @@ export async function buildApp({
   auth,
   users,
   authorization,
+  uploads,
 }: BuildAppOptions): Promise<FastifyInstance> {
   // Typed explicitly: Fastify's overloads otherwise resolve a broadly-typed
   // `logger` to the HTTP/2 signature, and every later use of the instance
@@ -95,7 +99,7 @@ export async function buildApp({
   );
 
   await registerPlugins(app, auth);
-  await registerRoutes(app, auth, users, authorization);
+  await registerRoutes(app, auth, users, authorization, uploads);
 
   return app;
 }

@@ -2206,3 +2206,37 @@ Timeline behaviour is now entirely a consequence of Moments and their occurrence
 The producer and consumer of Timeline read models are now named for what they do: `apps/api/src/features/timelines/` writes them, `apps/feed-aggregator/src/timelines/` reads them. Neither list of files duplicates the other.
 
 Which scopes ship at launch remains open, and is answered when Moments exist to judge it against.
+
+---
+
+# ADR-085 — Use SeaweedFS for Local Object Storage, and Verify Uploads After the Fact
+
+**Status:** Accepted
+
+## Decision
+
+Local object storage is SeaweedFS 3.95 in S3 mode. Media uploads go directly from client to storage through a presigned URL that authorises a single PUT to a single server-generated key. Nothing a client declares is trusted: what actually arrived is measured at finalization, and an object that fails verification is deleted rather than left in storage.
+
+## Alternatives Considered
+
+MinIO, the conventional choice, whose repository was archived in February 2026 and which stopped publishing container images in October 2025. LocalStack, archived in March 2026. Garage remains a viable fallback, and switching to it is a compose-file change because nothing above `integrations/storage/` knows which implementation is running.
+
+SeaweedFS 3.97 was tried first and does not work: its master never binds a gRPC listener, so raft elects no leader and the S3 gateway never starts. 3.95 was verified end to end — presigned PUT, HEAD reporting size and type, deletion, and a tampered key refused — before anything was built on it.
+
+## Rationale
+
+The server generates every storage key because a client-supplied key is a request to overwrite someone else's object, and a presigned URL would authorise exactly that. The owner's identifier is part of the path so an object traces to an account without a database lookup, which matters for erasure.
+
+Size is enforced at finalization rather than in the signature. A presigned PUT cannot reliably bound what a client sends, so verifying afterwards is the check that cannot be lied to — and deleting the oversized object is what makes the refusal complete rather than merely recorded.
+
+Testing against real storage found something a stub would have concealed: **SeaweedFS does not enforce the signed `Content-Type`.** AWS binds it into the signature; SeaweedFS accepts a PUT that contradicts it. Had the declared type been treated as load-bearing, that would have been a silent hole. Finalization compares what storage reports against what was declared and refuses a contradiction, so the flow holds — but the honest description is that a client can lie consistently, and only decoding the bytes settles it. That is 5E-2's work.
+
+## Consequences
+
+Local development gains a fifth service, slower to start than the others: master election and filer connection take about forty seconds, which the healthcheck's start period accounts for.
+
+An Upload belongs to a User rather than a Moment, because media exists before publication and drafts, retries, and abandonment depend on that. Association arrives with Moments.
+
+Storage keys are recorded in `UploadRegistered` and read back rather than recomputed. A key derived by a rule would orphan every existing object the day the rule changed.
+
+An upload's bytes are the one thing here not covered by ADR-080's rule against personal data in event history: history holds the key, not the media, and deleting the object leaves history describing something that no longer exists — which is the intended shape for erasure.

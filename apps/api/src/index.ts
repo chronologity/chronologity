@@ -4,6 +4,7 @@ import { createDatabase } from "./lib/database/postgres.js";
 import { createEventStore } from "./lib/eventstore/client.js";
 import { createMessaging } from "./lib/messaging/kafka.js";
 import { createEmailClient } from "./integrations/email/email-client.js";
+import { createStorageClient } from "./integrations/storage/storage-client.js";
 import { loadBreachedPasswordIndex } from "./lib/auth/breached-passwords.js";
 import { buildApp } from "./server/app.js";
 import { startServer } from "./server/server.js";
@@ -29,6 +30,7 @@ async function main(): Promise<void> {
   const dependencies = [database, eventStore, messaging];
 
   const email = createEmailClient(config.email);
+  const storage = createStorageClient(config.storage);
 
   const app = await buildApp({
     config,
@@ -48,12 +50,22 @@ async function main(): Promise<void> {
       client: eventStore.client,
       pool: database.pool,
     },
+    uploads: {
+      client: eventStore.client,
+      pool: database.pool,
+      storage,
+      limits: config.uploadLimits,
+    },
   });
 
   await startServer({
     app,
     config,
-    resources: [...dependencies, { name: "email", close: () => email.close() }],
+    resources: [
+      ...dependencies,
+      { name: "email", close: () => email.close() },
+      { name: "storage", close: async () => storage.close() },
+    ],
   });
 
   // Connectivity is reported rather than required at startup. An API that
