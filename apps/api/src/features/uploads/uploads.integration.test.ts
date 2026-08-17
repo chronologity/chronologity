@@ -5,6 +5,7 @@ import { CreateBucketCommand, S3Client } from "@aws-sdk/client-s3";
 import type { FastifyInstance } from "fastify";
 import type { AppConfig } from "../../config/app-config.js";
 import { createEmailClient } from "../../integrations/email/email-client.js";
+import { createDerivativeClient } from "../../integrations/metadata/derivative-client.js";
 import { createMetadataClient } from "../../integrations/metadata/metadata-client.js";
 import {
   createStorageClient,
@@ -161,6 +162,7 @@ describe("uploads", () => {
       pool: database.pool,
       storage,
       metadata: createMetadataClient(),
+      derivatives: createDerivativeClient(),
       limits: config.uploadLimits,
     };
 
