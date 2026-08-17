@@ -5,6 +5,7 @@ import { toEmailConfig, type EmailConfig } from "./email-config.js";
 import { envSchema, type Env } from "./env.js";
 import { toEventStoreConfig, type EventStoreConfig } from "./eventstore-config.js";
 import { toMessagingConfig, type MessagingConfig } from "./messaging-config.js";
+import { toPlacesConfig, type PlacesConfig } from "./places-config.js";
 import {
   toStorageConfig,
   toUploadLimits,
@@ -31,6 +32,7 @@ export interface AppConfig {
   readonly minimumAgeYears: number;
   readonly email: EmailConfig;
   readonly storage: StorageConfig;
+  readonly places: PlacesConfig;
   readonly uploadLimits: UploadLimits;
 }
 
@@ -62,6 +64,7 @@ export function loadConfig(source: Record<string, string | undefined> = process.
     minimumAgeYears: env.USER_MINIMUM_AGE_YEARS,
     email: toEmailConfig(env),
     storage: toStorageConfig(env),
+    places: toPlacesConfig(env),
     uploadLimits: toUploadLimits(env),
   };
 }

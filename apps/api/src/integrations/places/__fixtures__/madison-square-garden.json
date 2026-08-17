@@ -1,0 +1,32 @@
+[
+  {
+    "place_id": 359875407,
+    "licence": "Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+    "osm_type": "way",
+    "osm_id": 138141251,
+    "lat": "40.7505129",
+    "lon": "-73.9935159",
+    "category": "leisure",
+    "type": "stadium",
+    "place_rank": 30,
+    "importance": 0.6559978742080905,
+    "addresstype": "leisure",
+    "name": "Madison Square Garden",
+    "display_name": "Madison Square Garden, 4, Pennsylvania Plaza, Chelsea District, Manhattan Community Board 5, Manhattan, New York County, New York, 10001, United States",
+    "address": {
+      "leisure": "Madison Square Garden",
+      "house_number": "4",
+      "road": "Pennsylvania Plaza",
+      "neighbourhood": "Chelsea District",
+      "suburb": "Manhattan",
+      "county": "New York County",
+      "city": "New York",
+      "state": "New York",
+      "ISO3166-2-lvl4": "US-NY",
+      "postcode": "10001",
+      "country": "United States",
+      "country_code": "us"
+    },
+    "boundingbox": ["40.7498726", "40.7511643", "-73.9944193", "-73.9925924"]
+  }
+]

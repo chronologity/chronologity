@@ -86,6 +86,11 @@ const config: AppConfig = {
     maxImageBytes: MAX_IMAGE_BYTES,
     maxVideoBytes: 524_288_000,
   },
+  places: {
+    endpoint: "https://nominatim.openstreetmap.org/search",
+    userAgent: "Chronologity/0.1 (test)",
+    minimumIntervalMs: 0,
+  },
   email: {
     host: process.env.SMTP_HOST ?? "localhost",
     port: Number(process.env.SMTP_PORT ?? "1025"),

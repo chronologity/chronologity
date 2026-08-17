@@ -60,6 +60,17 @@ export const envSchema = z.object({
   SMTP_PORT: portSchema,
   SMTP_FROM: z.email(),
 
+  // The public OpenStreetMap service. Chosen because it is the only major
+  // provider whose terms permit storing a place's name permanently, which
+  // Chronologity requires to keep historical names (ADR-090).
+  PLACES_ENDPOINT: z.url().default("https://nominatim.openstreetmap.org/search"),
+  // Required by OpenStreetMap's usage policy: requests must identify the
+  // application, not merely a library.
+  PLACES_USER_AGENT: z.string().min(1).default("Chronologity/0.1 (development)"),
+  // The public service asks for no more than one request a second. It is
+  // maintained by volunteers.
+  PLACES_MINIMUM_INTERVAL_MS: z.coerce.number().int().min(0).max(10_000).default(1_100),
+
   S3_ENDPOINT: z.url(),
   S3_REGION: z.string().min(1).default("us-east-1"),
   S3_ACCESS_KEY_ID: z.string().min(1),

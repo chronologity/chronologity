@@ -107,6 +107,24 @@ export {
   type UploadReceivedPayload,
 } from "./media-events.js";
 export {
+  coordinatesSchema,
+  createLocationRequestSchema,
+  geographicContextSchema,
+  locationPrecisionSchema,
+  locationSchema,
+  placeSuggestionSchema,
+  placeSuggestionsSchema,
+  searchPlacesRequestSchema,
+  type Coordinates,
+  type CreateLocationRequest,
+  type GeographicContext,
+  type Location,
+  type LocationPrecision,
+  type PlaceSuggestion,
+  type PlaceSuggestions,
+  type SearchPlacesRequest,
+} from "./locations.js";
+export {
   derivativeKindSchema,
   mediaKindSchema,
   registerUploadRequestSchema,

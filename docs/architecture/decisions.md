@@ -2370,3 +2370,41 @@ Derivatives are produced in the same pass as checking, from the same message. Th
 They are written before the upload is marked usable, so nothing can observe an upload claiming a preview that does not exist. A file that passes checking but cannot be processed fails permanently: a file that cannot be re-encoded will not re-encode differently on a second attempt.
 
 Deleting an upload lists everything under its prefix rather than removing a known set of keys. Deleted media that is still being served is among the worst failures available here, and a list of key shapes would fall out of step with what the code writes.
+
+---
+
+# ADR-090 — Use OpenStreetMap for Places, and Keep Location Identity Our Own
+
+**Status:** Accepted
+
+## Decision
+
+Places are looked up from OpenStreetMap. When someone chooses a result, Chronologity creates a Location with an identifier of its own and copies in the name, coordinates and surrounding context; the map service's reference is recorded as provenance and never as identity. Nothing a later lookup returns rewrites what was recorded.
+
+A Location may also be created with no search result behind it.
+
+Automated tests answer place searches from recorded responses rather than calling the service.
+
+## Alternatives Considered
+
+Google Places and Mapbox, both of which return better data than OpenStreetMap for most searches. Neither is usable here, and the reason is licensing rather than quality.
+
+`docs/product/locations.md` requires that a place keep the name it had when a Moment was recorded — a photograph from 1950 must not be relabelled with the name of the building standing there now. That requires storing the name permanently. Google's terms permit storing an identifier indefinitely and coordinates for thirty days, and grant no exception for the display name; Mapbox prohibits storage outright. Under either, showing a place would mean re-fetching its name, which would return today's name. The product requirement and the licences are directly incompatible.
+
+OpenStreetMap permits permanent storage. It was the only candidate that could satisfy the requirement, which makes this less a choice than a constraint.
+
+## Rationale
+
+Identity has to be ours regardless of provider. `locations.md:90` requires stable identity independent of display name, address formatting, map provider and coordinates, and a place is not a coordinate: the same ground holds different places over time. Adopting a provider's identifier would make our history depend on their data model, and on their continued existence.
+
+Keeping the provider reference as provenance preserves the useful part — two people choosing the same result reach the same place, enforced by a unique index rather than by a check that races — without conceding identity.
+
+Tests do not call the service. A suite that depends on someone else's uptime is unreliable, and the public service is maintained by volunteers who ask for at most one request a second. The recordings are real captured responses rather than invented ones, which settled several details a stand-in would have got wrong: the field a place is named by can be absent, and the durable reference is the type and identifier pair rather than the `place_id` beside it, which is an internal row number that changes on reimport.
+
+## Consequences
+
+The application must identify itself in requests and respect a rate limit, both of which the adapter does. Data shown must credit OpenStreetMap contributors under ODbL — the search response carries that attribution so it cannot be forgotten downstream.
+
+Search quality is lower than a paid provider's, and duplicate places will accumulate. Merging duplicates is deferred: `locations.md` still lists who may approve a merge and how a wrong one is reversed among its open questions, and guessing now would mean unpicking later.
+
+Precision is recorded rather than inferred from a coordinate's decimal places, and a place whose position is unknown must carry no coordinates at all — enforced by a database constraint. Inventing a coordinate to fill a gap would fabricate exactly the historical certainty this model exists to protect.

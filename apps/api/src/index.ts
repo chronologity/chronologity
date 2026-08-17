@@ -7,6 +7,7 @@ import { createEmailClient } from "./integrations/email/email-client.js";
 import { createStorageClient } from "./integrations/storage/storage-client.js";
 import { createDerivativeClient } from "./integrations/metadata/derivative-client.js";
 import { createMetadataClient } from "./integrations/metadata/metadata-client.js";
+import { createPlaceSearchClient } from "./integrations/places/place-search-client.js";
 import { loadBreachedPasswordIndex } from "./lib/auth/breached-passwords.js";
 import { buildApp } from "./server/app.js";
 import { startServer } from "./server/server.js";
@@ -36,6 +37,7 @@ async function main(): Promise<void> {
   // Built here so the wiring is uniform, though the HTTP process never opens a
   // file: authorising and verifying an upload does not require reading it.
   const metadata = createMetadataClient();
+  const places = createPlaceSearchClient(config.places);
 
   const app = await buildApp({
     config,
@@ -62,6 +64,11 @@ async function main(): Promise<void> {
       metadata,
       derivatives: createDerivativeClient(),
       limits: config.uploadLimits,
+    },
+    locations: {
+      client: eventStore.client,
+      pool: database.pool,
+      places,
     },
   });
 
