@@ -90,7 +90,7 @@ A Moment is an experience, not a media file, and not every Moment is public. Chr
 - Reserve end-to-end tests for critical cross-system flows
 - Never claim a test or check passed unless it was actually run successfully
 - Spec first: before writing code, list the success paths, error paths, and edge cases the tests will cover
-- Structure every test as Arrange-Act-Assert, with explicit `// Arrange`, `// Act`, `// Assert` comments
+- Structure every test as Arrange-Act-Assert: set up, then act, then assert, separated by blank lines rather than labelled with comments
 - Test HTTP behaviour with `app.inject()` rather than binding a real port
 - Reserve `vi.spyOn()` and `vi.mock()` for third-party APIs and network boundaries; never mock this system's own database, broker, or event store
 
