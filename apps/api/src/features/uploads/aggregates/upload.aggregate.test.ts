@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import {
+  decideCheck,
   decideDelete,
+  decideDerivativesProduced,
   decideFail,
   decideFinalize,
   decideRegister,
@@ -356,6 +358,258 @@ describe("decideDelete", () => {
     assert.deepEqual(decideDelete(stateAfter(registered()), { ...input, actorUserId: OTHER }), {
       ok: false,
       reason: "not_owner",
+    });
+  });
+});
+
+describe("decideCheck", () => {
+  const measured = {
+    kind: "image" as const,
+    codec: "mjpeg",
+    container: "image2",
+    width: 640,
+    height: 480,
+    durationSeconds: undefined,
+    hasAudio: false,
+    now,
+  };
+
+  const arrived = () =>
+    stateAfter(registered(), {
+      type: "UploadReceived",
+      payload: {
+        ...identity,
+        byteSize: 2048,
+        contentType: "image/jpeg",
+        checksum: "abc",
+        receivedAt: now.toISOString(),
+      },
+    });
+
+  it("accepts a file that arrived and was opened", () => {
+    const decision = decideCheck(arrived(), measured);
+
+    assert.ok(decision.ok);
+    assert.equal(decision.events[0]?.type, "UploadChecked");
+  });
+
+  it("records what was measured rather than what was declared", () => {
+    // Registration declared an image; so did the decoder. The point is that
+    // the recorded kind comes from the second one.
+    const decision = decideCheck(arrived(), { ...measured, kind: "video", durationSeconds: 12 });
+
+    assert.ok(decision.ok);
+
+    const event = decision.events[0];
+
+    assert.equal(event?.type, "UploadChecked");
+    assert.equal(event.payload.kind, "video");
+    assert.equal(event.payload.durationSeconds, 12);
+  });
+
+  it("refuses a file that never arrived", () => {
+    // A note delivered before the arrival it describes. There is nothing to
+    // open.
+    assert.deepEqual(decideCheck(stateAfter(registered()), measured), {
+      ok: false,
+      reason: "not_received",
+    });
+  });
+
+  it("refuses an upload that does not exist", () => {
+    assert.deepEqual(decideCheck(initialUploadState, measured), {
+      ok: false,
+      reason: "upload_not_found",
+    });
+  });
+
+  it("treats a deleted upload as absent", () => {
+    const deleted = stateAfter(registered(), {
+      type: "UploadDeleted",
+      payload: { deletedAt: now.toISOString() },
+    });
+
+    assert.deepEqual(decideCheck(deleted, measured), { ok: false, reason: "upload_not_found" });
+  });
+
+  it("refuses to check the same file twice", () => {
+    // At-least-once delivery makes this ordinary. Callers treat it as success.
+    const checked = stateAfter(
+      registered(),
+      {
+        type: "UploadReceived",
+        payload: {
+          ...identity,
+          byteSize: 2048,
+          contentType: "image/jpeg",
+          checksum: "abc",
+          receivedAt: now.toISOString(),
+        },
+      },
+      {
+        type: "UploadChecked",
+        payload: { ...measured, checkedAt: now.toISOString() },
+      },
+    );
+
+    assert.deepEqual(decideCheck(checked, measured), { ok: false, reason: "already_checked" });
+  });
+
+  it("refuses to check a file already refused", () => {
+    const failed = stateAfter(registered(), {
+      type: "UploadFailed",
+      payload: {
+        reason: "too large",
+        category: "permanent",
+        attempt: 1,
+        failedAt: now.toISOString(),
+      },
+    });
+
+    assert.deepEqual(decideCheck(failed, measured), { ok: false, reason: "already_failed" });
+  });
+
+  it("replaces the declared kind with the measured one in state", () => {
+    const decision = decideCheck(arrived(), { ...measured, kind: "video", durationSeconds: 3 });
+
+    assert.ok(decision.ok);
+
+    const after = stateAfter(
+      registered(),
+      {
+        type: "UploadReceived",
+        payload: {
+          ...identity,
+          byteSize: 2048,
+          contentType: "image/jpeg",
+          checksum: "abc",
+          receivedAt: now.toISOString(),
+        },
+      },
+      decision.events[0]!,
+    );
+
+    assert.equal(after.status, "ready");
+    assert.equal(after.kind, "video");
+  });
+});
+
+describe("decideDerivativesProduced", () => {
+  const ready = () =>
+    stateAfter(registered(), {
+      type: "UploadReceived",
+      payload: {
+        ...identity,
+        byteSize: 2048,
+        contentType: "image/jpeg",
+        checksum: "abc",
+        receivedAt: now.toISOString(),
+      },
+    });
+
+  it("records what was produced", () => {
+    const decision = decideDerivativesProduced(ready(), { derivatives: ["thumbnail"], now });
+
+    assert.ok(decision.ok);
+    assert.equal(decision.events[0]?.type, "UploadDerivativesProduced");
+  });
+
+  it("records only what is new", () => {
+    // A second pass after a partial failure should add what was missing rather
+    // than claiming to have produced everything again.
+    const withPoster = stateAfter(
+      registered(),
+      {
+        type: "UploadReceived",
+        payload: {
+          ...identity,
+          byteSize: 2048,
+          contentType: "video/mp4",
+          checksum: "abc",
+          receivedAt: now.toISOString(),
+        },
+      },
+      {
+        type: "UploadDerivativesProduced",
+        payload: { derivatives: ["poster"], producedAt: now.toISOString() },
+      },
+    );
+
+    const decision = decideDerivativesProduced(withPoster, {
+      derivatives: ["poster", "faststart"],
+      now,
+    });
+
+    assert.ok(decision.ok);
+
+    const event = decision.events[0];
+
+    assert.equal(event?.type, "UploadDerivativesProduced");
+    assert.deepEqual(event.payload.derivatives, ["faststart"]);
+  });
+
+  it("refuses when nothing is new", () => {
+    // History should say what happened, and a worker running again did not
+    // produce anything.
+    const withThumbnail = stateAfter(
+      registered(),
+      {
+        type: "UploadReceived",
+        payload: {
+          ...identity,
+          byteSize: 2048,
+          contentType: "image/jpeg",
+          checksum: "abc",
+          receivedAt: now.toISOString(),
+        },
+      },
+      {
+        type: "UploadDerivativesProduced",
+        payload: { derivatives: ["thumbnail"], producedAt: now.toISOString() },
+      },
+    );
+
+    assert.deepEqual(
+      decideDerivativesProduced(withThumbnail, { derivatives: ["thumbnail"], now }),
+      { ok: false, reason: "nothing_to_produce" },
+    );
+  });
+
+  it("accumulates rather than replacing", () => {
+    const first = stateAfter(
+      registered(),
+      {
+        type: "UploadDerivativesProduced",
+        payload: { derivatives: ["poster"], producedAt: now.toISOString() },
+      },
+      {
+        type: "UploadDerivativesProduced",
+        payload: { derivatives: ["faststart"], producedAt: now.toISOString() },
+      },
+    );
+
+    assert.deepEqual([...first.derivatives].sort(), ["faststart", "poster"]);
+  });
+
+  it("refuses for an upload that does not exist", () => {
+    assert.deepEqual(
+      decideDerivativesProduced(initialUploadState, { derivatives: ["thumbnail"], now }),
+      {
+        ok: false,
+        reason: "upload_not_found",
+      },
+    );
+  });
+
+  it("refuses for a deleted upload", () => {
+    const deleted = stateAfter(registered(), {
+      type: "UploadDeleted",
+      payload: { deletedAt: now.toISOString() },
+    });
+
+    assert.deepEqual(decideDerivativesProduced(deleted, { derivatives: ["thumbnail"], now }), {
+      ok: false,
+      reason: "upload_not_found",
     });
   });
 });
