@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, it } from "vitest";
-import type { EventMetadata } from "../../types/domain-event.js";
+import type { EventMetadata } from "../../types/event-metadata.js";
 import { createEventStore, type EventStore } from "../eventstore/client.js";
-import { ConcurrencyConflictError } from "../eventstore/append-events.js";
+import { ConcurrencyConflictError } from "../errors/concurrency-conflict-error.js";
 import { defineAggregate, type AggregateStore } from "./aggregate.js";
 
 /**

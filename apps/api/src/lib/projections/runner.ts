@@ -1,6 +1,6 @@
 import type { EventStoreDBClient } from "@eventstore/db-client";
 import type pg from "pg";
-import type { EventMetadata } from "../../types/domain-event.js";
+import type { EventMetadata } from "../../types/event-metadata.js";
 import type { Projection, ProjectionEvent } from "../../types/projection.js";
 import { withTransaction } from "../database/transaction.js";
 import type { Logger } from "../logger/logger.js";

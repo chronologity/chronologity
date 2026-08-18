@@ -1,5 +1,6 @@
 import type { EventStoreDBClient } from "@eventstore/db-client";
-import type { DomainEvent, EventMetadata } from "../../types/domain-event.js";
+import type { DomainEvent } from "../../types/domain-event.js";
+import type { EventMetadata } from "../../types/event-metadata.js";
 import { appendEvents, type ExpectedRevision } from "../eventstore/append-events.js";
 import { readStream } from "../eventstore/read-stream.js";
 import { streamName } from "../eventstore/stream-name.js";

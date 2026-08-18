@@ -4,7 +4,7 @@ import { appendEvents } from "../../../lib/eventstore/append-events.js";
 import { streamName } from "../../../lib/eventstore/stream-name.js";
 import { ValidationError } from "../../../lib/errors/validation-error.js";
 import type { RequestContext } from "../../../types/request-context.js";
-import type { EventMetadata } from "../../../types/domain-event.js";
+import type { EventMetadata } from "../../../types/event-metadata.js";
 import { decideCreateUser, initialUserState, USER_CATEGORY } from "../aggregates/user.aggregate.js";
 import { checkAge, describeAgeRejection } from "../age-policy.js";
 import { clockFor, cooldownFor, minimumAgeFor, type UserDependencies } from "../dependencies.js";

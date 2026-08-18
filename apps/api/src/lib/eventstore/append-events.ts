@@ -6,23 +6,10 @@ import {
   type AppendExpectedRevision,
   type EventStoreDBClient,
 } from "@eventstore/db-client";
-import type { ErrorCode } from "@chronologity/contracts";
-import type { DomainEvent, EventMetadata } from "../../types/domain-event.js";
-import { DomainError } from "../errors/domain-error.js";
+import type { DomainEvent } from "../../types/domain-event.js";
+import type { EventMetadata } from "../../types/event-metadata.js";
+import { ConcurrencyConflictError } from "../errors/concurrency-conflict-error.js";
 import { generateId } from "../ids/generate-id.js";
-
-/**
- * Raised when a stream moved since the state a decision was based on.
- *
- * This is an ordinary outcome under concurrency, not a defect: two callers
- * acted on the same version and one of them must retry against fresh state.
- * It maps to a documented, retryable error code so a client can tell the
- * difference between "try again" and "this will never work".
- */
-export class ConcurrencyConflictError extends DomainError {
-  override readonly code: ErrorCode = "CONCURRENCY_CONFLICT";
-  override readonly status = 409;
-}
 
 /** Where a stream is expected to be when appending. */
 export type ExpectedRevision = bigint | "no_stream" | "stream_exists" | "any";

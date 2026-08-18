@@ -1,7 +1,7 @@
 import type { EventEnvelope } from "@chronologity/contracts";
 import type { EventStoreDBClient } from "@eventstore/db-client";
 import type pg from "pg";
-import type { EventMetadata } from "../../types/domain-event.js";
+import type { EventMetadata } from "../../types/event-metadata.js";
 import { withTransaction } from "../../lib/database/transaction.js";
 import { tryParseStreamName } from "../../lib/eventstore/stream-name.js";
 import type { Logger } from "../../lib/logger/logger.js";

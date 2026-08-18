@@ -1,5 +1,5 @@
 import { StreamNotFoundError, type EventStoreDBClient } from "@eventstore/db-client";
-import type { EventMetadata } from "../../types/domain-event.js";
+import type { EventMetadata } from "../../types/event-metadata.js";
 
 /** One persisted event, as read back from a stream. */
 export interface RecordedEvent<Payload = unknown> {

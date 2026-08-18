@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, it } from "vitest";
-import type { EventMetadata } from "../../types/domain-event.js";
+import type { EventMetadata } from "../../types/event-metadata.js";
 import type { Projection, ProjectionEvent } from "../../types/projection.js";
 import { migrate } from "../../lib/database/migrations.js";
 import { createDatabase, type Database } from "../../lib/database/postgres.js";

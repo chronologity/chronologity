@@ -1,4 +1,4 @@
-import type { EventMetadata } from "./domain-event.js";
+import type { EventMetadata } from "./event-metadata.js";
 
 /** A persisted event as a projection receives it. */
 export interface ProjectionEvent<Payload = unknown> {

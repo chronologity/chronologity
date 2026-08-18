@@ -1,4 +1,4 @@
-import type { EventMetadata } from "../../../types/domain-event.js";
+import type { EventMetadata } from "../../../types/event-metadata.js";
 import type { RequestContext } from "../../../types/request-context.js";
 
 /**
