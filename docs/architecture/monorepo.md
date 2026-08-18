@@ -116,7 +116,7 @@ Contains repository-level generators and automation that operate across applicat
 
 ### `docker/`
 
-Contains local infrastructure configuration for ClickHouse, EventStoreDB, and PostgreSQL.
+Contains local infrastructure configuration for ClickHouse, Kafka, PostgreSQL, and object storage.
 
 ### Root configuration
 
@@ -130,9 +130,9 @@ The root pnpm workspace, TypeScript configuration, package manifest, lockfile, a
 
 `apps/api` is the authoritative Fastify + TypeScript backend.
 
-It owns command processing, domain invariants, authorization, authentication workflows, event-sourced aggregates where applicable, authoritative domain events, operational REST queries, uploads, notifications, moderation decisions, and projection definitions/update logic.
+It owns domain invariants, authorization, authentication workflows, authoritative state in PostgreSQL, operational REST endpoints, uploads, notifications, moderation decisions, and projection definitions/update logic.
 
-It is feature-oriented rather than controller/service-oriented.
+It is feature-oriented. Within a feature the layering is route → service → repository, with pure policy modules holding rules that are worth stating on their own (ADR-091).
 
 The canonical structural baseline is:
 
@@ -141,14 +141,13 @@ apps/
 └── api/
     ├── package.json
     ├── tsconfig.json
-    ├── .env.example
+    ├── vitest.config.ts
+    ├── vitest.integration.config.ts
     ├── README.md
-    ├── scripts/
-    │   ├── scaffold-api.sh
-    │   ├── generate-feature.sh
-    │   └── generate-command.sh
+    ├── migrations/
+    │   └── <timestamp>-<description>.sql
     └── src/
-        ├── index.ts
+        ├── main.ts
         ├── server/
         │   ├── app.ts
         │   ├── server.ts
@@ -158,552 +157,122 @@ apps/
         │   ├── env.ts
         │   ├── app-config.ts
         │   ├── auth-config.ts
-        │   ├── database-config.ts
-        │   └── eventstore-config.ts
+        │   └── database-config.ts
         ├── plugins/
         │   ├── auth.plugin.ts
         │   ├── cors.plugin.ts
         │   ├── helmet.plugin.ts
-        │   ├── metrics.plugin.ts
+        │   ├── rate-limit.plugin.ts
         │   ├── request-context.plugin.ts
-        │   ├── swagger.plugin.ts
         │   └── validation.plugin.ts
         ├── lib/
         │   ├── database/
         │   │   ├── postgres.ts
-        │   │   └── clickhouse.ts
-        │   ├── eventstore/
-        │   │   ├── client.ts
-        │   │   ├── append-events.ts
-        │   │   ├── read-stream.ts
-        │   │   ├── subscribe.ts
-        │   │   └── stream-name.ts
+        │   │   ├── transaction.ts
+        │   │   ├── migrations.ts
+        │   │   └── outbox.ts
+        │   ├── messaging/
+        │   │   ├── kafka.ts
+        │   │   ├── producer.ts
+        │   │   ├── consumer.ts
+        │   │   └── topics.ts
         │   ├── logger/
         │   │   └── logger.ts
         │   ├── errors/
         │   │   ├── domain-error.ts
         │   │   ├── not-found-error.ts
         │   │   ├── unauthorized-error.ts
+        │   │   ├── concurrency-conflict-error.ts
         │   │   └── validation-error.ts
         │   ├── ids/
-        │   │   ├── generate-id.ts
-        │   │   └── generate-trace-id.ts
         │   └── time/
-        │       ├── now.ts
-        │       └── timestamp.ts
         ├── types/
-        │   ├── command.ts
-        │   ├── domain-event.ts
-        │   ├── request-context.ts
-        │   └── projection.ts
+        │   ├── event-metadata.ts
+        │   └── request-context.ts
+        ├── testing/
+        │   └── <shared integration-test harness>
         ├── integrations/
         │   ├── email/
-        │   │   └── email-client.ts
-        │   ├── push/
-        │   │   └── push-client.ts
         │   ├── storage/
-        │   │   ├── storage-client.ts
-        │   │   ├── generate-upload-url.ts
-        │   │   └── delete-object.ts
-        │   ├── transcoder/
-        │   │   └── transcoder-client.ts
         │   ├── metadata/
-        │   │   └── metadata-client.ts
-        │   └── projection-writer/
-        │       └── projection-writer-client.ts
-        ├── workflows/
-        │   ├── uploads/
-        │   │   ├── process-upload.workflow.ts
-        │   │   ├── finalize-upload.workflow.ts
-        │   │   └── delete-upload.workflow.ts
-        │   ├── moments/
-        │   │   ├── create-moment.workflow.ts
-        │   │   └── finalize-moment.workflow.ts
-        │   ├── auth/
-        │   │   ├── magic-link-login.workflow.ts
-        │   │   └── revoke-user-sessions.workflow.ts
-        │   ├── notifications/
-        │   │   └── deliver-notification.workflow.ts
-        │   └── moderation/
-        │       ├── remove-content.workflow.ts
-        │       └── suspend-user.workflow.ts
+        │   └── places/
+        ├── projections/
+        │   └── <projector + projection repository per read model>
+        ├── workers/
+        │   ├── outbox-publisher/
+        │   ├── media/
+        │   └── projections/
         └── features/
-            ├── auth/
-            │   ├── index.ts
-            │   ├── aggregates/
-            │   │   ├── identity.aggregate.ts
-            │   │   ├── identity.aggregate.test.ts
-            │   │   ├── session.aggregate.ts
-            │   │   └── session.aggregate.test.ts
-            │   ├── commands/
-            │   │   ├── create-identity.command.ts
-            │   │   ├── create-identity.handler.ts
-            │   │   ├── create-identity.handler.test.ts
-            │   │   ├── add-email-to-identity.command.ts
-            │   │   ├── add-email-to-identity.handler.ts
-            │   │   ├── add-email-to-identity.handler.test.ts
-            │   │   ├── verify-identity-email.command.ts
-            │   │   ├── verify-identity-email.handler.ts
-            │   │   ├── verify-identity-email.handler.test.ts
-            │   │   ├── remove-email-from-identity.command.ts
-            │   │   ├── remove-email-from-identity.handler.ts
-            │   │   ├── remove-email-from-identity.handler.test.ts
-            │   │   ├── link-oauth-provider.command.ts
-            │   │   ├── link-oauth-provider.handler.ts
-            │   │   ├── unlink-oauth-provider.command.ts
-            │   │   ├── unlink-oauth-provider.handler.ts
-            │   │   ├── enable-two-factor-auth.command.ts
-            │   │   ├── enable-two-factor-auth.handler.ts
-            │   │   ├── disable-two-factor-auth.command.ts
-            │   │   ├── disable-two-factor-auth.handler.ts
-            │   │   ├── create-session.command.ts
-            │   │   ├── create-session.handler.ts
-            │   │   ├── refresh-session.command.ts
-            │   │   ├── refresh-session.handler.ts
-            │   │   ├── revoke-session.command.ts
-            │   │   ├── revoke-session.handler.ts
-            │   │   ├── expire-session.command.ts
-            │   │   ├── expire-session.handler.ts
-            │   │   ├── revoke-all-user-sessions.command.ts
-            │   │   └── revoke-all-user-sessions.handler.ts
-            │   ├── events/
-            │   │   ├── identity-created.event.ts
-            │   │   ├── email-added.event.ts
-            │   │   ├── email-verified.event.ts
-            │   │   ├── email-removed.event.ts
-            │   │   ├── oauth-linked.event.ts
-            │   │   ├── oauth-unlinked.event.ts
-            │   │   ├── two-factor-enabled.event.ts
-            │   │   ├── two-factor-disabled.event.ts
-            │   │   ├── session-created.event.ts
-            │   │   ├── session-refreshed.event.ts
-            │   │   ├── session-revoked.event.ts
-            │   │   └── session-expired.event.ts
-            │   ├── event-handlers/
-            │   │   ├── session-created.handler.ts
-            │   │   ├── session-revoked.handler.ts
-            │   │   ├── identity-created.handler.ts
-            │   │   └── session-expired.handler.ts
-            │   ├── projections/
-            │   │   ├── identity.projection.ts
-            │   │   ├── session.projection.ts
-            │   │   └── auth-read-model.projection.ts
-            │   ├── queries/
-            │   │   ├── get-session.query.ts
-            │   │   ├── get-session.handler.ts
-            │   │   ├── get-session.handler.test.ts
-            │   │   ├── get-sessions-for-user.query.ts
-            │   │   ├── get-sessions-for-user.handler.ts
-            │   │   ├── get-auth-providers-for-user.query.ts
-            │   │   ├── get-auth-providers-for-user.handler.ts
-            │   │   ├── get-two-factor-status.query.ts
-            │   │   ├── get-two-factor-status.handler.ts
-            │   │   ├── validate-session.query.ts
-            │   │   └── validate-session.handler.ts
-            │   ├── routes/
-            │   │   ├── auth.routes.ts
-            │   │   └── auth.routes.test.ts
-            │   ├── schemas/
-            │   │   ├── create-session.schema.ts
-            │   │   ├── magic-link.schema.ts
-            │   │   ├── oauth.schema.ts
-            │   │   └── session.schema.ts
-            │   └── utils/
-            │       ├── auth-stream-name.ts
-            │       └── normalize-email.ts
+            ├── authentication/
             ├── authorization/
-            │   ├── index.ts
-            │   ├── aggregates/
-            │   │   ├── user-authorization.aggregate.ts
-            │   │   └── user-authorization.aggregate.test.ts
-            │   ├── commands/
-            │   │   ├── assign-user-role.command.ts
-            │   │   ├── assign-user-role.handler.ts
-            │   │   ├── assign-user-role.handler.test.ts
-            │   │   ├── remove-user-role.command.ts
-            │   │   ├── remove-user-role.handler.ts
-            │   │   └── remove-user-role.handler.test.ts
-            │   ├── events/
-            │   │   ├── user-role-assigned.event.ts
-            │   │   └── user-role-removed.event.ts
-            │   ├── event-handlers/
-            │   │   ├── user-role-assigned.handler.ts
-            │   │   └── user-role-removed.handler.ts
-            │   ├── projections/
-            │   │   └── user-authorization.projection.ts
-            │   ├── queries/
-            │   │   ├── get-user-authorization.query.ts
-            │   │   ├── get-user-authorization.handler.ts
-            │   │   ├── get-user-authorization.handler.test.ts
-            │   │   ├── get-current-user-permissions.query.ts
-            │   │   ├── get-current-user-permissions.handler.ts
-            │   │   └── get-current-user-permissions.handler.test.ts
-            │   ├── policies/
-            │   │   ├── authorization-policy.ts
-            │   │   ├── authorization-policy.test.ts
-            │   │   ├── permission-registry.ts
-            │   │   ├── role-permissions.ts
-            │   │   └── role-permissions.test.ts
-            │   ├── routes/
-            │   │   ├── authorization.routes.ts
-            │   │   └── authorization.routes.test.ts
-            │   ├── schemas/
-            │   │   ├── assign-user-role.schema.ts
-            │   │   ├── remove-user-role.schema.ts
-            │   │   └── authorization.schema.ts
-            │   └── utils/
-            │       └── authorization-stream-name.ts
             ├── users/
-            │   ├── index.ts
-            │   ├── aggregates/
-            │   │   ├── user.aggregate.ts
-            │   │   └── user.aggregate.test.ts
-            │   ├── commands/
-            │   │   ├── create-user.command.ts
-            │   │   ├── create-user.handler.ts
-            │   │   ├── update-user-profile.command.ts
-            │   │   ├── update-user-profile.handler.ts
-            │   │   ├── update-username.command.ts
-            │   │   ├── update-username.handler.ts
-            │   │   ├── add-user-email.command.ts
-            │   │   ├── add-user-email.handler.ts
-            │   │   ├── remove-user-email.command.ts
-            │   │   ├── remove-user-email.handler.ts
-            │   │   ├── deactivate-user.command.ts
-            │   │   ├── deactivate-user.handler.ts
-            │   │   ├── reactivate-user.command.ts
-            │   │   ├── reactivate-user.handler.ts
-            │   │   ├── delete-user.command.ts
-            │   │   └── delete-user.handler.ts
-            │   ├── events/
-            │   │   ├── user-created.event.ts
-            │   │   ├── user-profile-updated.event.ts
-            │   │   ├── user-username-updated.event.ts
-            │   │   ├── user-email-added.event.ts
-            │   │   ├── user-email-removed.event.ts
-            │   │   ├── user-deactivated.event.ts
-            │   │   ├── user-reactivated.event.ts
-            │   │   └── user-deleted.event.ts
-            │   ├── event-handlers/
-            │   │   ├── user-created.handler.ts
-            │   │   ├── user-deactivated.handler.ts
-            │   │   └── user-deleted.handler.ts
-            │   ├── projections/
-            │   │   ├── user-profile.projection.ts
-            │   │   └── user-status.projection.ts
-            │   ├── queries/
-            │   │   ├── get-user-by-id.query.ts
-            │   │   ├── get-user-by-id.handler.ts
-            │   │   ├── get-user-by-username.query.ts
-            │   │   ├── get-user-by-username.handler.ts
-            │   │   ├── get-user-profile.query.ts
-            │   │   ├── get-user-profile.handler.ts
-            │   │   ├── get-current-user.query.ts
-            │   │   ├── get-current-user.handler.ts
-            │   │   ├── get-user-preferences.query.ts
-            │   │   ├── get-user-preferences.handler.ts
-            │   │   ├── get-user-emails.query.ts
-            │   │   ├── get-user-emails.handler.ts
-            │   │   ├── get-user-status.query.ts
-            │   │   └── get-user-status.handler.ts
-            │   ├── routes/
-            │   │   └── users.routes.ts
-            │   ├── schemas/
-            │   │   ├── user-profile.schema.ts
-            │   │   └── username.schema.ts
-            │   └── utils/
-            │       └── normalize-username.ts
-            ├── uploads/
-            │   ├── index.ts
-            │   ├── aggregates/
-            │   │   ├── upload.aggregate.ts
-            │   │   └── upload.aggregate.test.ts
-            │   ├── commands/
-            │   │   ├── register-upload.command.ts
-            │   │   ├── register-upload.handler.ts
-            │   │   ├── mark-upload-received.command.ts
-            │   │   ├── mark-upload-received.handler.ts
-            │   │   ├── attach-upload-metadata.command.ts
-            │   │   ├── attach-upload-metadata.handler.ts
-            │   │   ├── start-upload-processing.command.ts
-            │   │   ├── start-upload-processing.handler.ts
-            │   │   ├── mark-upload-processed.command.ts
-            │   │   ├── mark-upload-processed.handler.ts
-            │   │   ├── finalize-upload.command.ts
-            │   │   ├── finalize-upload.handler.ts
-            │   │   ├── fail-upload.command.ts
-            │   │   ├── fail-upload.handler.ts
-            │   │   ├── retry-upload-processing.command.ts
-            │   │   ├── retry-upload-processing.handler.ts
-            │   │   ├── delete-upload.command.ts
-            │   │   └── delete-upload.handler.ts
-            │   ├── events/
-            │   │   ├── upload-registered.event.ts
-            │   │   ├── upload-received.event.ts
-            │   │   ├── upload-metadata-attached.event.ts
-            │   │   ├── upload-processing-started.event.ts
-            │   │   ├── upload-processed.event.ts
-            │   │   ├── upload-finalized.event.ts
-            │   │   ├── upload-failed.event.ts
-            │   │   └── upload-deleted.event.ts
-            │   ├── event-handlers/
-            │   │   ├── upload-registered.handler.ts
-            │   │   ├── upload-received.handler.ts
-            │   │   ├── upload-finalized.handler.ts
-            │   │   └── upload-deleted.handler.ts
-            │   ├── projections/
-            │   │   ├── upload-status.projection.ts
-            │   │   ├── upload-metadata.projection.ts
-            │   │   └── upload-read-model.projection.ts
-            │   ├── queries/
-            │   │   ├── get-upload-by-id.query.ts
-            │   │   ├── get-upload-by-id.handler.ts
-            │   │   ├── get-uploads-for-user.query.ts
-            │   │   ├── get-uploads-for-user.handler.ts
-            │   │   ├── get-upload-status.query.ts
-            │   │   ├── get-upload-status.handler.ts
-            │   │   ├── get-upload-metadata.query.ts
-            │   │   ├── get-upload-metadata.handler.ts
-            │   │   ├── get-upload-processing-errors.query.ts
-            │   │   └── get-upload-processing-errors.handler.ts
-            │   ├── routes/
-            │   │   └── uploads.routes.ts
-            │   ├── schemas/
-            │   │   ├── register-upload.schema.ts
-            │   │   └── upload.schema.ts
-            │   └── utils/
-            │       └── infer-media-kind.ts
             ├── moments/
-            │   ├── index.ts
-            │   ├── aggregates/
-            │   │   ├── moment.aggregate.ts
-            │   │   └── moment.aggregate.test.ts
-            │   ├── commands/
-            │   │   ├── create-moment.command.ts
-            │   │   ├── create-moment.handler.ts
-            │   │   ├── update-moment-metadata.command.ts
-            │   │   ├── update-moment-metadata.handler.ts
-            │   │   ├── finalize-moment.command.ts
-            │   │   ├── finalize-moment.handler.ts
-            │   │   ├── delete-moment.command.ts
-            │   │   ├── delete-moment.handler.ts
-            │   │   ├── restore-moment.command.ts
-            │   │   ├── restore-moment.handler.ts
-            │   │   ├── flag-moment.command.ts
-            │   │   └── flag-moment.handler.ts
-            │   ├── events/
-            │   │   ├── moment-created.event.ts
-            │   │   ├── moment-metadata-updated.event.ts
-            │   │   ├── moment-finalized.event.ts
-            │   │   ├── moment-deleted.event.ts
-            │   │   ├── moment-restored.event.ts
-            │   │   └── moment-flagged.event.ts
-            │   ├── event-handlers/
-            │   │   ├── moment-created.handler.ts
-            │   │   ├── moment-finalized.handler.ts
-            │   │   ├── moment-deleted.handler.ts
-            │   │   └── moment-restored.handler.ts
-            │   ├── projections/
-            │   │   └── moment-read-model.projection.ts
-            │   ├── queries/
-            │   │   ├── get-moment-by-id.query.ts
-            │   │   ├── get-moment-by-id.handler.ts
-            │   │   ├── get-moments-for-upload.query.ts
-            │   │   ├── get-moments-for-upload.handler.ts
-            │   │   ├── get-moment-metadata.query.ts
-            │   │   ├── get-moment-metadata.handler.ts
-            │   │   ├── get-moment-status.query.ts
-            │   │   ├── get-moment-status.handler.ts
-            │   │   ├── get-moments-by-time-range.query.ts
-            │   │   ├── get-moments-by-time-range.handler.ts
-            │   │   ├── get-moments-by-user.query.ts
-            │   │   └── get-moments-by-user.handler.ts
-            │   ├── routes/
-            │   │   └── moments.routes.ts
-            │   ├── schemas/
-            │   │   ├── moment.schema.ts
-            │   │   ├── create-moment.schema.ts
-            │   └── utils/
-            │       ├── validate-time-range.ts
-            │       └── overlap.ts
+            ├── uploads/
+            ├── locations/
+            ├── real-world-events/
+            ├── social-graph/
             ├── reactions/
-            │   ├── index.ts
-            │   ├── aggregates/
-            │   │   ├── reaction.aggregate.ts
-            │   │   └── reaction.aggregate.test.ts
-            │   ├── commands/
-            │   │   ├── add-reaction.command.ts
-            │   │   ├── add-reaction.handler.ts
-            │   │   ├── change-reaction.command.ts
-            │   │   ├── change-reaction.handler.ts
-            │   │   ├── remove-reaction.command.ts
-            │   │   ├── remove-reaction.handler.ts
-            │   │   ├── clear-reactions-for-moment.command.ts
-            │   │   ├── clear-reactions-for-moment.handler.ts
-            │   │   ├── clear-reactions-for-user.command.ts
-            │   │   └── clear-reactions-for-user.handler.ts
-            │   ├── events/
-            │   │   ├── reaction-added.event.ts
-            │   │   ├── reaction-changed.event.ts
-            │   │   ├── reaction-removed.event.ts
-            │   │   ├── reaction-cleared-for-moment.event.ts
-            │   │   └── reaction-cleared-for-user.event.ts
-            │   ├── event-handlers/
-            │   │   ├── reaction-added.handler.ts
-            │   │   ├── reaction-changed.handler.ts
-            │   │   ├── reaction-removed.handler.ts
-            │   │   └── reaction-cleared.handler.ts
-            │   ├── projections/
-            │   │   ├── reaction-summary.projection.ts
-            │   │   ├── user-reaction.projection.ts
-            │   │   └── moment-reaction-counts.projection.ts
-            │   ├── queries/
-            │   │   ├── get-reactions-for-moment.query.ts
-            │   │   ├── get-reactions-for-moment.handler.ts
-            │   │   ├── get-reaction-summary-for-moment.query.ts
-            │   │   ├── get-reaction-summary-for-moment.handler.ts
-            │   │   ├── get-user-reaction-for-moment.query.ts
-            │   │   ├── get-user-reaction-for-moment.handler.ts
-            │   │   ├── get-reactions-by-user.query.ts
-            │   │   └── get-reactions-by-user.handler.ts
-            │   ├── routes/
-            │   │   └── reactions.routes.ts
-            │   ├── schemas/
-            │   │   └── reaction.schema.ts
-            │   └── utils/
-            │       └── normalize-reaction-type.ts
-            ├── timelines/
-            │   ├── index.ts
-            │   ├── projections/
-            │   │   ├── timeline-by-time.projection.ts
-            │   │   ├── timeline-by-location.projection.ts
-            │   │   ├── timeline-by-user.projection.ts
-            │   │   ├── timeline-by-tag.projection.ts
-            │   │   ├── timeline-by-network.projection.ts
-            │   │   ├── timeline-head.projection.ts
-            │   │   └── timeline-slice.projection.ts
-            │   ├── schemas/
-            │   │   └── timeline-slice.schema.ts
-            │   └── utils/
-            │       ├── encode-cursor.ts
-            │       └── decode-cursor.ts
+            ├── comments/
+            ├── causality/
+            ├── historical-significance/
+            ├── moderation/
             ├── notifications/
-            │   ├── index.ts
-            │   ├── aggregates/
-            │   │   ├── notification.aggregate.ts
-            │   │   └── notification.aggregate.test.ts
-            │   ├── commands/
-            │   │   ├── create-notification.command.ts
-            │   │   ├── create-notification.handler.ts
-            │   │   ├── mark-notification-read.command.ts
-            │   │   ├── mark-notification-read.handler.ts
-            │   │   ├── mark-all-notifications-read.command.ts
-            │   │   ├── mark-all-notifications-read.handler.ts
-            │   │   ├── dismiss-notification.command.ts
-            │   │   ├── dismiss-notification.handler.ts
-            │   │   ├── delete-notification.command.ts
-            │   │   └── delete-notification.handler.ts
-            │   ├── events/
-            │   │   ├── notification-created.event.ts
-            │   │   ├── notification-read.event.ts
-            │   │   ├── notification-dismissed.event.ts
-            │   │   └── notification-deleted.event.ts
-            │   ├── event-handlers/
-            │   │   ├── notification-created.handler.ts
-            │   │   └── notification-read.handler.ts
-            │   ├── projections/
-            │   │   ├── notification-inbox.projection.ts
-            │   │   ├── unread-notification-count.projection.ts
-            │   │   └── recent-notifications.projection.ts
-            │   ├── queries/
-            │   │   ├── get-notifications-for-user.query.ts
-            │   │   ├── get-notifications-for-user.handler.ts
-            │   │   ├── get-unread-notification-count.query.ts
-            │   │   ├── get-unread-notification-count.handler.ts
-            │   │   ├── get-notification-by-id.query.ts
-            │   │   ├── get-notification-by-id.handler.ts
-            │   │   ├── get-notification-preferences.query.ts
-            │   │   ├── get-notification-preferences.handler.ts
-            │   │   ├── get-recent-notifications.query.ts
-            │   │   └── get-recent-notifications.handler.ts
-            │   ├── routes/
-            │   │   └── notifications.routes.ts
-            │   ├── schemas/
-            │   │   └── notification.schema.ts
-            │   └── utils/
-            │       └── notification-kind.ts
-            └── moderation/
-                ├── index.ts
-                ├── aggregates/
-                │   ├── moderation.aggregate.ts
-                │   └── moderation.aggregate.test.ts
-                ├── commands/
-                │   ├── open-moderation-case.command.ts
-                │   ├── open-moderation-case.handler.ts
-                │   ├── review-moderation-case.command.ts
-                │   ├── review-moderation-case.handler.ts
-                │   ├── restrict-content.command.ts
-                │   ├── restrict-content.handler.ts
-                │   ├── remove-content.command.ts
-                │   ├── remove-content.handler.ts
-                │   ├── restore-content.command.ts
-                │   ├── restore-content.handler.ts
-                │   ├── escalate-moderation-case.command.ts
-                │   ├── escalate-moderation-case.handler.ts
-                │   ├── close-moderation-case.command.ts
-                │   └── close-moderation-case.handler.ts
-                ├── events/
-                │   ├── moderation-case-opened.event.ts
-                │   ├── moderation-case-reviewed.event.ts
-                │   ├── moderation-content-restricted.event.ts
-                │   ├── moderation-content-removed.event.ts
-                │   ├── moderation-content-restored.event.ts
-                │   ├── moderation-case-escalated.event.ts
-                │   └── moderation-case-closed.event.ts
-                ├── event-handlers/
-                │   ├── moderation-content-restricted.handler.ts
-                │   ├── moderation-content-removed.handler.ts
-                │   ├── moderation-content-restored.handler.ts
-                │   ├── moderation-case-opened.handler.ts
-                │   └── moderation-case-closed.handler.ts
-                ├── projections/
-                │   ├── moderation-status.projection.ts
-                │   ├── moderation-history.projection.ts
-                │   └── open-moderation-flags.projection.ts
-                ├── queries/
-                │   ├── get-moderation-status-for-content.query.ts
-                │   ├── get-moderation-status-for-content.handler.ts
-                │   ├── get-moderation-status-for-user.query.ts
-                │   ├── get-moderation-status-for-user.handler.ts
-                │   ├── get-open-moderation-flags.query.ts
-                │   ├── get-open-moderation-flags.handler.ts
-                │   ├── get-moderation-history.query.ts
-                │   ├── get-moderation-history.handler.ts
-                │   ├── get-moderation-case-by-id.query.ts
-                │   └── get-moderation-case-by-id.handler.ts
-                ├── routes/
-                │   └── moderation.routes.ts
-                ├── schemas/
-                │   └── moderation.schema.ts
-                └── utils/
-                    └── moderation-target.ts
+            └── health/
 ```
+
+### The feature template
+
+Every feature takes the same shape. `locations` is shown in full because it is the shortest complete example; the rest differ only in how many files each part needs.
+
+```text
+features/locations/
+├── location.routes.ts
+├── location.service.ts
+├── location.service.integration.test.ts
+├── location.repository.ts
+├── location.policy.ts
+├── location.policy.test.ts
+├── location.types.ts
+└── location.integration.test.ts
+```
+
+- `*.routes.ts` — Fastify registration, schemas, status codes, and preHandlers. Calls services and nothing else.
+- `*.service.ts` — a class. Orchestrates one use case per method, owns the transaction, and enqueues any integration event inside it. Methods are named for what they do without repeating the noun the class already carries: `record`, `finalize`, `updateHandle`.
+- `*.repository.ts` — a class holding the SQL. Reads take the pool; writes take a transaction, so the transaction stays visible at the call site.
+- `*.policy.ts` — pure functions. Where the rules live, and the layer that gets exhaustive unit tests.
+- `*.types.ts` — feature-local types. Types crossing the API boundary belong in `packages/contracts`.
+- `*.schemas.ts` — only when a feature needs a request shape no client shares. Otherwise validation comes from `packages/contracts`.
+
+This is a default shape, not a checklist. A feature omits any file it has no real responsibility for; `health/` is a single routes file and correctly so.
+
+### Where the tests go
+
+- Rules are proven by unit tests against the policy module. These need no infrastructure and run in milliseconds.
+- Services are proven by integration tests against real PostgreSQL. A service orchestrates repositories, so unit-testing it would mean substituting the database — and a hand-written fake proves only that the service works against the fake.
+- Repositories get their own tests when they contain query composition, row mapping, or transactional behaviour worth isolating. A one-line pass-through is covered adequately by the feature's integration test.
 
 ### API placement rules
 
 The major directory meanings are:
 
 - `src/server/` owns Fastify composition and server startup.
-- `src/config/` owns API-local configuration.
+- `src/config/` owns API-local configuration. Environment validation stays here rather than in a shared package: the API's environment is the API's business.
 - `src/plugins/` owns Fastify plugins.
 - `src/lib/` owns infrastructure-facing primitives used across API features.
 - `src/integrations/` owns explicit external-system adapters.
-- `src/workflows/` owns multi-step application workflows crossing feature/integration boundaries.
+- `src/projections/` owns read-model projectors and their repositories.
+- `src/workers/` owns processes that run outside the HTTP runtime.
+- `src/testing/` owns the shared integration-test harness.
 - `src/features/` owns domain/application behavior by feature.
-- Within a feature, `aggregates/`, `commands/`, `events/`, `event-handlers/`, `projections/`, `queries/`, `routes/`, `schemas/`, and `utils/` remain colocated with that feature.
 - Tests are colocated next to the implementation files they protect.
 
-The API does not expose a global `controllers/` or `services/` layer as its primary architecture.
+The API has no controller layer. With `fastify-type-provider-zod` the route handler already receives a validated, typed request, so a class between the route and the service would translate nothing (ADR-091).
+
+Business rules must not accumulate in route handlers. A route that needs a rule reaches into a service to find it.
+
+Commands and queries are not separated. A method that changes state and a method that reads it sit on the same service class.
+
+Dependencies are wired by hand at the composition root in `main.ts`. There is no container.
 
 ---
 
@@ -1270,7 +839,7 @@ The major directory meanings are:
 - `src/styles/` owns global styling primitives.
 - Tests are colocated with the components/hooks they exercise.
 
-The Gatsby application should not acquire mobile-product domain aggregates, Timeline rendering engines, command handlers, or authoritative state.
+The Gatsby application should not acquire mobile-product domain logic, Timeline rendering engines, or authoritative state.
 
 ---
 
@@ -1487,13 +1056,10 @@ The major directory meanings are:
 The aggregator deliberately does **not** own:
 
 ```text
-aggregates/
-commands/
-domain events/
-event handlers that mutate authoritative state/
+services that mutate authoritative state/
 projection writers/
-EventStoreDB clients/
 authoritative Postgres repositories/
+outbox writers/
 authentication/session creation/
 state-mutating workflows/
 ```
@@ -1518,7 +1084,7 @@ It should contain canonical serialized boundary definitions such as:
 - stable error codes;
 - identifiers/types whose serialized representation is part of a boundary.
 
-It should **not** contain aggregate implementations, repositories, Fastify handlers, ClickHouse adapters, React components, or application services.
+It should **not** contain repositories, Fastify handlers, ClickHouse adapters, React components, or application services.
 
 ## `packages/api-client`
 
@@ -1628,11 +1194,11 @@ Where an application contains meaningful domain or user-facing features, related
 Unit tests should remain adjacent to implementation files:
 
 ```text
-moment.aggregate.ts
-moment.aggregate.test.ts
+moment.policy.ts
+moment.policy.test.ts
 
-get-timeline-slice.query.ts
-get-timeline-slice.query.test.ts
+moment.repository.ts
+moment.repository.test.ts
 ```
 
 A small application-level integration/e2e suite may be introduced separately when justified, but it does not replace colocated unit tests.
@@ -1687,7 +1253,7 @@ The finalized product specifications govern the structure. In particular, Moment
 
 The API includes a dedicated `features/authorization/` module that owns role assignment, permission policy, authorization read state, and privileged role-management boundaries. Scene-detection integration has been removed because it has no remaining product responsibility.
 
-`features/timelines/` owns no aggregate, no commands, and no events. The Timeline is derived, so there is nothing to create, rename, archive, or delete: the module exists to maintain the read models that Timeline navigation is composed from, and its absence of a write side is deliberate rather than an omission (ADR-084). The current `feed-aggregator` repository name remains unchanged until an explicit rename decision is made.
+`features/timelines/` owns no service that writes and no routes that mutate. The Timeline is derived, so there is nothing to create, rename, archive, or delete: the module exists to maintain the read models that Timeline navigation is composed from, and its absence of a write side is deliberate rather than an omission (ADR-084). The current `feed-aggregator` repository name remains unchanged until an explicit rename decision is made.
 
 # Adding New Applications
 
@@ -1730,23 +1296,20 @@ apps/api/src/features/<feature>/
 
 with only the subdirectories the feature actually needs.
 
-Do not scaffold every possible CQRS/Event Sourcing directory mechanically when the feature does not use it.
+Do not scaffold every file in the template mechanically when the feature does not need it.
 
 A feature may have:
 
 ```text
-aggregates/
-commands/
-events/
-event-handlers/
-projections/
-queries/
-routes/
-schemas/
-utils/
+<feature>.routes.ts
+<feature>.service.ts
+<feature>.repository.ts
+<feature>.policy.ts
+<feature>.types.ts
+<feature>.schemas.ts
 ```
 
-but structure should follow actual behavior rather than ceremony.
+but structure should follow actual behavior rather than ceremony. `features/health/` is a single routes file, and that is correct.
 
 ---
 
@@ -1808,7 +1371,7 @@ A full consumer Timeline implementation should not appear in Gatsby incidentally
 5. `packages/contracts` is the principal cross-application contract boundary.
 6. The API is authoritative for domain mutations.
 7. The feed aggregator is read-only.
-8. The feed aggregator consumes read models; it does not own authoritative projections or EventStoreDB streams.
+8. The feed aggregator consumes read models; it does not own authoritative projections or write to authoritative state.
 9. The mobile app intentionally consumes both REST and GraphQL.
 10. The Gatsby web application is not the primary consumer product.
 11. Tests are colocated with implementation by default.
@@ -1818,7 +1381,7 @@ A full consumer Timeline implementation should not appear in Gatsby incidentally
 15. Shared packages must represent genuine shared ownership rather than convenience.
 16. A Moment's unlimited media semantics must not be replaced by a structural media-count limit.
 17. Recursive Sub-Moment hierarchies are prohibited by the finalized product model and must not appear in the canonical repository structure.
-18. The Timeline has no aggregate and no lifecycle commands; `features/timelines/` owns Timeline read models, and read composition belongs to `apps/feed-aggregator`.
+18. The Timeline has no write side; `features/timelines/` owns Timeline read models, and read composition belongs to `apps/feed-aggregator`.
 19. `feed-aggregator` remains the canonical repository name until explicitly renamed.
 20. New applications and datastores require architectural justification rather than stylistic preference.
 

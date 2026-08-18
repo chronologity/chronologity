@@ -202,7 +202,7 @@ Features must not bypass architectural boundaries merely because code is colocat
 
 # ADR-007 — Do Not Use a Traditional Controller/Service Architecture
 
-**Status:** Accepted
+**Status:** Superseded by ADR-091
 
 ## Decision
 
@@ -222,7 +222,7 @@ Business rules must not accumulate in Fastify route handlers.
 
 # ADR-008 — Use CQRS
 
-**Status:** Accepted
+**Status:** Superseded by ADR-091
 
 ## Decision
 
@@ -253,7 +253,7 @@ The product must explicitly handle propagation lag.
 
 # ADR-009 — Use Event Sourcing Selectively for Domain Authority
 
-**Status:** Accepted
+**Status:** Superseded by ADR-092
 
 ## Decision
 
@@ -285,7 +285,7 @@ Event Sourcing must not be applied mechanically to every table or feature.
 
 # ADR-010 — EventStoreDB Is Not the Timeline Query Database
 
-**Status:** Accepted
+**Status:** Superseded by ADR-092
 
 ## Decision
 
@@ -401,7 +401,7 @@ Sensitive fields must not leak merely because they exist in domain history.
 
 # ADR-015 — Use an Event Publisher Between EventStoreDB and Kafka
 
-**Status:** Accepted
+**Status:** Superseded by ADR-093
 
 ## Decision
 
@@ -1761,7 +1761,6 @@ The following remain implementation/infrastructure choices rather than accepted 
 - cloud provider;
 - primary production region;
 - container orchestration platform;
-- EventStoreDB hosting model;
 - managed Kafka provider;
 - managed PostgreSQL provider;
 - ClickHouse hosting model;
@@ -1797,13 +1796,13 @@ These should not be silently treated as settled during implementation.
 8. Web uses Gatsby.
 9. API uses Node.js, TypeScript, and Fastify.
 10. Backend domain/application organization is feature-based.
-11. CQRS separates writes from optimized reads.
-12. Event Sourcing is selective rather than universal.
-13. EventStoreDB is the event-sourced authority, not the Timeline query engine.
+11. API features are organised as routes, services, and repositories.
+12. PostgreSQL holds authoritative state; there is no event store.
+13. Integration Events reach Kafka through the transactional outbox alone.
 14. PostgreSQL owns relational/operational state where appropriate.
 15. ClickHouse owns derived Timeline/historical read models.
 16. Kafka is the canonical durable asynchronous messaging backbone.
-17. Domain Events and Integration Events remain distinct.
+17. Integration Events are enqueued deliberately by the service that caused the change.
 18. Distributed publication is at-least-once and consumers are idempotent.
 19. Projections are rebuildable.
 20. Chronology uses occurrence time.
@@ -1822,7 +1821,7 @@ These should not be silently treated as settled during implementation.
 33. Authentication and authorization are separate.
 34. Privacy changes propagate across all exposure surfaces.
 35. Deletion is a cross-system workflow.
-36. Replay/restore must not resurrect erased data.
+36. Rebuild and restore must not resurrect erased data.
 37. Notifications are asynchronous derived behavior.
 38. Cache never owns truth.
 39. Redis is not required without demonstrated need.
@@ -2025,7 +2024,7 @@ Integration tests now run against a database created fresh for each run, which r
 
 # ADR-078 — Make the Session the Revocation Boundary, Decided From Its Aggregate
 
-**Status:** Accepted
+**Status:** Superseded by ADR-094
 
 ## Decision
 
@@ -2075,7 +2074,7 @@ A client that races two refreshes against itself signs its user out. Clients mus
 
 # ADR-080 — Never Write Secrets or Erasable Personal Data to Event History
 
-**Status:** Accepted
+**Status:** Superseded by ADR-095
 
 ## Decision
 
@@ -2279,7 +2278,7 @@ Embedded GPS metadata is deliberately not extracted, even though the decoder cou
 
 # ADR-087 — Translate Domain Events Into Integration Events Deliberately
 
-**Status:** Accepted
+**Status:** Superseded by ADR-096
 
 ## Decision
 
@@ -2408,3 +2407,201 @@ The application must identify itself in requests and respect a rate limit, both 
 Search quality is lower than a paid provider's, and duplicate places will accumulate. Merging duplicates is deferred: `locations.md` still lists who may approve a merge and how a wrong one is reversed among its open questions, and guessing now would mean unpicking later.
 
 Precision is recorded rather than inferred from a coordinate's decimal places, and a place whose position is unknown must carry no coordinates at all — enforced by a database constraint. Inventing a coordinate to fill a gap would fabricate exactly the historical certainty this model exists to protect.
+
+---
+
+# ADR-091 — Organise API Features as Routes, Services, and Repositories
+
+**Status:** Accepted
+
+Supersedes ADR-007 and ADR-008.
+
+## Decision
+
+An API feature is a route module, a service class, a repository class, and — where it has rules worth stating on their own — a pure policy module. Routes register HTTP concerns and call services. Services orchestrate a use case and own the transaction. Repositories hold the SQL. Policies are pure functions.
+
+There is no controller layer: with `fastify-type-provider-zod` the route handler already receives a validated, typed request, and a class between it and the service would translate nothing.
+
+Commands and queries are no longer separated. A service method that changes something and a service method that reads something sit on the same class.
+
+Service methods are named for what they do, without repeating the noun the class already carries: `locationService.record(...)`, `uploadService.finalize(...)`, `userService.updateHandle(...)`.
+
+## Alternatives Considered
+
+Keeping the command/query split while dropping event sourcing. This would have preserved the file-per-operation shape — a command object, a handler, and a test for each — which is the larger share of the ceremony. The split earns its cost when the read side is a genuinely different model with a different store; inside a single feature reading and writing the same PostgreSQL tables, it produces two directories where one class would do.
+
+Adding a controller layer, as most descriptions of this architecture do. Fastify's schema-validated handler already occupies that role, and across fifteen features a pass-through controller and its test would have added around thirty files that translate a request into the same request.
+
+## Rationale
+
+Five features cost 255 TypeScript files, 69 of them command and query handlers, for behaviour that is mostly create-read-update. The structure was carrying a cost that the domain was not asking for.
+
+The split of responsibility survives the collapse. What made the previous arrangement worth defending was that business rules could not accumulate in route handlers — the concern ADR-007 was written to protect. That protection now comes from the service class and the policy module rather than from the command bus: a route that reaches for a rule has to reach into a service to find it.
+
+Pure policy modules are where the rules actually live, and the codebase already demonstrates this working. `media-policy.ts`, `age-policy.ts`, and `handle-policy.ts` are pure functions with exhaustive unit tests and no infrastructure dependency. Dissolving aggregates does not dissolve them; it moves the surrounding ceremony and leaves them where they were.
+
+## Consequences
+
+Services cannot be unit-tested without substituting the database, and substituting it with a hand-written fake would prove the service works against the fake. So the rules go in policy modules, which are unit-tested exhaustively, and the services are proven by integration tests against real PostgreSQL. This is a deliberate shift of weight toward integration testing, and it is affordable because CI is already the authority for integration tests.
+
+Repositories take the pool for reads and a transaction for writes, which is the convention the existing read-model modules already follow. The transaction stays visible at the call site rather than hiding inside a unit of work.
+
+Dependencies are wired by hand at the composition root. No container: resolving dependencies at runtime from a registry is the ceremony this decision removes, not a different flavour of it.
+
+---
+
+# ADR-092 — Make PostgreSQL the Sole Authority and Remove Event Sourcing
+
+**Status:** Accepted
+
+Supersedes ADR-009 and ADR-010.
+
+## Decision
+
+PostgreSQL holds authoritative state for every feature. EventStoreDB is removed from the architecture, along with aggregate reconstruction, `decide`/`evolve` pairs, and persisted domain events.
+
+Kafka, the transactional outbox, projections, and ClickHouse read models are unaffected.
+
+## Alternatives Considered
+
+Keeping event sourcing and fixing the write ordering, by appending to the event store first and projecting into PostgreSQL asynchronously. This is the architecture that was intended, and it would have been correct. It also means every read becomes eventually consistent, every feature needs a projection and a checkpoint, and read-your-own-writes has to be solved per surface — for a system whose event history nothing reads.
+
+Keeping event sourcing for the features that plausibly want it and dropping it elsewhere, which is what ADR-009 already permitted. No feature turned out to want it: of roughly twenty-two event types across five features, exactly one crosses a boundary.
+
+## Rationale
+
+The implementation never matched the decision, and the gap was structural rather than a bug. Every command handler committed to PostgreSQL first and appended to the event store afterwards, outside the transaction — so a failed append left PostgreSQL holding a record the authority never recorded. This is the unsafe dual write the architecture explicitly forbids, present at all twenty append sites.
+
+The benefits ADR-009 claimed were not being collected. Nothing replays a stream to rebuild state: `lib/projections/runner.ts` has no callers anywhere in the repository. No query reads an aggregate's own history. Deterministic reconstruction was a property of code that ran only to feed the next decision, which PostgreSQL already held.
+
+Auditability, the strongest argument for keeping a log, is already satisfied without one. `auth_audit_events` and `authorization_audit_events` are written in the same transaction as the change they describe, and record refused attempts as well as successful ones — which an aggregate's event stream does not.
+
+The product does not require an event log. Every reference to event sourcing in `docs/product/` is either a disclaimer that persistence is not being prescribed, or a constraint of the form "if event sourcing is used, it must not prevent erasure." What the product actually requires is that occurrence time is authoritative, that changes are explicit and carry provenance, and that nothing is silently rewritten. Rows with occurrence-time columns, explicit correction records, and an audit trail satisfy that.
+
+Removing it also removes a hazard. `docs/product/privacy.md` and `docs/product/moderation.md` both carry open questions about reconciling erasure with append-only history; those questions disappear rather than being answered.
+
+## Consequences
+
+Historical integrity becomes an enforced discipline rather than a structural impossibility. Nothing now prevents an `UPDATE` from destroying a prior value, so where the product requires history to be preserved — corrections in particular — that must be an explicit correction record, and reviews must look for it. This is the real cost of this decision and it should not be understated.
+
+Optimistic concurrency loses its mechanism and needs replacing case by case. Of nineteen expected-version checks, seven were creation guards already backed by a unique constraint and seven sat after the PostgreSQL write had committed, guarding nothing. The five that matter are addressed by conditional updates: rotating a refresh credential only if the presented one is still current, transitioning an upload only from the state it is expected to be in, and letting the first revocation win through `COALESCE`.
+
+Uniqueness stays where it already was. `identity_emails`, `user_handles`, `users.identity_id`, `uploads.storage_key`, and the Location source reference are all enforced by PostgreSQL constraints rather than by application checks that race, and that does not change.
+
+An `identities` table is now required. Identity existed only as a stream, leaving `identity_emails.identity_id` and `users.identity_id` pointing at nothing relational.
+
+The schema has no foreign keys, because referential integrity was the aggregate's responsibility. It should acquire them, as work in its own right.
+
+Local infrastructure loses a stateful service, and every authenticated request loses a network round trip.
+
+---
+
+# ADR-093 — Publish Integration Events Through the Outbox Alone
+
+**Status:** Accepted
+
+Supersedes ADR-015. Promotes ADR-016 from one publication path to the only one.
+
+## Decision
+
+A state change that must reach Kafka writes its integration event to `outbox_messages` in the same transaction. A publisher process claims unpublished rows, sends them, and marks them published.
+
+The publisher that read EventStoreDB's `$all` stream is removed, along with its checkpoint table.
+
+## Rationale
+
+The outbox was built in Phase 4 for exactly this purpose, tested thoroughly, and then never used, because every feature built afterwards was event-sourced. Its test suite already proves the property that matters: a rolled-back transaction leaves no message behind.
+
+It is also strictly better than what it replaces. The stream publisher required exactly one instance, because two would publish twice from the same checkpoint. Claiming rows with `FOR UPDATE SKIP LOCKED` lets several run.
+
+## Consequences
+
+Delivery stays at-least-once and consumers must remain idempotent, which they already are.
+
+The outbox row carries no aggregate identity, and the Kafka envelope requires one. Columns for the aggregate's type, identifier, and version are added.
+
+Published rows are never deleted and the attempt counter climbs without limit, so a permanently failing message retries forever. Both are acceptable at present volume and neither should reach production unaddressed.
+
+Ordering is by insertion time across all messages rather than per partition key. Two overlapping transactions writing to the same key can publish out of causal order.
+
+---
+
+# ADR-094 — Decide Session Validity From the Sessions Table
+
+**Status:** Accepted
+
+Supersedes ADR-078, and keeps its substance.
+
+## Decision
+
+A Session, not an access token, remains what can be revoked. Validity is now decided by reading the `sessions` row: a session is usable when it has not been revoked and has not expired.
+
+## Rationale
+
+ADR-078 refused to trust the `sessions` table for one specific reason: a projection that lags by even a second would leave a revoked session authenticating requests for that second. That reasoning was sound and its premise is gone. There is no asynchronous projection — revocation is written synchronously, inside the request that performs it, in the same transaction as everything else it touches.
+
+Reading the row is therefore not a weaker answer than reading the stream. It is the same answer, from the store that now commits it, and it is fresher than a stream read could have been in the architecture ADR-078 anticipated.
+
+The cost it removes is not incidental. This ran on every authenticated request, and it was the one place the event store sat on the hot path.
+
+## Consequences
+
+The `sessions` table acquires an authorization responsibility, which ADR-078 forbade it. That prohibition existed to stop a derived model from deciding something it could not decide correctly; the table is no longer derived.
+
+First-revocation-wins must be preserved. `COALESCE(revoked_at, ...)` keeps the reason a session ended as the reason that ended it, so a later ordinary sign-out cannot overwrite evidence of a suspected credential theft.
+
+Refresh must check revocation in the same statement that rotates the credential, or a refresh racing a revoke can resurrect a revoked session.
+
+---
+
+# ADR-095 — Keep Erasable Personal Data Out of Anything Append-Only
+
+**Status:** Accepted
+
+Supersedes ADR-080 and generalises it.
+
+## Decision
+
+No secret and no erasable personal data is written to any store that is not straightforwardly erasable — which now means the outbox and the Kafka log rather than the event store.
+
+Where a fact must be recorded but must also be erasable, it goes in a table of its own that a targeted delete can clear, as `user_restricted_data` already does for dates of birth.
+
+## Rationale
+
+ADR-080 was written against a store that no longer exists, and retiring it would have quietly discarded a constraint that still applies. The hazard moved rather than disappeared: outbox rows are never deleted, and a Kafka topic's retention is not an erasure mechanism. A birthdate placed in an integration event would be exactly as unerasable as one placed in an event stream.
+
+This also carries ADR-072's protection forward. Its decision to keep the birthdate out of history was justified by permanence of the event log; the storage choice was right for a reason that now needs restating rather than removing.
+
+## Consequences
+
+Integration event payloads must be reviewed for personal data as deliberately as event payloads were. The rule that a payload carries identifiers and the fact of a change, rather than the personal data behind it, still holds.
+
+Erasure remains a cross-system workflow and gets no easier. What changes is that there is one fewer store to reason about.
+
+---
+
+# ADR-096 — Enqueue Integration Events From the Service That Caused the Change
+
+**Status:** Accepted
+
+Supersedes ADR-087, and keeps its principle.
+
+## Decision
+
+A service that changes state and needs the change published enqueues the integration event itself, in the same transaction, already in its published shape. There is no automatic translation from internal records to external ones.
+
+## Rationale
+
+ADR-087 established that publication is opt-in and deliberate — that a feature declares what it publishes, and what it does not declare stays private. The mechanism was a route table keyed on stream category, consulted by the publisher; the principle was that internal history must not quietly become a contract.
+
+The principle is better served now, not worse. Previously every change was recorded in a form that _could_ be published, and a route table decided what actually was. Now nothing is publishable unless a service deliberately writes it as a message, which makes accidental publication require an act rather than an omission.
+
+The translation also belongs where the knowledge is. The publisher had to understand each feature's internal events well enough to convert them; the service already knows what happened and what outsiders should be told.
+
+## Consequences
+
+The publisher becomes a pump with no domain knowledge, and the route registry is removed.
+
+A service that publishes must construct the external payload explicitly. That is more typing than a mechanical projection of internal fields, and it is the point: the two shapes are allowed to differ, and the external one is a contract.
+
+Exactly one integration event exists today — a media upload having arrived. That is not an accident of incompleteness; registration is an intention rather than a fact about a file, and failure and deletion are the API's own business.

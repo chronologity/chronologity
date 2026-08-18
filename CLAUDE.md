@@ -92,7 +92,7 @@ A Moment is an experience, not a media file, and not every Moment is public. Chr
 - Spec first: before writing code, list the success paths, error paths, and edge cases the tests will cover
 - Structure every test as Arrange-Act-Assert: set up, then act, then assert, separated by blank lines rather than labelled with comments
 - Test HTTP behaviour with `app.inject()` rather than binding a real port
-- Reserve `vi.spyOn()` and `vi.mock()` for third-party APIs and network boundaries; never mock this system's own database, broker, or event store
+- Reserve `vi.spyOn()` and `vi.mock()` for third-party APIs and network boundaries; never mock this system's own database or broker
 
 ## Database Migrations
 
@@ -134,7 +134,7 @@ A Moment is an experience, not a media file, and not every Moment is public. Chr
 - NEVER replace chronological Timeline ordering with algorithmic ranking
 - NEVER treat client-side authorization as authoritative
 - NEVER treat ClickHouse as domain authority
-- NEVER use EventStoreDB as the general Timeline query database
+- NEVER reintroduce event sourcing, EventStoreDB, or a command/query handler split
 - Do not add Redis as a foundational dependency without a measured, approved need
 - Do not introduce microservices solely for organizational aesthetics
 
@@ -143,15 +143,18 @@ A Moment is an experience, not a media file, and not every Moment is public. Chr
 - Framework: Fastify
 - Follow the feature-based canonical tree in `docs/architecture/monorepo.md`
 - Maintain a dedicated `features/authorization/` module
-- Use CQRS where command/query separation is useful; avoid ceremonial abstractions
-- Use Event Sourcing only for domains explicitly designed for it
-- EventStoreDB stores canonical event streams for event-sourced aggregates
-- PostgreSQL owns relational/application/read responsibilities assigned by architecture
+- Within a feature, layer route to service to repository, with pure policy modules holding the rules
+- Services are classes; name methods for what they do without repeating the noun the class carries
+- There is no controller layer; the schema-validated Fastify handler already is one
+- Do not separate commands from queries
+- PostgreSQL holds authoritative state for every feature
 - Kafka carries asynchronous Integration Events
 - ClickHouse stores Timeline/read projections assigned by architecture
-- Events are immutable and deliberately versioned
-- Use optimistic concurrency for event-sourced aggregates
+- Integration Events are immutable and deliberately versioned
+- Integration Events reach Kafka through the transactional outbox, enqueued in the same transaction as the change they describe
+- A service that publishes constructs the external payload explicitly; nothing is published automatically
 - Avoid unsafe dual writes
+- Guard concurrent state transitions with conditional updates rather than read-then-write
 - Consumers must be idempotent where delivery can be repeated
 - Projections must support replay/rebuild and preserve privacy/deletion guarantees
 
@@ -159,7 +162,7 @@ A Moment is an experience, not a media file, and not every Moment is public. Chr
 
 - `apps/feed-aggregator` is read-only
 - Use GraphQL for Timeline/read composition
-- Do not place domain writes or write aggregates in the feed aggregator
+- Do not place domain writes in the feed aggregator
 - Do not duplicate API business logic
 - Keep Timeline composition and historical aggregation out of mobile
 - Use deterministic opaque cursor pagination
@@ -238,7 +241,6 @@ A Moment is an experience, not a media file, and not every Moment is public. Chr
 
 - Initial local services:
   - PostgreSQL
-  - EventStoreDB
   - Kafka
   - ClickHouse
 - Add S3-compatible object storage when media implementation requires it
