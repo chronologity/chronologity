@@ -1,5 +1,5 @@
 import type pg from "pg";
-import type { EventMetadata } from "../../types/domain-event.js";
+import type { EventMetadata } from "../../types/event-metadata.js";
 import { generateId } from "../ids/generate-id.js";
 import type { Transaction } from "./transaction.js";
 
@@ -17,7 +17,20 @@ import type { Transaction } from "./transaction.js";
  * would be back to coupling the two systems it just decoupled.
  */
 
-export interface OutboxMessage {
+/** The entity a message is about, as the Kafka envelope names it. */
+export interface MessageSubject {
+  /** The kind of entity, owned by the feature that publishes it. */
+  readonly aggregateType: string;
+  readonly aggregateId: string;
+  /**
+   * The entity's version where it carries one for optimistic concurrency, so a
+   * consumer can tell an older message from a newer one about the same thing.
+   * Zero where it carries none.
+   */
+  readonly aggregateVersion: number;
+}
+
+export interface OutboxMessage extends MessageSubject {
   readonly id: string;
   readonly topic: string;
   readonly partitionKey: string;
@@ -27,7 +40,7 @@ export interface OutboxMessage {
   readonly metadata: EventMetadata;
 }
 
-export interface EnqueueOptions {
+export interface EnqueueOptions extends MessageSubject {
   readonly topic: string;
   /** Determines ordering. Events that must stay ordered share a key. */
   readonly partitionKey: string;
@@ -46,8 +59,8 @@ export interface EnqueueOptions {
  * @param tx - The transaction carrying the state change this event describes.
  *   Taking a transaction rather than a pool makes it impossible to enqueue
  *   outside it.
- * @param options - Topic, partition key, event type and version, payload, and
- *   metadata.
+ * @param options - Topic, partition key, event type and version, payload,
+ *   metadata, and which entity the message is about.
  * @returns The new message's identifier.
  */
 export async function enqueueOutboxMessage(
@@ -58,8 +71,9 @@ export async function enqueueOutboxMessage(
 
   await tx.query(
     `INSERT INTO outbox_messages
-       (id, topic, partition_key, event_type, event_version, payload, metadata)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+       (id, topic, partition_key, event_type, event_version, payload, metadata,
+        aggregate_type, aggregate_id, aggregate_version)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
     [
       id,
       options.topic,
@@ -68,6 +82,9 @@ export async function enqueueOutboxMessage(
       options.eventVersion,
       JSON.stringify(options.payload),
       JSON.stringify(options.metadata),
+      options.aggregateType,
+      options.aggregateId,
+      options.aggregateVersion,
     ],
   );
 
@@ -97,8 +114,12 @@ export async function claimOutboxBatch(tx: Transaction, limit: number): Promise<
     event_version: number;
     payload: unknown;
     metadata: EventMetadata;
+    aggregate_type: string;
+    aggregate_id: string;
+    aggregate_version: number;
   }>(
-    `SELECT id, topic, partition_key, event_type, event_version, payload, metadata
+    `SELECT id, topic, partition_key, event_type, event_version, payload, metadata,
+            aggregate_type, aggregate_id, aggregate_version
        FROM outbox_messages
       WHERE published_at IS NULL
       ORDER BY created_at
@@ -115,6 +136,9 @@ export async function claimOutboxBatch(tx: Transaction, limit: number): Promise<
     eventVersion: row.event_version,
     payload: row.payload,
     metadata: row.metadata,
+    aggregateType: row.aggregate_type,
+    aggregateId: row.aggregate_id,
+    aggregateVersion: row.aggregate_version,
   }));
 }
 

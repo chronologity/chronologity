@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, it } from "vitest";
-import type { EventMetadata } from "../../types/domain-event.js";
+import type { EventMetadata } from "../../types/event-metadata.js";
 import { migrate } from "./migrations.js";
 import {
   claimOutboxBatch,
@@ -9,6 +9,7 @@ import {
   enqueueOutboxMessage,
   markFailed,
   markPublished,
+  type MessageSubject,
 } from "./outbox.js";
 import { createDatabase, type Database } from "./postgres.js";
 import { withTransaction } from "./transaction.js";
@@ -22,6 +23,12 @@ const config = {
   user: process.env.POSTGRES_USER ?? "chronologity",
   password: process.env.POSTGRES_PASSWORD ?? "chronologity",
 };
+
+const subject = (aggregateId = randomUUID()): MessageSubject => ({
+  aggregateType: "test",
+  aggregateId,
+  aggregateVersion: 0,
+});
 
 const metadata = (traceId = randomUUID()): EventMetadata => ({
   traceId,
@@ -81,6 +88,7 @@ describe("PostgreSQL foundation against a real database", () => {
         await enqueueOutboxMessage(tx, {
           topic: "chronologity.test.v1",
           partitionKey: id,
+          ...subject(id),
           eventType: "Committed",
           eventVersion: 1,
           payload: { id },
@@ -103,6 +111,7 @@ describe("PostgreSQL foundation against a real database", () => {
           await enqueueOutboxMessage(tx, {
             topic: "chronologity.test.v1",
             partitionKey: id,
+            ...subject(id),
             eventType: "RolledBack",
             eventVersion: 1,
             payload: { id },
@@ -155,6 +164,7 @@ describe("PostgreSQL foundation against a real database", () => {
           await enqueueOutboxMessage(tx, {
             topic: "chronologity.test.v1",
             partitionKey: key,
+            ...subject(key),
             eventType: "Enqueued",
             eventVersion: 1,
             payload: { index: i },
@@ -194,6 +204,7 @@ describe("PostgreSQL foundation against a real database", () => {
           await enqueueOutboxMessage(tx, {
             topic: "chronologity.test.v1",
             partitionKey: key,
+            ...subject(key),
             eventType: "Ordered",
             eventVersion: 1,
             payload: { index },
@@ -215,6 +226,7 @@ describe("PostgreSQL foundation against a real database", () => {
         enqueueOutboxMessage(tx, {
           topic: "chronologity.test.v1",
           partitionKey: randomUUID(),
+          ...subject(),
           eventType: "Failing",
           eventVersion: 1,
           payload: {},
@@ -240,6 +252,7 @@ describe("PostgreSQL foundation against a real database", () => {
           await enqueueOutboxMessage(tx, {
             topic: "chronologity.test.v1",
             partitionKey: randomUUID(),
+            ...subject(),
             eventType: "Contended",
             eventVersion: 1,
             payload: { i },
