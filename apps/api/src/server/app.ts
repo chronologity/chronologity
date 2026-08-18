@@ -5,7 +5,7 @@ import type { HealthCheckable } from "../lib/health.js";
 import { loggerOptions } from "../lib/logger/logger.js";
 import type { AuthDependencies } from "../features/auth/index.js";
 import type { AuthorizationDependencies } from "../features/authorization/index.js";
-import type { LocationDependencies } from "../features/locations/index.js";
+import type { LocationService } from "../features/locations/location.service.js";
 import type { UploadDependencies } from "../features/uploads/index.js";
 import type { UserDependencies } from "../features/users/index.js";
 import { registerPlugins } from "./register-plugins.js";
@@ -42,8 +42,8 @@ export interface BuildAppOptions {
   authorization?: AuthorizationDependencies | undefined;
   /** Upload wiring. Mounted only alongside users. */
   uploads?: UploadDependencies | undefined;
-  /** Location wiring. Mounted only alongside users. */
-  locations?: LocationDependencies | undefined;
+  /** The Location service. Mounted only alongside users. */
+  locations?: LocationService | undefined;
 }
 
 /**

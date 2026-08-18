@@ -8,12 +8,8 @@ import {
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { requireUser } from "../../../plugins/auth.plugin.js";
-import { recordLocationCommand } from "../commands/record-location.command.js";
-import { handleRecordLocation } from "../commands/record-location.handler.js";
-import type { LocationDependencies } from "../dependencies.js";
-import { handleGetLocation } from "../queries/get-location.handler.js";
-import { handleSearchPlaces } from "../queries/search-places.handler.js";
+import { requireUser } from "../../plugins/auth.plugin.js";
+import type { LocationService } from "./location.service.js";
 
 /**
  * Location endpoints.
@@ -23,10 +19,10 @@ import { handleSearchPlaces } from "../queries/search-places.handler.js";
  * when someone chooses one, and then it carries an identity of ours rather
  * than the service's.
  *
- * @param deps - What the Location handlers need.
+ * @param locations - The service these routes delegate to.
  * @returns A Fastify plugin registering the Location endpoints.
  */
-export function locationRoutes(deps: LocationDependencies) {
+export function locationRoutes(locations: LocationService) {
   return async function register(instance: FastifyInstance): Promise<void> {
     const app = instance.withTypeProvider<ZodTypeProvider>();
 
@@ -39,11 +35,7 @@ export function locationRoutes(deps: LocationDependencies) {
         },
         preHandler: requireUser,
       },
-      async (request) =>
-        handleSearchPlaces(deps, {
-          query: request.query.query,
-          limit: request.query.limit,
-        }),
+      async (request) => locations.searchPlaces(request.query.query, request.query.limit),
     );
 
     app.post(
@@ -53,11 +45,7 @@ export function locationRoutes(deps: LocationDependencies) {
         preHandler: requireUser,
       },
       async (request, reply) => {
-        const location = await handleRecordLocation(
-          deps,
-          recordLocationCommand(request.user.userId, request.body),
-          request.requestContext,
-        );
+        const location = await locations.record(request.user.userId, request.body);
 
         return reply.status(201).send(location);
       },
@@ -72,7 +60,7 @@ export function locationRoutes(deps: LocationDependencies) {
         },
         preHandler: requireUser,
       },
-      async (request) => handleGetLocation(deps, { locationId: request.params.locationId }),
+      async (request) => locations.get(request.params.locationId),
     );
   };
 }

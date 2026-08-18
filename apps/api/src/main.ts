@@ -9,6 +9,8 @@ import { createDerivativeClient } from "./integrations/metadata/derivative-clien
 import { createMetadataClient } from "./integrations/metadata/metadata-client.js";
 import { createPlaceSearchClient } from "./integrations/places/place-search-client.js";
 import { loadBreachedPasswordIndex } from "./lib/auth/breached-passwords.js";
+import { LocationRepository } from "./features/locations/location.repository.js";
+import { LocationService } from "./features/locations/location.service.js";
 import { buildApp } from "./server/app.js";
 import { startServer } from "./server/server.js";
 
@@ -65,11 +67,7 @@ async function main(): Promise<void> {
       derivatives: createDerivativeClient(),
       limits: config.uploadLimits,
     },
-    locations: {
-      client: eventStore.client,
-      pool: database.pool,
-      places,
-    },
+    locations: new LocationService(database.pool, new LocationRepository(database.pool), places),
   });
 
   await startServer({
