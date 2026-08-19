@@ -3,8 +3,8 @@ import fp from "fastify-plugin";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { handleValidateSession } from "../features/auth/queries/validate-session.handler.js";
 import type { AuthDependencies } from "../features/auth/dependencies.js";
-import { hasPermission } from "../features/authorization/policies/authorization-policy.js";
-import { readRolesFor } from "../features/authorization/utils/authorization-read-model.js";
+import { hasPermission } from "../features/authorization/authorization.policy.js";
+import { AuthorizationRepository } from "../features/authorization/authorization.repository.js";
 import { OnboardingRequiredError } from "../lib/errors/onboarding-required-error.js";
 import { UnauthenticatedError, UnauthorizedError } from "../lib/errors/unauthorized-error.js";
 import { verifyAccessToken } from "../lib/auth/tokens.js";
@@ -46,7 +46,11 @@ export const authPlugin = fp(async function authPlugin(app, options: { deps: Aut
     findUserIdForIdentity(options.deps.pool, identityId),
   );
 
-  app.decorate("readRoles", (userId: string) => readRolesFor(options.deps.pool, userId));
+  // Built once rather than per request: it holds only the pool, and the roles
+  // lookup is on the path of every privileged request.
+  const roles = new AuthorizationRepository(options.deps.pool);
+
+  app.decorate("readRoles", (userId: string) => roles.rolesFor(userId));
 
   // Declared here so every request object has the same shape, which keeps
   // Fastify's request allocation monomorphic. The value is only meaningful

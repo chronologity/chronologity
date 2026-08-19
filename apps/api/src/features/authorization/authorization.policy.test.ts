@@ -1,7 +1,23 @@
 import assert from "node:assert/strict";
-import { PERMISSIONS, roleSchema, type Permission } from "@chronologity/contracts";
+import { randomUUID } from "node:crypto";
+import { PERMISSIONS, roleSchema, type Permission, type Role } from "@chronologity/contracts";
 import { describe, it } from "vitest";
-import { effectiveRoles, permissionsFor, ROLE_PERMISSIONS } from "./role-permissions.js";
+import {
+  effectiveRoles,
+  hasPermission,
+  mayGrantRole,
+  permissionsFor,
+  ROLE_PERMISSIONS,
+} from "./authorization.policy.js";
+
+/**
+ * Who may do what.
+ *
+ * These need no database, and they are worth exercising exhaustively because
+ * what they protect fails silently. A permission wrongly granted does not throw
+ * — it lets somebody through, and nothing downstream can tell that apart from a
+ * person who was genuinely entitled.
+ */
 
 describe("ROLE_PERMISSIONS", () => {
   it("covers every role", () => {
@@ -87,5 +103,56 @@ describe("the registry", () => {
     for (const permission of PERMISSIONS satisfies readonly Permission[]) {
       assert.match(permission, /^[a-z]+:[a-z][a-z-]*[a-z]$/, permission);
     }
+  });
+});
+
+describe("hasPermission", () => {
+  it("allows an administrator to manage roles", () => {
+    assert.equal(hasPermission(["administrator"], "admin:user-role-manage"), true);
+  });
+
+  it("refuses an ordinary User", () => {
+    assert.equal(hasPermission([], "admin:user-role-manage"), false);
+  });
+
+  it("refuses a moderator, who has no administrative authority", () => {
+    assert.equal(hasPermission(["moderator"], "admin:user-role-manage"), false);
+  });
+
+  it("adds the baseline role itself, so callers pass what is stored", () => {
+    // An empty array is an ordinary User, not an actor with no roles at all.
+    assert.equal(hasPermission([], "admin:user-role-manage"), false);
+    assert.equal(hasPermission(["administrator"], "admin:user-role-manage"), true);
+  });
+
+  it("allows when any held role grants it", () => {
+    assert.equal(hasPermission(["moderator", "administrator"], "admin:user-role-manage"), true);
+  });
+
+  it("denies rather than trusting a role it does not recognise", () => {
+    // Deny is the default. A role that arrived from stale data or a bad
+    // migration must contribute nothing rather than be assumed powerful.
+    assert.equal(hasPermission(["superuser" as unknown as Role], "admin:user-role-manage"), false);
+  });
+});
+
+describe("mayGrantRole", () => {
+  it("lets an administrator grant a role to somebody else", () => {
+    assert.equal(mayGrantRole(randomUUID(), randomUUID()), true);
+  });
+
+  it("refuses somebody granting a role to themselves", () => {
+    // The invariant this exists for. Holding the permission to manage roles is
+    // not permission to raise yourself, or the first administrator would be the
+    // last check anyone faced.
+    const userId = randomUUID();
+
+    assert.equal(mayGrantRole(userId, userId), false);
+  });
+
+  it("permits a grant with no acting User, as the command line makes it", () => {
+    // There is no self to escalate to. This is how the first administrator is
+    // made, and refusing it would leave the platform with no way to start.
+    assert.equal(mayGrantRole(undefined, randomUUID()), true);
   });
 });

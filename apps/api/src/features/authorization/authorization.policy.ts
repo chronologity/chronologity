@@ -1,6 +1,18 @@
 import type { Permission, Role } from "@chronologity/contracts";
 
 /**
+ * Who may do what.
+ *
+ * Pure functions, so the rules can be exercised exhaustively without a
+ * database. Deliberately small: this owns the platform-wide question — does
+ * this Viewer hold this capability — and nothing else. Resource rules such as
+ * Moment visibility, blocking, and Location precision stay close to the
+ * features that own them (`authorization.md:418-422`); absorbing them here
+ * would produce exactly the giant condition tree the architecture warns
+ * against.
+ */
+
+/**
  * Which role grants which permissions.
  *
  * Server-side by design. The identifiers are a boundary contract and live in
@@ -56,4 +68,39 @@ export function permissionsFor(roles: readonly Role[]): readonly Permission[] {
  */
 export function effectiveRoles(elevated: readonly Role[]): readonly Role[] {
   return elevated.includes("user") ? elevated : ["user", ...elevated];
+}
+
+/**
+ * Whether a set of roles confers a permission.
+ *
+ * Deny is the default: a permission granted by no role is refused, and an
+ * unrecognised role contributes nothing rather than being trusted.
+ *
+ * @param roles - The elevated roles held. The baseline is added here, so
+ *   callers pass what is stored rather than remembering to add it.
+ * @param required - The permission the action needs.
+ * @returns True only if some role grants it.
+ */
+export function hasPermission(roles: readonly Role[], required: Permission): boolean {
+  return permissionsFor(effectiveRoles(roles)).includes(required);
+}
+
+/**
+ * Whether someone may grant a role to the account named.
+ *
+ * The one rule that is about the act rather than the actor's capability, and
+ * the reason it lives here rather than in a route: no future caller can reach
+ * a grant without passing through this (`authorization.md` invariant 22).
+ *
+ * @param actorUserId - Who is granting. Undefined means the command line,
+ *   where no User is acting and there is no self to escalate to.
+ * @param subjectUserId - Who would hold the role.
+ * @returns True if the grant is permissible. False only for self-escalation: a
+ *   User must never be able to raise their own privileges, however the request
+ *   reaches the server. Removal is deliberately not symmetrical and needs no
+ *   rule of its own — the prohibition is about escalation, and an
+ *   administrator standing down should not need a second administrator.
+ */
+export function mayGrantRole(actorUserId: string | undefined, subjectUserId: string): boolean {
+  return actorUserId === undefined || actorUserId !== subjectUserId;
 }

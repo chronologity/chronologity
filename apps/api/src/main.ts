@@ -9,6 +9,8 @@ import { createDerivativeClient } from "./integrations/metadata/derivative-clien
 import { createMetadataClient } from "./integrations/metadata/metadata-client.js";
 import { createPlaceSearchClient } from "./integrations/places/place-search-client.js";
 import { loadBreachedPasswordIndex } from "./lib/auth/breached-passwords.js";
+import { AuthorizationRepository } from "./features/authorization/authorization.repository.js";
+import { AuthorizationService } from "./features/authorization/authorization.service.js";
 import { LocationRepository } from "./features/locations/location.repository.js";
 import { LocationService } from "./features/locations/location.service.js";
 import { buildApp } from "./server/app.js";
@@ -55,10 +57,10 @@ async function main(): Promise<void> {
       pool: database.pool,
       minimumAgeYears: config.minimumAgeYears,
     },
-    authorization: {
-      client: eventStore.client,
-      pool: database.pool,
-    },
+    authorization: new AuthorizationService(
+      database.pool,
+      new AuthorizationRepository(database.pool),
+    ),
     uploads: {
       client: eventStore.client,
       pool: database.pool,

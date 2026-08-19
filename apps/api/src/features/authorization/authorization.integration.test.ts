@@ -10,10 +10,8 @@ import { createEventStore, type EventStore } from "../../lib/eventstore/client.j
 import { buildApp } from "../../server/app.js";
 import type { AuthDependencies } from "../auth/dependencies.js";
 import type { UserDependencies } from "../users/dependencies.js";
-import { assignUserRole } from "./commands/assign-user-role.command.js";
-import { handleAssignUserRole } from "./commands/assign-user-role.handler.js";
-import type { AuthorizationDependencies } from "./dependencies.js";
-import { readAuthorizationAudit } from "./utils/authorization-audit.js";
+import { AuthorizationRepository } from "./authorization.repository.js";
+import { AuthorizationService } from "./authorization.service.js";
 
 /**
  * Authorization, end to end against real infrastructure.
@@ -92,7 +90,8 @@ describe("authorization", () => {
   let eventStore: EventStore;
   let auth: AuthDependencies;
   let users: UserDependencies;
-  let authorization: AuthorizationDependencies;
+  let authorization: AuthorizationService;
+  let roles: AuthorizationRepository;
 
   beforeAll(async () => {
     database = createDatabase(config.database);
@@ -119,7 +118,8 @@ describe("authorization", () => {
       minimumAgeYears: config.minimumAgeYears,
     };
 
-    authorization = { client: eventStore.client, pool: database.pool };
+    roles = new AuthorizationRepository(database.pool);
+    authorization = new AuthorizationService(database.pool, roles);
 
     app = await buildApp({ config, dependencies: [], auth, users, authorization });
   });
@@ -193,9 +193,11 @@ describe("authorization", () => {
   const onboardAdministrator = async () => {
     const account = await onboard();
 
-    await handleAssignUserRole(
-      authorization,
-      assignUserRole(account.user.userId, "administrator", undefined, "integration test"),
+    await authorization.assign(
+      account.user.userId,
+      "administrator",
+      undefined,
+      "integration test",
       { traceId: randomUUID(), actor: undefined, receivedAt: new Date() },
     );
 
@@ -366,7 +368,7 @@ describe("authorization", () => {
       assert.equal((await grant()).statusCode, 200);
       assert.equal((await grant()).statusCode, 200);
 
-      const audit = await readAuthorizationAudit(database.pool, subject.user.userId);
+      const audit = await roles.auditFor(subject.user.userId);
 
       // PUT declares a desired state, so asking twice succeeds twice; but
       // history should record what happened, and the second time nothing did.
@@ -507,7 +509,7 @@ describe("authorization", () => {
         payload: { reason: "leaving the review team" },
       });
 
-      const audit = await readAuthorizationAudit(database.pool, subject.user.userId);
+      const audit = await roles.auditFor(subject.user.userId);
 
       assert.deepEqual(
         audit.map((row) => row.eventType),
@@ -533,7 +535,7 @@ describe("authorization", () => {
         payload: {},
       });
 
-      const audit = await readAuthorizationAudit(database.pool, admin.user.userId);
+      const audit = await roles.auditFor(admin.user.userId);
       const refusal = audit.find((row) => row.outcome === "failure");
 
       assert.ok(refusal !== undefined, "the attempt must be recorded");
@@ -544,7 +546,7 @@ describe("authorization", () => {
     it("records a grant made with no acting User, as the CLI makes it", async () => {
       const { user } = await onboardAdministrator();
 
-      const audit = await readAuthorizationAudit(database.pool, user.userId);
+      const audit = await roles.auditFor(user.userId);
 
       assert.equal(audit[0]?.actorUserId, null);
       assert.equal(audit[0]?.role, "administrator");

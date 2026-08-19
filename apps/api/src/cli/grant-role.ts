@@ -2,15 +2,10 @@ import { parseArgs } from "node:util";
 import { ConfigurationError } from "@chronologity/config";
 import { grantableRoleSchema } from "@chronologity/contracts";
 import { loadConfig } from "../config/app-config.js";
-import {
-  assignUserRole,
-  handleAssignUserRole,
-  removeUserRole,
-  handleRemoveUserRole,
-} from "../features/authorization/index.js";
+import { AuthorizationRepository } from "../features/authorization/authorization.repository.js";
+import { AuthorizationService } from "../features/authorization/authorization.service.js";
 import { normalizeHandle } from "../features/users/handle-policy.js";
 import { createDatabase } from "../lib/database/postgres.js";
-import { createEventStore } from "../lib/eventstore/client.js";
 import { generateTraceId } from "../lib/ids/generate-trace-id.js";
 import { systemContext } from "../types/request-context.js";
 
@@ -62,7 +57,6 @@ try {
   const role = parsedRole.data;
   const config = loadConfig();
   const database = createDatabase(config.database);
-  const eventStore = createEventStore(config.eventStore);
 
   try {
     const { rows } = await database.pool.query<{ user_id: string }>(
@@ -77,7 +71,10 @@ try {
       process.exit(1);
     }
 
-    const deps = { client: eventStore.client, pool: database.pool };
+    const authorization = new AuthorizationService(
+      database.pool,
+      new AuthorizationRepository(database.pool),
+    );
     // System context: no actor, because there is no acting User. That is the
     // whole point of this command, and the audit row says so.
     const context = systemContext(generateTraceId(), new Date());
@@ -86,8 +83,8 @@ try {
     const why = reason ?? "granted from the command line";
 
     const changed = remove
-      ? await handleRemoveUserRole(deps, removeUserRole(userId, role, undefined, why), context)
-      : await handleAssignUserRole(deps, assignUserRole(userId, role, undefined, why), context);
+      ? await authorization.remove(userId, role, undefined, why, context)
+      : await authorization.assign(userId, role, undefined, why, context);
 
     const verb = remove ? "removed from" : "granted to";
     process.stdout.write(
@@ -96,7 +93,6 @@ try {
         : `No change: @${handle} ${remove ? "does not hold" : "already holds"} ${role}\n`,
     );
   } finally {
-    await eventStore.close();
     await database.close();
   }
 } catch (error) {

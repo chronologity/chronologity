@@ -1,10 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { authRoutes } from "../features/auth/routes/auth.routes.js";
 import type { AuthDependencies } from "../features/auth/index.js";
-import {
-  authorizationRoutes,
-  type AuthorizationDependencies,
-} from "../features/authorization/index.js";
+import { authorizationRoutes } from "../features/authorization/authorization.routes.js";
+import type { AuthorizationService } from "../features/authorization/authorization.service.js";
 import { healthRoutes } from "../features/health/index.js";
 import { locationRoutes } from "../features/locations/location.routes.js";
 import type { LocationService } from "../features/locations/location.service.js";
@@ -20,7 +18,7 @@ import { userRoutes, type UserDependencies } from "../features/users/index.js";
  * @param app - The instance to mount on.
  * @param auth - Authentication wiring; when absent the auth routes are skipped.
  * @param users - User wiring; mounted only alongside auth.
- * @param authorization - Authorization wiring; mounted only alongside users,
+ * @param authorization - The Authorization service; mounted only alongside users,
  *   since every role belongs to a User.
  * @param uploads - Upload wiring; mounted only alongside users, since every
  *   upload belongs to a User.
@@ -32,7 +30,7 @@ export async function registerRoutes(
   app: FastifyInstance,
   auth?: AuthDependencies | undefined,
   users?: UserDependencies | undefined,
-  authorization?: AuthorizationDependencies | undefined,
+  authorization?: AuthorizationService | undefined,
   uploads?: UploadDependencies | undefined,
   locations?: LocationService | undefined,
 ): Promise<void> {
