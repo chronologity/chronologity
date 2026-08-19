@@ -1,8 +1,9 @@
 import { ConfigurationError } from "@chronologity/config";
 import { MEDIA_BOUNDARY } from "@chronologity/contracts";
 import { loadConfig } from "../../config/app-config.js";
+import { UploadRepository } from "../../features/uploads/upload.repository.js";
+import { UploadService } from "../../features/uploads/upload.service.js";
 import { createDatabase } from "../../lib/database/postgres.js";
-import { createEventStore } from "../../lib/eventstore/client.js";
 import { createEventConsumer } from "../../lib/messaging/consumer.js";
 import { createMessaging } from "../../lib/messaging/kafka.js";
 import { topicName } from "../../lib/messaging/topics.js";
@@ -38,32 +39,29 @@ const GROUP_ID = "media-checker";
 async function main(): Promise<void> {
   const config = loadConfig();
   const database = createDatabase(config.database);
-  const eventStore = createEventStore(config.eventStore);
   const messaging = createMessaging(config.messaging);
   const storage = createStorageClient(config.storage);
   const metadata = createMetadataClient();
 
-  const deps = {
-    client: eventStore.client,
-    pool: database.pool,
+  const uploads = new UploadService(
+    database.pool,
+    new UploadRepository(database.pool),
     storage,
-    metadata,
-    derivatives: createDerivativeClient(),
-    limits: config.uploadLimits,
-  };
+    config.uploadLimits,
+    { metadata, derivatives: createDerivativeClient() },
+  );
 
   const consumer = createEventConsumer({
     kafka: messaging.kafka,
     groupId: GROUP_ID,
     topics: [topicName(MEDIA_BOUNDARY)],
-    handler: (event) => checkArrivedMedia(deps, event),
+    handler: (event) => checkArrivedMedia(uploads, event),
   });
 
   const shutdown = async (): Promise<void> => {
     await consumer.stop();
     await messaging.close();
     storage.close();
-    await eventStore.close();
     await database.close();
   };
 

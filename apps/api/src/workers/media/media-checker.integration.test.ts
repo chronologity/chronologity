@@ -5,23 +5,17 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { CreateBucketCommand, S3Client } from "@aws-sdk/client-s3";
 import type { UploadReceivedPayload } from "@chronologity/contracts";
-import { checkUpload } from "../../features/uploads/commands/check-upload.command.js";
-import { handleCheckUpload } from "../../features/uploads/commands/check-upload.handler.js";
-import { finalizeUpload } from "../../features/uploads/commands/finalize-upload.command.js";
-import { handleFinalizeUpload } from "../../features/uploads/commands/finalize-upload.handler.js";
-import { registerUpload } from "../../features/uploads/commands/register-upload.command.js";
-import { handleRegisterUpload } from "../../features/uploads/commands/register-upload.handler.js";
-import type { UploadDependencies } from "../../features/uploads/dependencies.js";
-import { uploadRoute } from "../../features/uploads/integration-events.js";
-import { readUpload } from "../../features/uploads/utils/upload-read-model.js";
+import { UploadRepository } from "../../features/uploads/upload.repository.js";
+import { UploadService } from "../../features/uploads/upload.service.js";
 import { createDerivativeClient } from "../../integrations/metadata/derivative-client.js";
 import { createMetadataClient } from "../../integrations/metadata/metadata-client.js";
-import { createStorageClient } from "../../integrations/storage/storage-client.js";
+import {
+  createStorageClient,
+  type StorageClient,
+} from "../../integrations/storage/storage-client.js";
 import { migrate } from "../../lib/database/migrations.js";
 import { createDatabase, type Database } from "../../lib/database/postgres.js";
 import { createEventStore, type EventStore } from "../../lib/eventstore/client.js";
-import { readStream } from "../../lib/eventstore/read-stream.js";
-import { streamName } from "../../lib/eventstore/stream-name.js";
 import type { ConsumedEvent } from "../../lib/messaging/consumer.js";
 import { systemContext } from "../../types/request-context.js";
 import { checkArrivedMedia } from "./check-media.js";
@@ -56,7 +50,9 @@ const fixture = (name: string) =>
 describe("checking media", () => {
   let database: Database;
   let eventStore: EventStore;
-  let deps: UploadDependencies;
+  let uploads: UploadService;
+  let repository: UploadRepository;
+  let storage: StorageClient;
 
   beforeAll(async () => {
     database = createDatabase({
@@ -92,22 +88,23 @@ describe("checking media", () => {
     }
     admin.destroy();
 
-    deps = {
-      client: eventStore.client,
-      pool: database.pool,
-      storage: createStorageClient(storageConfig),
-      metadata: createMetadataClient(),
-      derivatives: createDerivativeClient(),
-      limits: {
+    storage = createStorageClient(storageConfig);
+    repository = new UploadRepository(database.pool);
+    uploads = new UploadService(
+      database.pool,
+      repository,
+      storage,
+      {
         registrationTtlSeconds: 3_600,
         maxImageBytes: 26_214_400,
         maxVideoBytes: 524_288_000,
       },
-    };
+      { metadata: createMetadataClient(), derivatives: createDerivativeClient() },
+    );
   });
 
   afterAll(async () => {
-    deps.storage.close();
+    storage.close();
     await eventStore.close();
     await database.close();
   });
@@ -123,11 +120,10 @@ describe("checking media", () => {
     const contentType = declaredKind === "image" ? "image/jpeg" : "video/mp4";
     const bytes = await readFile(fixture(file));
 
-    const authorization = await handleRegisterUpload(
-      deps,
-      registerUpload(ownerUserId, { contentType, declaredByteSize: bytes.byteLength }),
-      context(),
-    );
+    const authorization = await uploads.register(ownerUserId, {
+      contentType,
+      declaredByteSize: bytes.byteLength,
+    });
 
     const put = await fetch(authorization.uploadUrl, {
       method: "PUT",
@@ -137,11 +133,7 @@ describe("checking media", () => {
 
     assert.equal(put.status, 200, "the presigned link did not accept the file");
 
-    await handleFinalizeUpload(
-      deps,
-      finalizeUpload(authorization.uploadId, ownerUserId),
-      context(),
-    );
+    await uploads.finalize(authorization.uploadId, ownerUserId, context());
 
     return { uploadId: authorization.uploadId, ownerUserId };
   };
@@ -149,11 +141,11 @@ describe("checking media", () => {
   it("accepts a photograph, and records what it measured", async () => {
     const { uploadId } = await arrive("photo.jpg", "image");
 
-    const accepted = await handleCheckUpload(deps, checkUpload(uploadId), context());
+    const accepted = await uploads.check(uploadId);
 
     assert.equal(accepted, true);
 
-    const upload = await readUpload(database.pool, uploadId);
+    const upload = await repository.findById(uploadId);
 
     assert.equal(upload?.state, "ready");
     assert.equal(upload?.mediaKind, "image");
@@ -166,9 +158,9 @@ describe("checking media", () => {
   it("accepts a video, and records its real length", async () => {
     const { uploadId } = await arrive("video-short.mp4", "video");
 
-    assert.equal(await handleCheckUpload(deps, checkUpload(uploadId), context()), true);
+    assert.equal(await uploads.check(uploadId), true);
 
-    const upload = await readUpload(database.pool, uploadId);
+    const upload = await repository.findById(uploadId);
 
     assert.equal(upload?.state, "ready");
     assert.equal(upload?.mediaKind, "video");
@@ -179,9 +171,9 @@ describe("checking media", () => {
   it("refuses a video over ninety seconds, and says so plainly", async () => {
     const { uploadId } = await arrive("video-too-long.mp4", "video");
 
-    assert.equal(await handleCheckUpload(deps, checkUpload(uploadId), context()), false);
+    assert.equal(await uploads.check(uploadId), false);
 
-    const upload = await readUpload(database.pool, uploadId);
+    const upload = await repository.findById(uploadId);
 
     assert.equal(upload?.state, "failed");
     assert.match(upload?.failureReason ?? "", /90 seconds/);
@@ -193,9 +185,9 @@ describe("checking media", () => {
     // the file settles it.
     const { uploadId } = await arrive("not-really-a-photo.jpg", "image");
 
-    assert.equal(await handleCheckUpload(deps, checkUpload(uploadId), context()), false);
+    assert.equal(await uploads.check(uploadId), false);
 
-    const upload = await readUpload(database.pool, uploadId);
+    const upload = await repository.findById(uploadId);
 
     assert.equal(upload?.state, "failed");
     assert.ok((upload?.failureReason ?? "").length > 0);
@@ -204,14 +196,14 @@ describe("checking media", () => {
   it("refuses a genuine video uploaded as a photograph", async () => {
     const { uploadId } = await arrive("video-short.mp4", "image");
 
-    assert.equal(await handleCheckUpload(deps, checkUpload(uploadId), context()), false);
+    assert.equal(await uploads.check(uploadId), false);
 
-    assert.equal((await readUpload(database.pool, uploadId))?.state, "failed");
+    assert.equal((await repository.findById(uploadId))?.state, "failed");
   });
 
   it("records a permanent failure as permanent, so it is never retried", async () => {
     const { uploadId } = await arrive("video-too-long.mp4", "video");
-    await handleCheckUpload(deps, checkUpload(uploadId), context());
+    await uploads.check(uploadId);
 
     const { rows } = await database.pool.query<{ failure_category: string; attempts: number }>(
       `SELECT failure_category, attempts FROM uploads WHERE upload_id = $1`,
@@ -223,21 +215,32 @@ describe("checking media", () => {
   });
 
   it("does not check the same file twice", async () => {
-    // At-least-once delivery makes this ordinary rather than exceptional.
+    // At-least-once delivery makes this ordinary rather than exceptional. The
+    // second call must find the upload already settled and do no work, which
+    // shows as an unchanged check time and no further attempt counted.
     const { uploadId } = await arrive("photo.jpg", "image");
 
-    assert.equal(await handleCheckUpload(deps, checkUpload(uploadId), context()), true);
-    assert.equal(await handleCheckUpload(deps, checkUpload(uploadId), context()), true);
+    assert.equal(await uploads.check(uploadId), true);
 
-    const recorded = await readStream(eventStore.client, streamName("upload", uploadId));
-    const checks = recorded.filter((event) => event.type === "UploadChecked");
+    const after = await database.pool.query<{ checked_at: Date; attempts: number }>(
+      `SELECT checked_at, attempts FROM uploads WHERE upload_id = $1`,
+      [uploadId],
+    );
 
-    assert.equal(checks.length, 1, "the file was checked twice");
+    assert.equal(await uploads.check(uploadId), true);
+
+    const again = await database.pool.query<{ checked_at: Date; attempts: number }>(
+      `SELECT checked_at, attempts FROM uploads WHERE upload_id = $1`,
+      [uploadId],
+    );
+
+    assert.deepEqual(again.rows[0]?.checked_at, after.rows[0]?.checked_at, "it was checked twice");
+    assert.equal(again.rows[0]?.attempts, after.rows[0]?.attempts, "a second attempt was counted");
   });
 
   it("counts an attempt before doing the work, so a fatal file leaves a trace", async () => {
     const { uploadId } = await arrive("photo.jpg", "image");
-    await handleCheckUpload(deps, checkUpload(uploadId), context());
+    await uploads.check(uploadId);
 
     const { rows } = await database.pool.query<{ attempts: number }>(
       `SELECT attempts FROM uploads WHERE upload_id = $1`,
@@ -246,12 +249,64 @@ describe("checking media", () => {
 
     assert.equal(rows[0]?.attempts, 1);
   });
+
+  describe("what crosses the boundary", () => {
+    it("announces only what a checker needs, never internal detail", async () => {
+      // The translation is now the service's own act rather than a publisher's
+      // (ADR-096), so this reads the message actually enqueued instead of calling
+      // a translator directly.
+      const { uploadId, ownerUserId } = await arrive("photo.jpg", "image");
+
+      const { rows } = await database.pool.query<{ payload: Record<string, unknown> }>(
+        `SELECT payload FROM outbox_messages
+          WHERE aggregate_id = $1 AND event_type = 'UploadReceived'`,
+        [uploadId],
+      );
+
+      assert.equal(rows.length, 1, "arrival was announced exactly once");
+      assert.deepEqual(Object.keys(rows[0]!.payload).sort(), [
+        "kind",
+        "ownerUserId",
+        "receivedAt",
+        "storageKey",
+        "uploadId",
+      ]);
+      assert.equal(rows[0]!.payload.ownerUserId, ownerUserId);
+
+      // The size, the content type and the checksum stay internal. They exist so
+      // that a mismatch between claim and object is answerable later, which is
+      // not a consumer's business.
+      assert.doesNotMatch(JSON.stringify(rows[0]!.payload), /checksum|contentType|byteSize/);
+    });
+
+    it("announces nothing for the states that have no consumer", async () => {
+      // Registration is an intention rather than a fact about a file; failure and
+      // deletion are the API's own business. None has a consumer, and publishing
+      // without one is how internal state quietly becomes a contract.
+      const { uploadId } = await arrive("photo.jpg", "image");
+
+      await uploads.check(uploadId);
+      await uploads.delete(uploadId, (await repository.findRecord(uploadId))?.ownerUserId ?? "");
+
+      const { rows } = await database.pool.query<{ event_type: string }>(
+        `SELECT event_type FROM outbox_messages WHERE aggregate_id = $1`,
+        [uploadId],
+      );
+
+      assert.deepEqual(
+        rows.map((row) => row.event_type),
+        ["UploadReceived"],
+      );
+    });
+  });
 });
 
 describe("handling a note from the queue", () => {
   let database: Database;
   let eventStore: EventStore;
-  let deps: UploadDependencies;
+  let uploads: UploadService;
+  let repository: UploadRepository;
+  let storage: StorageClient;
 
   beforeAll(async () => {
     database = createDatabase({
@@ -265,22 +320,23 @@ describe("handling a note from the queue", () => {
       connectionString: process.env.EVENTSTOREDB_URL ?? "esdb://localhost:2113?tls=false",
     });
 
-    deps = {
-      client: eventStore.client,
-      pool: database.pool,
-      storage: createStorageClient(storageConfig),
-      metadata: createMetadataClient(),
-      derivatives: createDerivativeClient(),
-      limits: {
+    storage = createStorageClient(storageConfig);
+    repository = new UploadRepository(database.pool);
+    uploads = new UploadService(
+      database.pool,
+      repository,
+      storage,
+      {
         registrationTtlSeconds: 3_600,
         maxImageBytes: 26_214_400,
         maxVideoBytes: 524_288_000,
       },
-    };
+      { metadata: createMetadataClient(), derivatives: createDerivativeClient() },
+    );
   });
 
   afterAll(async () => {
-    deps.storage.close();
+    storage.close();
     await eventStore.close();
     await database.close();
   });
@@ -310,50 +366,11 @@ describe("handling a note from the queue", () => {
       receivedAt: new Date().toISOString(),
     };
 
-    await checkArrivedMedia(deps, noteAbout(payload));
+    await checkArrivedMedia(uploads, noteAbout(payload));
   });
 
   it("ignores a note whose contents do not match the contract", async () => {
     // Retrying cannot repair a malformed message, so it must not loop.
-    await checkArrivedMedia(deps, noteAbout({ nonsense: true }));
-  });
-});
-
-describe("what crosses the boundary", () => {
-  it("publishes only what a checker needs, never internal history", () => {
-    const published = uploadRoute.translate({
-      type: "UploadReceived",
-      payload: {
-        uploadId: "u1",
-        ownerUserId: "o1",
-        kind: "image",
-        storageKey: "uploads/o1/u1/original",
-        byteSize: 4096,
-        contentType: "image/jpeg",
-        checksum: "abc123",
-        receivedAt: "2026-08-16T12:00:00.000Z",
-      },
-    });
-
-    assert.deepEqual(published, {
-      uploadId: "u1",
-      ownerUserId: "o1",
-      kind: "image",
-      storageKey: "uploads/o1/u1/original",
-      receivedAt: "2026-08-16T12:00:00.000Z",
-    });
-
-    // The size, the content type and the checksum stay internal. They exist so
-    // that a mismatch between claim and object is answerable later, which is
-    // not a consumer's business.
-    const serialised = JSON.stringify(published);
-
-    assert.doesNotMatch(serialised, /4096|checksum|contentType/);
-  });
-
-  it("publishes nothing for events with no consumer", () => {
-    for (const type of ["UploadRegistered", "UploadFailed", "UploadDeleted", "UploadChecked"]) {
-      assert.equal(uploadRoute.translate({ type, payload: {} }), undefined, type);
-    }
+    await checkArrivedMedia(uploads, noteAbout({ nonsense: true }));
   });
 });

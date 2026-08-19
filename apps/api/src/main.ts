@@ -5,14 +5,14 @@ import { createEventStore } from "./lib/eventstore/client.js";
 import { createMessaging } from "./lib/messaging/kafka.js";
 import { createEmailClient } from "./integrations/email/email-client.js";
 import { createStorageClient } from "./integrations/storage/storage-client.js";
-import { createDerivativeClient } from "./integrations/metadata/derivative-client.js";
-import { createMetadataClient } from "./integrations/metadata/metadata-client.js";
 import { createPlaceSearchClient } from "./integrations/places/place-search-client.js";
 import { loadBreachedPasswordIndex } from "./lib/auth/breached-passwords.js";
 import { AuthorizationRepository } from "./features/authorization/authorization.repository.js";
 import { AuthorizationService } from "./features/authorization/authorization.service.js";
 import { LocationRepository } from "./features/locations/location.repository.js";
 import { LocationService } from "./features/locations/location.service.js";
+import { UploadRepository } from "./features/uploads/upload.repository.js";
+import { UploadService } from "./features/uploads/upload.service.js";
 import { UserRepository } from "./features/users/user.repository.js";
 import { UserService } from "./features/users/user.service.js";
 import { buildApp } from "./server/app.js";
@@ -42,7 +42,6 @@ async function main(): Promise<void> {
   const storage = createStorageClient(config.storage);
   // Built here so the wiring is uniform, though the HTTP process never opens a
   // file: authorising and verifying an upload does not require reading it.
-  const metadata = createMetadataClient();
   const places = createPlaceSearchClient(config.places);
 
   const app = await buildApp({
@@ -61,14 +60,12 @@ async function main(): Promise<void> {
       database.pool,
       new AuthorizationRepository(database.pool),
     ),
-    uploads: {
-      client: eventStore.client,
-      pool: database.pool,
+    uploads: new UploadService(
+      database.pool,
+      new UploadRepository(database.pool),
       storage,
-      metadata,
-      derivatives: createDerivativeClient(),
-      limits: config.uploadLimits,
-    },
+      config.uploadLimits,
+    ),
     locations: new LocationService(database.pool, new LocationRepository(database.pool), places),
   });
 

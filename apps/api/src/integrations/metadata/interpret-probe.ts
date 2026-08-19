@@ -1,4 +1,4 @@
-import type { ProbedMedia } from "../../features/uploads/media-policy.js";
+import type { ProbedMedia } from "../../features/uploads/upload.media-policy.js";
 
 /**
  * Reading a decoder's report.

@@ -6,7 +6,7 @@ import { loggerOptions } from "../lib/logger/logger.js";
 import type { AuthDependencies } from "../features/auth/index.js";
 import type { AuthorizationService } from "../features/authorization/authorization.service.js";
 import type { LocationService } from "../features/locations/location.service.js";
-import type { UploadDependencies } from "../features/uploads/index.js";
+import type { UploadService } from "../features/uploads/upload.service.js";
 import type { UserService } from "../features/users/user.service.js";
 import { registerPlugins } from "./register-plugins.js";
 import { registerRoutes } from "./register-routes.js";
@@ -40,8 +40,8 @@ export interface BuildAppOptions {
   users?: UserService | undefined;
   /** The Authorization service. Mounted only alongside users. */
   authorization?: AuthorizationService | undefined;
-  /** Upload wiring. Mounted only alongside users. */
-  uploads?: UploadDependencies | undefined;
+  /** The Upload service. Mounted only alongside users. */
+  uploads?: UploadService | undefined;
   /** The Location service. Mounted only alongside users. */
   locations?: LocationService | undefined;
 }

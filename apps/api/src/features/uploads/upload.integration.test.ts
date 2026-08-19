@@ -16,7 +16,8 @@ import { createDatabase, type Database } from "../../lib/database/postgres.js";
 import { createEventStore, type EventStore } from "../../lib/eventstore/client.js";
 import { buildApp } from "../../server/app.js";
 import type { AuthDependencies } from "../auth/dependencies.js";
-import type { UploadDependencies } from "./dependencies.js";
+import { UploadRepository } from "./upload.repository.js";
+import { UploadService } from "./upload.service.js";
 import { UserRepository } from "../users/user.repository.js";
 import { UserService } from "../users/user.service.js";
 
@@ -109,7 +110,7 @@ describe("uploads", () => {
   let eventStore: EventStore;
   let auth: AuthDependencies;
   let users: UserService;
-  let uploads: UploadDependencies;
+  let uploads: UploadService;
   let storage: StorageClient;
 
   beforeAll(async () => {
@@ -161,14 +162,13 @@ describe("uploads", () => {
       minimumAgeYears: config.minimumAgeYears,
     });
 
-    uploads = {
-      client: eventStore.client,
-      pool: database.pool,
+    uploads = new UploadService(
+      database.pool,
+      new UploadRepository(database.pool),
       storage,
-      metadata: createMetadataClient(),
-      derivatives: createDerivativeClient(),
-      limits: config.uploadLimits,
-    };
+      config.uploadLimits,
+      { metadata: createMetadataClient(), derivatives: createDerivativeClient() },
+    );
 
     app = await buildApp({ config, dependencies: [], auth, users, uploads });
   });
@@ -594,21 +594,20 @@ describe("uploads", () => {
     });
   });
 
-  describe("history", () => {
-    it("records the storage key in the event, so bytes are never orphaned", async () => {
+  describe("the stored record", () => {
+    it("records the storage key, so bytes are never orphaned", async () => {
+      // Recorded rather than recomputed. Deletion lists the prefix this key
+      // sits under, so a key the record does not hold is media nothing can
+      // find and nothing will ever remove.
       const { credentials } = await onboard();
       const { uploadId } = (await register(credentials.accessToken)).json();
 
-      const { readStream } = await import("../../lib/eventstore/read-stream.js");
-      const { streamName } = await import("../../lib/eventstore/stream-name.js");
-
-      const recorded = await readStream(eventStore.client, streamName("upload", uploadId));
-
-      assert.equal(recorded[0]?.type, "UploadRegistered");
-      assert.match(
-        (recorded[0]?.payload as { storageKey: string }).storageKey,
-        /^uploads\/.+\/.+\/original$/,
+      const { rows } = await database.pool.query<{ storage_key: string }>(
+        `SELECT storage_key FROM uploads WHERE upload_id = $1`,
+        [uploadId],
       );
+
+      assert.match(rows[0]?.storage_key ?? "", /^uploads\/.+\/.+\/original$/);
     });
   });
 });

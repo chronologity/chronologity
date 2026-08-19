@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { ProbedMedia } from "../../features/uploads/media-policy.js";
+import type { ProbedMedia } from "../../features/uploads/upload.media-policy.js";
 import type { Logger } from "../../lib/logger/logger.js";
 import { empty, interpret, isTimeoutOrMissing } from "./interpret-probe.js";
 
@@ -11,7 +11,7 @@ const run = promisify(execFile);
  *
  * An adapter, not a judge: it opens a file and reports what it found, and has
  * no opinion about whether that is acceptable. The rules live in
- * `features/uploads/media-policy.ts`.
+ * `features/uploads/upload.media-policy.ts`.
  *
  * ffprobe is a system dependency rather than a bundled package. The decoder is
  * pointed at files that strangers upload, which makes it one of the more

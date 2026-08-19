@@ -1,5 +1,5 @@
 import type { MediaKind } from "@chronologity/contracts";
-import type { DerivativeKind } from "./utils/storage-key.js";
+import type { DerivativeKind } from "./upload.storage-key.js";
 
 /**
  * Which derivatives a piece of media needs.
@@ -40,4 +40,40 @@ export function derivativesFor(kind: MediaKind): readonly DerivativeKind[] {
  */
 export function hasAllDerivatives(kind: MediaKind, produced: readonly DerivativeKind[]): boolean {
   return derivativesFor(kind).every((needed) => produced.includes(needed));
+}
+
+/**
+ * What still needs producing for a piece of media.
+ *
+ * Producing derivatives is retried, and a retry after a partial failure must
+ * add what is missing rather than redo what already exists — re-encoding a
+ * video that was transcoded fine costs minutes for nothing.
+ *
+ * @param kind - What the file actually is, as measured rather than declared.
+ * @param existing - What has already been produced and stored.
+ * @returns Only the derivatives still absent, in the order they are wanted.
+ */
+export function missingDerivatives(
+  kind: MediaKind,
+  existing: readonly DerivativeKind[],
+): readonly DerivativeKind[] {
+  const have = new Set(existing);
+
+  return derivativesFor(kind).filter((derivative) => !have.has(derivative));
+}
+
+/**
+ * Everything that exists once a round of production finishes.
+ *
+ * @param existing - What was already there.
+ * @param produced - What this round made.
+ * @returns The union, without duplicates. A union rather than a replacement:
+ *   a second pass that produced only the missing derivative must not report
+ *   that as the complete set and lose the ones made earlier.
+ */
+export function withProduced(
+  existing: readonly DerivativeKind[],
+  produced: readonly DerivativeKind[],
+): readonly DerivativeKind[] {
+  return [...new Set([...existing, ...produced])];
 }

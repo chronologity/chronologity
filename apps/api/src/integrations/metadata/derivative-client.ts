@@ -13,7 +13,7 @@ const run = promisify(execFile);
  *
  * An adapter, like the probe beside it: it transforms bytes and decides
  * nothing about whether it should have. What derivatives a given upload needs
- * is decided in `features/uploads/derivative-policy.ts`.
+ * is decided in `features/uploads/upload.derivative-policy.ts`.
  *
  * Everything here reads the original over the network and writes its output to
  * a temporary file, because these tools produce files rather than streams. The

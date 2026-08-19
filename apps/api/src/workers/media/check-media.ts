@@ -1,11 +1,7 @@
 import { uploadReceivedPayloadSchema } from "@chronologity/contracts";
-import { checkUpload } from "../../features/uploads/commands/check-upload.command.js";
-import { handleCheckUpload } from "../../features/uploads/commands/check-upload.handler.js";
-import type { UploadDependencies } from "../../features/uploads/dependencies.js";
+import type { UploadService } from "../../features/uploads/upload.service.js";
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
 import type { ConsumedEvent } from "../../lib/messaging/consumer.js";
-import { generateTraceId } from "../../lib/ids/generate-trace-id.js";
-import { systemContext } from "../../types/request-context.js";
 import type { Logger } from "../../lib/logger/logger.js";
 
 /**
@@ -23,7 +19,7 @@ import type { Logger } from "../../lib/logger/logger.js";
  * whether the file was accepted or refused — a refusal is a completed check,
  * not a failure to check.
  *
- * @param deps - What the Uploads feature needs, including the decoder.
+ * @param uploads - The Upload service, built with a decoder.
  * @param event - The consumed message.
  * @param logger - Optional. Outcomes are logged with the upload's identifier;
  *   the storage key is not, since it is infrastructure detail.
@@ -32,7 +28,7 @@ import type { Logger } from "../../lib/logger/logger.js";
  *   repeating — storage unreachable, the decoder unavailable.
  */
 export async function checkArrivedMedia(
-  deps: UploadDependencies,
+  uploads: UploadService,
   event: ConsumedEvent,
   logger?: Logger,
 ): Promise<void> {
@@ -52,15 +48,8 @@ export async function checkArrivedMedia(
 
   const { uploadId } = parsed.data;
 
-  // Correlation carries across the hop, so a trace that began with someone
-  // pressing upload continues into work that happens minutes later.
-  const context = systemContext(
-    event.envelope.correlationId ?? generateTraceId(),
-    new Date(event.envelope.occurredAt),
-  );
-
   try {
-    const accepted = await handleCheckUpload(deps, checkUpload(uploadId), context);
+    const accepted = await uploads.check(uploadId);
 
     logger?.info({ uploadId, accepted }, accepted ? "Media accepted" : "Media refused");
   } catch (error) {

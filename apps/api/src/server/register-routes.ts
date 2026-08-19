@@ -6,7 +6,8 @@ import type { AuthorizationService } from "../features/authorization/authorizati
 import { healthRoutes } from "../features/health/index.js";
 import { locationRoutes } from "../features/locations/location.routes.js";
 import type { LocationService } from "../features/locations/location.service.js";
-import { uploadRoutes, type UploadDependencies } from "../features/uploads/index.js";
+import { uploadRoutes } from "../features/uploads/upload.routes.js";
+import type { UploadService } from "../features/uploads/upload.service.js";
 import { userRoutes } from "../features/users/user.routes.js";
 import type { UserService } from "../features/users/user.service.js";
 
@@ -21,7 +22,7 @@ import type { UserService } from "../features/users/user.service.js";
  * @param users - The User service; mounted only alongside auth.
  * @param authorization - The Authorization service; mounted only alongside users,
  *   since every role belongs to a User.
- * @param uploads - Upload wiring; mounted only alongside users, since every
+ * @param uploads - The Upload service; mounted only alongside users, since every
  *   upload belongs to a User.
  * @param locations - The Location service; mounted only alongside users,
  *   since recording a place requires an account.
@@ -32,7 +33,7 @@ export async function registerRoutes(
   auth?: AuthDependencies | undefined,
   users?: UserService | undefined,
   authorization?: AuthorizationService | undefined,
-  uploads?: UploadDependencies | undefined,
+  uploads?: UploadService | undefined,
   locations?: LocationService | undefined,
 ): Promise<void> {
   await app.register(healthRoutes);

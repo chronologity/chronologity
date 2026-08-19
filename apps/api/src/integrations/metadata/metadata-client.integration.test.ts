@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "vitest";
-import { checkMedia } from "../../features/uploads/media-policy.js";
+import { checkMedia } from "../../features/uploads/upload.media-policy.js";
 import { createMetadataClient } from "./metadata-client.js";
 
 /**

@@ -4,25 +4,21 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { CreateBucketCommand, GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { checkUpload } from "../../features/uploads/commands/check-upload.command.js";
-import { handleCheckUpload } from "../../features/uploads/commands/check-upload.handler.js";
-import { deleteUpload } from "../../features/uploads/commands/delete-upload.command.js";
-import { handleDeleteUpload } from "../../features/uploads/commands/delete-upload.handler.js";
-import { finalizeUpload } from "../../features/uploads/commands/finalize-upload.command.js";
-import { handleFinalizeUpload } from "../../features/uploads/commands/finalize-upload.handler.js";
-import { registerUpload } from "../../features/uploads/commands/register-upload.command.js";
-import { handleRegisterUpload } from "../../features/uploads/commands/register-upload.handler.js";
-import type { UploadDependencies } from "../../features/uploads/dependencies.js";
-import { readUpload } from "../../features/uploads/utils/upload-read-model.js";
-import { derivativeKey, uploadPrefix } from "../../features/uploads/utils/storage-key.js";
+import { UploadRepository } from "../../features/uploads/upload.repository.js";
+import { UploadService } from "../../features/uploads/upload.service.js";
+import { derivativeKey, uploadPrefix } from "../../features/uploads/upload.storage-key.js";
 import { createDerivativeClient } from "../../integrations/metadata/derivative-client.js";
-import { createMetadataClient } from "../../integrations/metadata/metadata-client.js";
-import { createStorageClient } from "../../integrations/storage/storage-client.js";
+import {
+  createMetadataClient,
+  type MetadataClient,
+} from "../../integrations/metadata/metadata-client.js";
+import {
+  createStorageClient,
+  type StorageClient,
+} from "../../integrations/storage/storage-client.js";
 import { migrate } from "../../lib/database/migrations.js";
 import { createDatabase, type Database } from "../../lib/database/postgres.js";
 import { createEventStore, type EventStore } from "../../lib/eventstore/client.js";
-import { readStream } from "../../lib/eventstore/read-stream.js";
-import { streamName } from "../../lib/eventstore/stream-name.js";
 import { systemContext } from "../../types/request-context.js";
 
 /**
@@ -55,7 +51,10 @@ const fixture = (name: string) =>
 describe("producing derivatives", () => {
   let database: Database;
   let eventStore: EventStore;
-  let deps: UploadDependencies;
+  let uploads: UploadService;
+  let repository: UploadRepository;
+  let storage: StorageClient;
+  let metadata: MetadataClient;
   let s3: S3Client;
 
   beforeAll(async () => {
@@ -91,22 +90,24 @@ describe("producing derivatives", () => {
       }
     }
 
-    deps = {
-      client: eventStore.client,
-      pool: database.pool,
-      storage: createStorageClient(storageConfig),
-      metadata: createMetadataClient(),
-      derivatives: createDerivativeClient(),
-      limits: {
+    storage = createStorageClient(storageConfig);
+    metadata = createMetadataClient();
+    repository = new UploadRepository(database.pool);
+    uploads = new UploadService(
+      database.pool,
+      repository,
+      storage,
+      {
         registrationTtlSeconds: 3_600,
         maxImageBytes: 26_214_400,
         maxVideoBytes: 524_288_000,
       },
-    };
+      { metadata, derivatives: createDerivativeClient() },
+    );
   });
 
   afterAll(async () => {
-    deps.storage.close();
+    storage.close();
     s3.destroy();
     await eventStore.close();
     await database.close();
@@ -132,11 +133,10 @@ describe("producing derivatives", () => {
     const contentType = declaredKind === "image" ? "image/jpeg" : "video/mp4";
     const bytes = await readFile(fixture(file));
 
-    const authorization = await handleRegisterUpload(
-      deps,
-      registerUpload(ownerUserId, { contentType, declaredByteSize: bytes.byteLength }),
-      context(),
-    );
+    const authorization = await uploads.register(ownerUserId, {
+      contentType,
+      declaredByteSize: bytes.byteLength,
+    });
 
     const put = await fetch(authorization.uploadUrl, {
       method: "PUT",
@@ -146,13 +146,9 @@ describe("producing derivatives", () => {
 
     assert.equal(put.status, 200);
 
-    await handleFinalizeUpload(
-      deps,
-      finalizeUpload(authorization.uploadId, ownerUserId),
-      context(),
-    );
+    await uploads.finalize(authorization.uploadId, ownerUserId, context());
 
-    const accepted = await handleCheckUpload(deps, checkUpload(authorization.uploadId), context());
+    const accepted = await uploads.check(authorization.uploadId);
 
     return { uploadId: authorization.uploadId, ownerUserId, accepted };
   };
@@ -162,7 +158,7 @@ describe("producing derivatives", () => {
 
     assert.equal(accepted, true);
 
-    const upload = await readUpload(database.pool, uploadId);
+    const upload = await repository.findById(uploadId);
     assert.deepEqual(upload?.derivatives, ["thumbnail"]);
 
     // Decoded rather than assumed: the bytes must actually be an image, and a
@@ -172,8 +168,8 @@ describe("producing derivatives", () => {
     assert.equal(bytes[0], 0xff, "not a JPEG");
     assert.equal(bytes[1], 0xd8, "not a JPEG");
 
-    const probe = await deps.metadata.probe(
-      await deps.storage.presignDownload(derivativeKey(ownerUserId, uploadId, "thumbnail")),
+    const probe = await metadata.probe(
+      await storage.presignDownload(derivativeKey(ownerUserId, uploadId, "thumbnail")),
     );
 
     assert.equal(probe.width, 480);
@@ -185,7 +181,7 @@ describe("producing derivatives", () => {
 
     assert.equal(accepted, true);
 
-    const upload = await readUpload(database.pool, uploadId);
+    const upload = await repository.findById(uploadId);
     assert.deepEqual([...(upload?.derivatives ?? [])].sort(), ["faststart", "poster"]);
 
     const poster = await fetchObject(derivativeKey(ownerUserId, uploadId, "poster"));
@@ -226,14 +222,28 @@ describe("producing derivatives", () => {
   });
 
   it("does not produce a second set when asked again", async () => {
+    // Re-encoding a video that transcoded fine costs minutes for nothing, so a
+    // redelivered note must find the work already done and leave it alone.
     const { uploadId } = await runThrough("photo.jpg", "image");
 
-    assert.equal(await handleCheckUpload(deps, checkUpload(uploadId), context()), true);
+    const first = await database.pool.query<{ derived_at: Date; derivatives: string[] }>(
+      `SELECT derived_at, derivatives FROM uploads WHERE upload_id = $1`,
+      [uploadId],
+    );
 
-    const recorded = await readStream(eventStore.client, streamName("upload", uploadId));
-    const produced = recorded.filter((event) => event.type === "UploadDerivativesProduced");
+    assert.equal(await uploads.check(uploadId), true);
 
-    assert.equal(produced.length, 1, "derivatives were produced twice");
+    const second = await database.pool.query<{ derived_at: Date; derivatives: string[] }>(
+      `SELECT derived_at, derivatives FROM uploads WHERE upload_id = $1`,
+      [uploadId],
+    );
+
+    assert.deepEqual(
+      second.rows[0]?.derived_at,
+      first.rows[0]?.derived_at,
+      "derivatives were produced twice",
+    );
+    assert.deepEqual(second.rows[0]?.derivatives, first.rows[0]?.derivatives);
   });
 
   it("produces nothing for a file that fails checking", async () => {
@@ -241,14 +251,14 @@ describe("producing derivatives", () => {
 
     assert.equal(accepted, false);
 
-    const upload = await readUpload(database.pool, uploadId);
+    const upload = await repository.findById(uploadId);
     assert.equal(upload?.state, "failed");
     assert.deepEqual(upload?.derivatives, []);
 
-    const stored = await deps.storage.list(uploadPrefix(ownerUserId, uploadId));
+    const stored = await storage.list(uploadPrefix(ownerUserId, uploadId));
 
     assert.deepEqual(
-      stored.filter((key) => !key.endsWith("/original")),
+      stored.filter((key: string) => !key.endsWith("/original")),
       [],
       "a refused upload should have no derivatives",
     );
@@ -257,12 +267,12 @@ describe("producing derivatives", () => {
   it("removes derivatives when the upload is deleted", async () => {
     const { uploadId, ownerUserId } = await runThrough("video-slow-start.mp4", "video");
 
-    const before = await deps.storage.list(uploadPrefix(ownerUserId, uploadId));
+    const before = await storage.list(uploadPrefix(ownerUserId, uploadId));
     assert.equal(before.length, 3, `expected original and two derivatives, found ${before.length}`);
 
-    await handleDeleteUpload(deps, deleteUpload(uploadId, ownerUserId), context());
+    await uploads.delete(uploadId, ownerUserId);
 
-    const after = await deps.storage.list(uploadPrefix(ownerUserId, uploadId));
+    const after = await storage.list(uploadPrefix(ownerUserId, uploadId));
 
     assert.deepEqual(after, [], "deleted media is still in storage");
   });

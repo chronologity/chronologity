@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
-import { derivativesFor, hasAllDerivatives } from "./derivative-policy.js";
+import {
+  derivativesFor,
+  hasAllDerivatives,
+  missingDerivatives,
+  withProduced,
+} from "./upload.derivative-policy.js";
 import {
   derivativeContentType,
   derivativeKey,
   originalKey,
   uploadPrefix,
-} from "./utils/storage-key.js";
+} from "./upload.storage-key.js";
 
 describe("derivativesFor", () => {
   it("gives a photograph a preview", () => {
@@ -107,5 +112,49 @@ describe("where derivatives are stored", () => {
     assert.equal(derivativeContentType("thumbnail"), "image/jpeg");
     assert.equal(derivativeContentType("poster"), "image/jpeg");
     assert.equal(derivativeContentType("faststart"), "video/mp4");
+  });
+});
+
+describe("missingDerivatives", () => {
+  it("wants everything when nothing exists yet", () => {
+    assert.deepEqual(missingDerivatives("image", []), ["thumbnail"]);
+    assert.deepEqual(missingDerivatives("video", []), ["poster", "faststart"]);
+  });
+
+  it("wants only what is absent after a partial failure", () => {
+    // The case this exists for. A video whose poster was made but whose
+    // faststart copy failed must not be transcoded from scratch on retry.
+    assert.deepEqual(missingDerivatives("video", ["poster"]), ["faststart"]);
+  });
+
+  it("wants nothing once everything exists", () => {
+    assert.deepEqual(missingDerivatives("image", ["thumbnail"]), []);
+    assert.deepEqual(missingDerivatives("video", ["poster", "faststart"]), []);
+  });
+
+  it("ignores derivatives that do not belong to this kind", () => {
+    // A row carrying a derivative from a kind it is not is stale data rather
+    // than a reason to refuse: what matters is that the wanted ones exist.
+    assert.deepEqual(missingDerivatives("image", ["poster", "faststart"]), ["thumbnail"]);
+  });
+});
+
+describe("withProduced", () => {
+  it("keeps what already existed", () => {
+    // A second pass that produced only the missing derivative must not report
+    // that as the complete set.
+    assert.deepEqual(withProduced(["poster"], ["faststart"]), ["poster", "faststart"]);
+  });
+
+  it("does not duplicate a derivative produced twice", () => {
+    assert.deepEqual(withProduced(["thumbnail"], ["thumbnail"]), ["thumbnail"]);
+  });
+
+  it("handles a first pass with nothing before it", () => {
+    assert.deepEqual(withProduced([], ["thumbnail"]), ["thumbnail"]);
+  });
+
+  it("keeps everything when a pass produced nothing", () => {
+    assert.deepEqual(withProduced(["poster", "faststart"], []), ["poster", "faststart"]);
   });
 });
