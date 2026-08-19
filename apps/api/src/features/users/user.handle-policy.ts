@@ -148,3 +148,43 @@ export function describeHandleRejection(reason: HandleRejection): string {
       return "That handle is not available";
   }
 }
+
+/** Why a handle could not be claimed. Both are reported to the caller identically. */
+export type HandleClaimFailure = "taken" | "reserved_by_cooldown";
+
+export type HandleClaim =
+  { readonly ok: true } | { readonly ok: false; readonly reason: HandleClaimFailure };
+
+/**
+ * Whether a handle somebody has given up may be claimed now.
+ *
+ * Handles given up are kept rather than deleted. Releasing one for immediate
+ * reassignment invites impersonation and breaks references
+ * (`identity.md:113`), so a former handle stays reserved for its original
+ * owner for a cooldown. The exact period is configuration, because the policy
+ * is explicitly open.
+ *
+ * @param released - When the previous holder gave it up.
+ * @param previousHolderUserId - Who held it before.
+ * @param claimantUserId - Who wants it now.
+ * @param cooldownDays - How long a released handle stays reserved.
+ * @param now - The current instant.
+ * @returns True if the claim may proceed. A User reclaiming their own former
+ *   handle may always do so, even mid-cooldown: the cooldown exists to protect
+ *   them from somebody else, not from themselves.
+ */
+export function mayClaimReleasedHandle(
+  released: Date,
+  previousHolderUserId: string,
+  claimantUserId: string,
+  cooldownDays: number,
+  now: Date,
+): boolean {
+  if (previousHolderUserId === claimantUserId) {
+    return true;
+  }
+
+  const reservedUntil = new Date(released.getTime() + cooldownDays * 24 * 60 * 60 * 1000);
+
+  return reservedUntil <= now;
+}

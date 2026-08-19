@@ -7,7 +7,8 @@ import { healthRoutes } from "../features/health/index.js";
 import { locationRoutes } from "../features/locations/location.routes.js";
 import type { LocationService } from "../features/locations/location.service.js";
 import { uploadRoutes, type UploadDependencies } from "../features/uploads/index.js";
-import { userRoutes, type UserDependencies } from "../features/users/index.js";
+import { userRoutes } from "../features/users/user.routes.js";
+import type { UserService } from "../features/users/user.service.js";
 
 /**
  * Compose feature route modules.
@@ -17,7 +18,7 @@ import { userRoutes, type UserDependencies } from "../features/users/index.js";
  *
  * @param app - The instance to mount on.
  * @param auth - Authentication wiring; when absent the auth routes are skipped.
- * @param users - User wiring; mounted only alongside auth.
+ * @param users - The User service; mounted only alongside auth.
  * @param authorization - The Authorization service; mounted only alongside users,
  *   since every role belongs to a User.
  * @param uploads - Upload wiring; mounted only alongside users, since every
@@ -29,7 +30,7 @@ import { userRoutes, type UserDependencies } from "../features/users/index.js";
 export async function registerRoutes(
   app: FastifyInstance,
   auth?: AuthDependencies | undefined,
-  users?: UserDependencies | undefined,
+  users?: UserService | undefined,
   authorization?: AuthorizationService | undefined,
   uploads?: UploadDependencies | undefined,
   locations?: LocationService | undefined,

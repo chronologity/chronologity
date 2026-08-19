@@ -13,6 +13,8 @@ import { AuthorizationRepository } from "./features/authorization/authorization.
 import { AuthorizationService } from "./features/authorization/authorization.service.js";
 import { LocationRepository } from "./features/locations/location.repository.js";
 import { LocationService } from "./features/locations/location.service.js";
+import { UserRepository } from "./features/users/user.repository.js";
+import { UserService } from "./features/users/user.service.js";
 import { buildApp } from "./server/app.js";
 import { startServer } from "./server/server.js";
 
@@ -52,11 +54,9 @@ async function main(): Promise<void> {
       config: config.auth,
       email,
     },
-    users: {
-      client: eventStore.client,
-      pool: database.pool,
+    users: new UserService(database.pool, new UserRepository(database.pool), {
       minimumAgeYears: config.minimumAgeYears,
-    },
+    }),
     authorization: new AuthorizationService(
       database.pool,
       new AuthorizationRepository(database.pool),

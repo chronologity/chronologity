@@ -9,7 +9,8 @@ import { createDatabase, type Database } from "../../lib/database/postgres.js";
 import { createEventStore, type EventStore } from "../../lib/eventstore/client.js";
 import { buildApp } from "../../server/app.js";
 import type { AuthDependencies } from "../auth/dependencies.js";
-import type { UserDependencies } from "./dependencies.js";
+import { UserRepository } from "./user.repository.js";
+import { UserService } from "./user.service.js";
 
 /**
  * Users, end to end against real infrastructure.
@@ -90,7 +91,7 @@ describe("users", () => {
   let database: Database;
   let eventStore: EventStore;
   let auth: AuthDependencies;
-  let users: UserDependencies;
+  let users: UserService;
 
   beforeAll(async () => {
     database = createDatabase(config.database);
@@ -113,11 +114,9 @@ describe("users", () => {
 
     // No injected clock: nothing here manipulates time. The handle cooldown is
     // exercised by claiming during it, which needs no clock at all.
-    users = {
-      client: eventStore.client,
-      pool: database.pool,
+    users = new UserService(database.pool, new UserRepository(database.pool), {
       minimumAgeYears: config.minimumAgeYears,
-    };
+    });
 
     app = await buildApp({ config, dependencies: [], auth, users });
   });
@@ -372,25 +371,23 @@ describe("users", () => {
       assert.equal(theirs.json().dateOfBirth, undefined);
     });
 
-    it("keeps the date of birth out of event history", async () => {
+    it("keeps the date of birth out of anything that cannot be erased", async () => {
+      // The hazard this guards moved rather than disappeared (ADR-095). It used
+      // to be event history; it is now the outbox and the Kafka log behind it,
+      // where published rows are never deleted and a topic's retention is not
+      // an erasure mechanism. A birthdate in either could not be removed when
+      // somebody asks for their data to be deleted.
       const { user } = await onboard();
 
-      const { readStream } = await import("../../lib/eventstore/read-stream.js");
-      const { streamName } = await import("../../lib/eventstore/stream-name.js");
-
-      const recorded = await readStream(eventStore.client, streamName("user", user.userId));
-
-      assert.ok(recorded.length > 0);
-
-      // Stream revisions are BigInt, which JSON cannot serialise.
-      const history = JSON.stringify(recorded, (_key, value: unknown) =>
-        typeof value === "bigint" ? value.toString() : value,
+      const { rows } = await database.pool.query<{ payload: unknown; metadata: unknown }>(
+        `SELECT payload, metadata FROM outbox_messages WHERE aggregate_id = $1`,
+        [user.userId],
       );
 
-      // History is permanent. A birthdate written there could not be erased
-      // when someone asks for their data to be deleted.
-      assert.doesNotMatch(history, new RegExp(ADULT));
-      assert.doesNotMatch(history, /dateOfBirth/);
+      const published = JSON.stringify(rows);
+
+      assert.doesNotMatch(published, new RegExp(ADULT));
+      assert.doesNotMatch(published, /dateOfBirth/);
     });
 
     it("records the threshold the account was admitted under", async () => {

@@ -8,7 +8,7 @@ import { AuthorizationRepository } from "../features/authorization/authorization
 import { OnboardingRequiredError } from "../lib/errors/onboarding-required-error.js";
 import { UnauthenticatedError, UnauthorizedError } from "../lib/errors/unauthorized-error.js";
 import { verifyAccessToken } from "../lib/auth/tokens.js";
-import { findUserIdForIdentity } from "../features/users/utils/user-read-model.js";
+import { UserRepository } from "../features/users/user.repository.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -42,9 +42,9 @@ export interface AuthenticatedUser {
  * authenticated, and nothing about which of the checks refused them.
  */
 export const authPlugin = fp(async function authPlugin(app, options: { deps: AuthDependencies }) {
-  app.decorate("resolveUserId", (identityId: string) =>
-    findUserIdForIdentity(options.deps.pool, identityId),
-  );
+  const accounts = new UserRepository(options.deps.pool);
+
+  app.decorate("resolveUserId", (identityId: string) => accounts.findIdForIdentity(identityId));
 
   // Built once rather than per request: it holds only the pool, and the roles
   // lookup is on the path of every privileged request.

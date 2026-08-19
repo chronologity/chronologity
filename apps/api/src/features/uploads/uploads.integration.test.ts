@@ -17,7 +17,8 @@ import { createEventStore, type EventStore } from "../../lib/eventstore/client.j
 import { buildApp } from "../../server/app.js";
 import type { AuthDependencies } from "../auth/dependencies.js";
 import type { UploadDependencies } from "./dependencies.js";
-import type { UserDependencies } from "../users/dependencies.js";
+import { UserRepository } from "../users/user.repository.js";
+import { UserService } from "../users/user.service.js";
 
 /**
  * Uploads, end to end against real object storage.
@@ -107,7 +108,7 @@ describe("uploads", () => {
   let database: Database;
   let eventStore: EventStore;
   let auth: AuthDependencies;
-  let users: UserDependencies;
+  let users: UserService;
   let uploads: UploadDependencies;
   let storage: StorageClient;
 
@@ -156,11 +157,9 @@ describe("uploads", () => {
       },
     };
 
-    users = {
-      client: eventStore.client,
-      pool: database.pool,
+    users = new UserService(database.pool, new UserRepository(database.pool), {
       minimumAgeYears: config.minimumAgeYears,
-    };
+    });
 
     uploads = {
       client: eventStore.client,

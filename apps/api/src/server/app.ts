@@ -7,7 +7,7 @@ import type { AuthDependencies } from "../features/auth/index.js";
 import type { AuthorizationService } from "../features/authorization/authorization.service.js";
 import type { LocationService } from "../features/locations/location.service.js";
 import type { UploadDependencies } from "../features/uploads/index.js";
-import type { UserDependencies } from "../features/users/index.js";
+import type { UserService } from "../features/users/user.service.js";
 import { registerPlugins } from "./register-plugins.js";
 import { registerRoutes } from "./register-routes.js";
 
@@ -36,8 +36,8 @@ export interface BuildAppOptions {
    * have to provide a database and an event store.
    */
   auth?: AuthDependencies | undefined;
-  /** User wiring. Mounted only alongside authentication. */
-  users?: UserDependencies | undefined;
+  /** The User service. Mounted only alongside authentication. */
+  users?: UserService | undefined;
   /** The Authorization service. Mounted only alongside users. */
   authorization?: AuthorizationService | undefined;
   /** Upload wiring. Mounted only alongside users. */

@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
-import { checkHandle, describeHandleRejection, normalizeHandle } from "./handle-policy.js";
+import {
+  checkHandle,
+  describeHandleRejection,
+  mayClaimReleasedHandle,
+  normalizeHandle,
+} from "./user.handle-policy.js";
 
 describe("normalizeHandle", () => {
   it("lowercases and trims", () => {
@@ -78,5 +83,46 @@ describe("describeHandleRejection", () => {
   it("says nothing about why a reserved handle is unavailable", () => {
     // Distinguishing "reserved" from "taken" maps out the reserved list.
     assert.equal(describeHandleRejection("reserved"), "That handle is not available");
+  });
+});
+
+describe("mayClaimReleasedHandle — the cooldown", () => {
+  const owner = "11111111-1111-1111-1111-111111111111";
+  const stranger = "22222222-2222-2222-2222-222222222222";
+  const released = new Date("2026-01-01T00:00:00.000Z");
+  const days = (n: number) => new Date(released.getTime() + n * 24 * 60 * 60 * 1000);
+
+  it("refuses somebody else while the handle is still reserved", () => {
+    // The rule that exists to prevent impersonation. Handing a recognisable
+    // handle straight to the next person is how somebody inherits an audience
+    // that was never theirs.
+    assert.equal(mayClaimReleasedHandle(released, owner, stranger, 30, days(29)), false);
+  });
+
+  it("lets somebody else claim it once the cooldown has passed", () => {
+    assert.equal(mayClaimReleasedHandle(released, owner, stranger, 30, days(31)), true);
+  });
+
+  it("treats the moment the cooldown ends as free", () => {
+    // The boundary. Reserved *until* that instant, not through it.
+    assert.equal(mayClaimReleasedHandle(released, owner, stranger, 30, days(30)), true);
+  });
+
+  it("always lets the original holder take their own handle back", () => {
+    // Mid-cooldown, and on the first day. The cooldown protects them from
+    // somebody else, not from themselves.
+    assert.equal(mayClaimReleasedHandle(released, owner, owner, 30, days(1)), true);
+    assert.equal(mayClaimReleasedHandle(released, owner, owner, 30, days(29)), true);
+  });
+
+  it("honours a configured cooldown rather than a fixed one", () => {
+    // The period is a product decision that is explicitly still open, so it
+    // must come from configuration rather than be baked in here.
+    assert.equal(mayClaimReleasedHandle(released, owner, stranger, 7, days(8)), true);
+    assert.equal(mayClaimReleasedHandle(released, owner, stranger, 90, days(31)), false);
+  });
+
+  it("frees a handle immediately when there is no cooldown at all", () => {
+    assert.equal(mayClaimReleasedHandle(released, owner, stranger, 0, days(0)), true);
   });
 });

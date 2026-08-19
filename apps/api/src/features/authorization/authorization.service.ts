@@ -4,7 +4,7 @@ import { withTransaction } from "../../lib/database/transaction.js";
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
 import { UnauthorizedError } from "../../lib/errors/unauthorized-error.js";
 import type { RequestContext } from "../../types/request-context.js";
-import { userExists } from "../users/utils/user-read-model.js";
+import { UserRepository } from "../users/user.repository.js";
 import { effectiveRoles, mayGrantRole, permissionsFor } from "./authorization.policy.js";
 import type { AuthorizationRepository } from "./authorization.repository.js";
 
@@ -21,6 +21,9 @@ import type { AuthorizationRepository } from "./authorization.repository.js";
  * actually changed anything.
  */
 export class AuthorizationService {
+  /** Answers whether the account a role concerns exists at all. */
+  private readonly accounts: UserRepository;
+
   /**
    * Build the Authorization service.
    *
@@ -33,7 +36,9 @@ export class AuthorizationService {
     private readonly pool: pg.Pool,
     private readonly roles: AuthorizationRepository,
     private readonly clock: () => Date = () => new Date(),
-  ) {}
+  ) {
+    this.accounts = new UserRepository(pool);
+  }
 
   /**
    * Grant an elevated role.
@@ -60,7 +65,7 @@ export class AuthorizationService {
     reason: string | undefined,
     context: RequestContext,
   ): Promise<boolean> {
-    if (!(await userExists(this.pool, userId))) {
+    if (!(await this.accounts.exists(userId))) {
       throw new NotFoundError("No such account");
     }
 
@@ -126,7 +131,7 @@ export class AuthorizationService {
     reason: string | undefined,
     context: RequestContext,
   ): Promise<boolean> {
-    if (!(await userExists(this.pool, userId))) {
+    if (!(await this.accounts.exists(userId))) {
       throw new NotFoundError("No such account");
     }
 
@@ -161,7 +166,7 @@ export class AuthorizationService {
    *   elevated roles returns an empty list, which is a different answer.
    */
   async rolesFor(userId: string): Promise<UserRoles> {
-    if (!(await userExists(this.pool, userId))) {
+    if (!(await this.accounts.exists(userId))) {
       throw new NotFoundError("No such account");
     }
 

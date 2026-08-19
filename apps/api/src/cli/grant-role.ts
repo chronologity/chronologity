@@ -4,7 +4,7 @@ import { grantableRoleSchema } from "@chronologity/contracts";
 import { loadConfig } from "../config/app-config.js";
 import { AuthorizationRepository } from "../features/authorization/authorization.repository.js";
 import { AuthorizationService } from "../features/authorization/authorization.service.js";
-import { normalizeHandle } from "../features/users/handle-policy.js";
+import { normalizeHandle } from "../features/users/user.handle-policy.js";
 import { createDatabase } from "../lib/database/postgres.js";
 import { generateTraceId } from "../lib/ids/generate-trace-id.js";
 import { systemContext } from "../types/request-context.js";

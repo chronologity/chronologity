@@ -9,7 +9,8 @@ import { createDatabase, type Database } from "../../lib/database/postgres.js";
 import { createEventStore, type EventStore } from "../../lib/eventstore/client.js";
 import { buildApp } from "../../server/app.js";
 import type { AuthDependencies } from "../auth/dependencies.js";
-import type { UserDependencies } from "../users/dependencies.js";
+import { UserRepository } from "../users/user.repository.js";
+import { UserService } from "../users/user.service.js";
 import { AuthorizationRepository } from "./authorization.repository.js";
 import { AuthorizationService } from "./authorization.service.js";
 
@@ -89,7 +90,7 @@ describe("authorization", () => {
   let database: Database;
   let eventStore: EventStore;
   let auth: AuthDependencies;
-  let users: UserDependencies;
+  let users: UserService;
   let authorization: AuthorizationService;
   let roles: AuthorizationRepository;
 
@@ -112,11 +113,9 @@ describe("authorization", () => {
       },
     };
 
-    users = {
-      client: eventStore.client,
-      pool: database.pool,
+    users = new UserService(database.pool, new UserRepository(database.pool), {
       minimumAgeYears: config.minimumAgeYears,
-    };
+    });
 
     roles = new AuthorizationRepository(database.pool);
     authorization = new AuthorizationService(database.pool, roles);

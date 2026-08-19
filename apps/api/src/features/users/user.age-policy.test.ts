@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
-import { ageOn, checkAge, describeAgeRejection } from "./age-policy.js";
+import { ageOn, checkAge, describeAgeRejection } from "./user.age-policy.js";
 
 const on = (date: string) => new Date(`${date}T00:00:00.000Z`);
 

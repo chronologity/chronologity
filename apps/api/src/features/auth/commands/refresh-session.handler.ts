@@ -11,7 +11,7 @@ import { clockFor, type AuthDependencies } from "../dependencies.js";
 import { authEventMetadata } from "../utils/event-metadata.js";
 import { toSessionCredentials } from "../utils/issue-credentials.js";
 import { recordSessionRefreshed, recordSessionRevoked } from "../utils/session-read-model.js";
-import { findUserIdForIdentity } from "../../users/utils/user-read-model.js";
+import { UserRepository } from "../../users/user.repository.js";
 import { loadSession } from "../utils/session-store.js";
 import type { RefreshSessionCommand } from "./refresh-session.command.js";
 
@@ -88,7 +88,7 @@ export async function handleRefreshSession(
 
   // Re-resolved on refresh, which is how a token catches up after account
   // creation.
-  const userId = await findUserIdForIdentity(deps.pool, identityId);
+  const userId = await new UserRepository(deps.pool).findIdForIdentity(identityId);
   const access = await issueAccessToken(deps.config, { identityId, sessionId, userId }, at);
 
   await withTransaction(deps.pool, async (tx) => {
