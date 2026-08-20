@@ -108,8 +108,7 @@ For any important piece of state, engineers should be able to answer:
 
 Possible answers may include:
 
-- an EventStoreDB aggregate stream;
-- authoritative PostgreSQL operational state;
+- an authoritative PostgreSQL row;
 - object storage for a media binary;
 - or another explicitly designated source.
 
@@ -149,40 +148,47 @@ Derived state should be rebuildable where practical and should carry enough prov
 
 ---
 
-# 6. Event Sourcing Is Selective, Not Ideological
+# 6. Event-Driven, Not Event-Sourced
 
-Chronologity uses Event Sourcing where preserving the sequence of domain decisions materially improves correctness, auditability, reconstruction, or historical understanding.
+Chronologity publishes events. It does not store them as the source of truth
+(ADR-092).
 
-It must not be applied indiscriminately.
+PostgreSQL holds authoritative state, and a change announces itself through the
+transactional outbox. What makes something true is that a row was committed; the
+event says it happened.
 
-A concept should not become an event-sourced aggregate simply because Chronologity already uses EventStoreDB.
+The distinction matters because the two are easy to conflate:
 
-Event Sourcing is appropriate when the event history itself is valuable and the aggregate has meaningful behavior and invariants.
+```text
+event-driven      changes are announced, and other systems react
+event-sourced     the log of changes IS the state
+```
 
-It is usually inappropriate for:
+Auditability was the strongest argument for the second, and it did not require
+it: an audit row written in the same transaction as the change it describes is
+both queryable and erasable, which an append-only log is not.
 
-- disposable projections;
-- caches;
-- transient jobs;
-- large media binaries;
-- generic lookup data;
-- and operational state whose history provides little domain value.
-
-Focused architecture documents must define event-sourced boundaries intentionally.
+Where the sequence of decisions genuinely matters — a role granted then removed,
+a Session revoked for a stated reason — that sequence is recorded explicitly in
+an audit table designed for it, rather than implied by the shape of the
+persistence layer.
 
 ---
 
 # 7. Domain Events and Integration Events Are Different Responsibilities
 
-A persisted Domain Event records a domain fact within an authoritative event-sourced model.
+A Domain Event is a past-tense fact the API accepted. It is a way of describing
+a change, not a stored artifact.
 
-An integration event communicates a change across an application or subsystem boundary.
+An Integration Event communicates that change across an application or subsystem
+boundary. It is a versioned contract, constructed explicitly by the service that
+publishes it.
 
-They may contain related information, but they are not automatically the same artifact.
+Chronologity should preserve the ability to evolve internal state without
+forcing external consumers to depend on its schema.
 
-Chronologity should preserve the ability to evolve internal domain history without forcing every external consumer to depend directly on aggregate persistence schemas.
-
-Likewise, integration contracts should not dictate how aggregates must internally model their history.
+Likewise, integration contracts should not dictate how a feature internally
+models its state.
 
 This separation becomes increasingly valuable as the system evolves.
 
@@ -253,7 +259,7 @@ Ordering requirements should be defined at the smallest meaningful scope.
 
 Examples may include:
 
-- aggregate stream order;
+- per-subject order within a partition;
 - Moment media order;
 - events for a particular entity;
 - or another explicit partitioning key.
@@ -262,15 +268,21 @@ A global ordering dependency would unnecessarily constrain scalability and still
 
 ---
 
-# 12. CQRS Exists to Preserve Different Models, Not to Multiply Services
+# 12. Separate Models Where They Differ, Not Everywhere
 
-Chronologity uses CQRS where command-side correctness and query-side efficiency require different representations.
+Chronologity separates the authoritative write model from the Timeline read
+model, because the two have materially different shapes and access patterns.
 
-CQRS does not mean:
+That separation runs between applications — the API and the feed aggregator. It
+does not run through the middle of a feature. Inside the API there is no
+command/query split: reading and writing the same PostgreSQL tables through one
+service is simpler and no less correct (ADR-091).
+
+Separation does not mean:
 
 ```text
-one command = one service
-one query   = one service
+one operation = one class and one file
+read          = its own directory
 ```
 
 The write model should protect domain invariants.
@@ -355,7 +367,7 @@ Ports / interfaces
 Infrastructure adapters
 ```
 
-Chronologity should avoid allowing Fastify, EventStoreDB, Kafka, PostgreSQL, ClickHouse, Expo, or another technology to become the vocabulary of the domain model.
+Chronologity should avoid allowing Fastify, Kafka, PostgreSQL, ClickHouse, Expo, or another technology to become the vocabulary of the domain model.
 
 Technology is replaceable.
 
@@ -383,7 +395,7 @@ Good candidates include:
 
 Poor candidates include:
 
-- aggregate implementations imported by multiple applications;
+- service implementations imported by multiple applications;
 - application-specific repositories;
 - internal services;
 - arbitrary utility collections;
@@ -402,7 +414,7 @@ This includes:
 
 - REST requests and responses;
 - GraphQL schemas;
-- Domain Event schemas;
+- Integration Event schemas;
 - integration event schemas;
 - media-processing messages;
 - and other inter-application payloads.
@@ -724,11 +736,18 @@ A system that eventually grants access correctly but leaks revoked content for h
 
 ---
 
-# 31. Event Sourcing Does Not Override Erasure
+# 31. Append-Only Storage Does Not Override Erasure
 
-Append-only architecture is an implementation strategy, not a legal or ethical exemption.
+Append-only storage is an implementation strategy, not a legal or ethical
+exemption. This applies to whatever is append-only at the time — today the
+transactional outbox and Kafka topics (ADR-095).
 
-Chronologity must design event schemas and sensitive-data boundaries so that privacy, deletion, and applicable erasure requirements remain possible.
+Chronologity must design event schemas and sensitive-data boundaries so that
+privacy, deletion, and applicable erasure requirements remain possible.
+
+The simplest way to satisfy this is not to put erasable data there at all: an
+Integration Event carries an identifier and enough for a consumer to act, and
+the consumer reads what it needs from a source that can be corrected.
 
 Prefer minimizing sensitive immutable payloads.
 
@@ -826,7 +845,7 @@ Technical bounds must not become hidden product restrictions.
 
 Large images and videos do not belong in:
 
-- Domain Event payloads;
+- Integration Event payloads;
 - Kafka message bodies;
 - PostgreSQL rows intended as binary stores;
 - ClickHouse Feed records;
@@ -884,7 +903,7 @@ Stable identity allows persistence, partitioning, and deployment architecture to
 
 API contracts should be designed around client and product needs.
 
-They should not merely serialize database rows or EventStoreDB events.
+They should not merely serialize database rows.
 
 A persistence schema may contain implementation details that clients should never know.
 
@@ -957,7 +976,7 @@ This requirement is especially important for Search, Feed, caches, media metadat
 
 Chronologity spans multiple stores and asynchronous systems.
 
-It should not attempt to make EventStoreDB, PostgreSQL, Kafka, ClickHouse, object storage, Search, and external providers participate in one distributed transaction.
+It should not attempt to make PostgreSQL, Kafka, ClickHouse, object storage, Search, and external providers participate in one distributed transaction.
 
 Prefer:
 
@@ -1129,7 +1148,6 @@ It is:
 Current responsibilities include:
 
 ```text
-EventStoreDB -> selected event-sourced authority
 PostgreSQL   -> relational operational state and read models
 ClickHouse   -> high-volume derived Feed/read projections
 Object store -> media binaries
@@ -1299,11 +1317,18 @@ Retry safety should be designed into the boundary rather than left to caller luc
 
 ---
 
-# 62. Use Optimistic Concurrency for Aggregate Decisions
+# 62. Guard State Transitions in the Statement, Not in Application Code
 
-For event-sourced aggregates and other domains where concurrent writes can violate invariants, Chronologity should prefer explicit optimistic concurrency control.
+Where concurrent writes can violate an invariant, the condition belongs in the
+`WHERE` clause rather than in a check that precedes the write.
 
-The command path should detect that the state changed since it was read rather than silently overwriting another decision.
+A read, a decision, and then a write are three moments, and another request can
+commit between any two of them. Naming the expected state in the statement
+closes the gap, and the row count reports whether this call was the one that
+changed anything.
+
+The write path should detect that the state moved rather than silently
+overwriting another decision.
 
 Retry or conflict behavior should be feature-specific.
 
@@ -1311,7 +1336,7 @@ Retry or conflict behavior should be feature-specific.
 
 # 63. Avoid Generic Repository Abstractions That Erase Storage Semantics
 
-EventStoreDB, PostgreSQL, ClickHouse, Kafka, and object storage have materially different semantics.
+PostgreSQL, ClickHouse, Kafka, and object storage have materially different semantics.
 
 Chronologity should not force them behind one generic `Repository<T>` abstraction merely to make them look uniform.
 
@@ -1331,7 +1356,7 @@ In particular:
 
 - use **Moment**, not `Post`, for the canonical historical unit;
 - distinguish **User** from **Person**;
-- distinguish **Real-World Event** from **Domain Event**;
+- distinguish **Real-World Event** from **Integration Event**;
 - distinguish **occurrence time** from creation/publication timestamps;
 - distinguish **Search** from **Discovery**;
 - distinguish **historical significance** from popularity;
@@ -1428,7 +1453,7 @@ Compatibility matters most for:
 
 - mobile clients that may remain installed for long periods;
 - asynchronous Kafka consumers deployed at different times;
-- persisted Domain Events;
+- published Integration Events;
 - public or semi-public API contracts;
 - and stored read-model migration paths.
 
@@ -1515,7 +1540,7 @@ When partitioning becomes necessary, choose keys that preserve locality for the 
 
 Potential partitioning decisions must consider:
 
-- aggregate consistency;
+- transactional consistency;
 - chronological range queries;
 - User/social fan-out;
 - Real-World Events;
