@@ -1986,7 +1986,15 @@ Node's built-in test runner, which is what the repository actually used through 
 
 The built-in runner works, and its zero-dependency argument is real. What it cost was ergonomic and paid on every iteration: tests ran from `dist`, so a one-line change required a full compile before an assertion could run, and every stack trace pointed at generated JavaScript. Running from source removes both.
 
-`node:assert/strict` stays because migrating the assertions would weaken them. `assert.deepStrictEqual` distinguishes a property explicitly set to `undefined` from a property that is absent; `expect(...).toEqual` does not. Several tests here assert on payloads where that distinction is the point, and a mechanical conversion would have quietly loosened them. Vitest reports diffs for assertion errors carrying `actual` and `expected`, which Node's `AssertionError` does, so the reporting improves regardless.
+`node:assert/strict` stays for two reasons, and neither is that Vitest's matchers are inadequate.
+
+The first is that assertions written against Node's standard library do not belong to the runner. This repository has already changed runners once — `node:test` through Phases 0A to 5C, then Vitest — and the assertions did not move. Keeping that property means the next such change is a configuration change rather than a rewrite of every test in the repository.
+
+The second is cost against benefit. There are over a thousand assertion call sites and no `expect` call sites. Converting them buys no behaviour, and a mechanical conversion carries a specific risk: `expect(...).toEqual` treats a property explicitly set to `undefined` as equivalent to an absent property, while `assert.deepStrictEqual` does not. `expect(...).toStrictEqual` preserves the distinction, but `toEqual` is the matcher a bulk conversion reaches for, so the loosening would have been silent.
+
+What this costs is ergonomic and paid where an error is inspected. `assert.rejects` takes a validator function rather than a matcher chain, so asserting on an error's type and its details together is more verbose than `expect(...).rejects.toThrow(...)`. That is a fair trade for assertions that survive the next runner.
+
+Vitest reports diffs for assertion errors carrying `actual` and `expected`, which Node's `AssertionError` does, so the reporting improves regardless.
 
 Integration tests are named `*.integration.test.ts`. They are tests, and the suffix should say so: anything globbing `*.test.ts` finds them, which means the unit configuration has to exclude them deliberately rather than miss them by accident.
 
@@ -1995,6 +2003,16 @@ The integration configuration loads the root `.env` itself rather than relying o
 ## Consequences
 
 Test files no longer reach `dist`, so integration tests exercise source rather than the shipped artifact; the build is still verified by `build` and `typecheck` on every run. Turbo's `test` tasks no longer depend on a package's own build, only on its dependencies'. `pnpm test:watch` now exists. Mobile will use its own runner when that phase begins — `jest-expo` is what the Expo toolchain expects — so this decision covers the TypeScript backend and shared packages, not the whole repository.
+
+## Amendment
+
+The rationale for retaining `node:assert/strict` was rewritten. The decision is unchanged; the reason recorded for it was wrong in emphasis.
+
+As originally written, it rested on `assert.deepStrictEqual` distinguishing a property explicitly set to `undefined` from an absent one, and asserted that "several tests here assert on payloads where that distinction is the point". Both halves were weaker than they read. `expect(...).toStrictEqual` draws the same distinction, so the capability was never missing from Vitest — only from `toEqual`, which is what a bulk conversion would have used. And of the repository's deep-equality comparisons, two depend on that distinction, not several; both set the property explicitly, so `toStrictEqual` would have caught a regression in either.
+
+The reasons that actually hold are runner independence and the cost of converting a thousand call sites for no behavioural gain. They are now stated in that order.
+
+This is recorded rather than silently corrected because an ADR is only useful if the reasoning in it can be trusted, and reasoning that turns out to be thin is worth knowing about — including by whoever next proposes revisiting the decision on the strength of the argument that was there before.
 
 ---
 
