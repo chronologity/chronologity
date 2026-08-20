@@ -18,7 +18,6 @@ This document defines:
 
 - storage ownership;
 - authoritative versus derived data;
-- EventStoreDB responsibilities;
 - PostgreSQL responsibilities;
 - ClickHouse responsibilities;
 - object storage responsibilities;
@@ -74,7 +73,6 @@ Authority is a domain/architecture decision.
 Chronologity currently uses:
 
 ```text
-EventStoreDB
 PostgreSQL
 ClickHouse
 Object Storage
@@ -89,125 +87,20 @@ Kafka is messaging infrastructure.
 
 # Storage Responsibility Matrix
 
-| Store          | Primary role                                                        | Authoritative?               | Rebuildable?                                   |
-| -------------- | ------------------------------------------------------------------- | ---------------------------- | ---------------------------------------------- |
-| EventStoreDB   | Event-sourced aggregate history                                     | Yes, for selected aggregates | N/A; source history                            |
-| PostgreSQL     | Relational authoritative/operational state + relational read models | Sometimes                    | Depends on table                               |
-| ClickHouse     | High-volume derived Timeline/historical read models                 | No                           | Yes                                            |
-| Object storage | Media binaries and derivatives                                      | Yes for stored media bytes   | Derivatives yes; originals depend on retention |
-| Cache          | Performance acceleration                                            | No                           | Yes                                            |
+| Store          | Primary role                                        | Authoritative?             | Rebuildable?                                   |
+| -------------- | --------------------------------------------------- | -------------------------- | ---------------------------------------------- |
+| PostgreSQL     | Authoritative state for every feature                | Yes                        | No; it is the source                           |
+| ClickHouse     | High-volume derived Timeline/historical read models  | No                         | Yes                                            |
+| Object storage | Media binaries and derivatives                       | Yes for stored media bytes | Derivatives yes; originals depend on retention |
+| Cache          | Performance acceleration                             | No                         | Yes                                            |
 
-The phrase **sometimes** for PostgreSQL is deliberate.
+PostgreSQL is unambiguously authoritative (ADR-092). There is no second write
+store to reconcile it against, and no table in it is a projection of one.
 
-Some PostgreSQL tables may be authoritative.
-
-Others may be projections.
-
-That distinction must be explicit per schema/table.
-
----
-
-# EventStoreDB
-
-## Role
-
-EventStoreDB stores authoritative event streams for intentionally event-sourced aggregates.
-
-Examples may include:
-
-- Identity;
-- Session;
-- User;
-- Moment;
-- UserAuthorization;
-- Moderation;
-- Upload, if confirmed;
-- other aggregates explicitly approved for Event Sourcing.
-
-EventStoreDB is not a general-purpose read database.
-
----
-
-# EventStoreDB Owns
-
-For an event-sourced aggregate, EventStoreDB owns:
-
-- accepted Domain Event sequence;
-- aggregate stream version;
-- authoritative history required for reconstruction;
-- event metadata necessary for integrity/audit.
-
----
-
-# EventStoreDB Must Not Own
-
-EventStoreDB must not contain:
-
-- media binaries;
-- ClickHouse Timeline rows;
-- cache state;
-- transient upload chunks;
-- raw access/refresh tokens;
-- provider credentials;
-- generic Search documents;
-- arbitrary UI state;
-- large denormalized read snapshots.
-
----
-
-# EventStoreDB Read Path
-
-Normal client reads should not reconstruct aggregates from EventStoreDB.
-
-Aggregate reconstruction is primarily a command-side concern.
-
-Operational/audit tooling may read event streams explicitly where justified.
-
----
-
-# EventStoreDB Write Path
-
-Only authoritative event-sourced domain behavior writes EventStoreDB.
-
-Conceptually:
-
-```text
-command
-  ↓
-aggregate
-  ↓
-Domain Events
-  ↓
-expected-version append
-```
-
-Projection code must not append new aggregate history merely to repair read state.
-
----
-
-# EventStoreDB Retention
-
-Authoritative non-sensitive domain history should be retained as long as required for:
-
-- reconstruction;
-- auditability;
-- historical integrity;
-- projection rebuild.
-
-Sensitive values should be minimized/externalized so retention does not conflict with privacy or erasure requirements.
-
----
-
-# EventStoreDB Backup
-
-EventStoreDB backup/recovery is critical because it may contain authoritative history.
-
-Backup strategy must support:
-
-- durable recovery;
-- stream continuity validation;
-- point-in-time objectives where provider capabilities permit;
-- post-restore subscription/projection catch-up.
+A handful of PostgreSQL tables are still derived rather than authoritative —
+`projection_processed_events` records what a consumer has already applied — and
+that distinction must be explicit per table. What has gone is the case where a
+table mirrored state that lived authoritatively somewhere else.
 
 ---
 
@@ -215,57 +108,43 @@ Backup strategy must support:
 
 ## Role
 
-PostgreSQL serves two distinct categories:
+PostgreSQL holds authoritative state for every feature (ADR-092).
 
-```text
-authoritative relational/operational state
-+
-relational read models
-```
-
-These categories must not be conflated.
+That is the whole of its role, and stating it plainly matters: the previous
+architecture split authority between an event store and PostgreSQL, which meant
+every write committed twice, in two systems, with no transaction spanning them.
+A failure between the two left one holding a record the other never recorded.
+There is now one authority and one commit.
 
 ---
 
 # PostgreSQL Authoritative State
 
-PostgreSQL may be authoritative for data that:
+PostgreSQL is authoritative for:
 
-- is not event sourced;
-- requires relational constraints;
-- is operational rather than domain-historical;
-- benefits from transactional updates;
-- does not justify append-only aggregate history.
+- identities, their addresses, and their credentials;
+- Sessions, including whether one may still authenticate a request;
+- accounts, profiles, handles, and restricted personal data;
+- roles and the audit trail of every change to them;
+- uploads and their lifecycle state;
+- locations;
+- and every feature added after these.
 
-Potential examples:
-
-- temporary authentication verification artifacts;
-- relational notification state if not event sourced;
-- workflow/process-manager state;
-- idempotency records;
-- outbox records;
-- projection checkpoints;
-- operational upload-processing state where not event sourced;
-- provider callback deduplication;
-- administrative operational metadata.
-
-Exact ownership belongs in focused data documents.
+The row is the record, not a projection of one. What is written is what the
+system accepts as true.
 
 ---
 
-# PostgreSQL Read Models
+# PostgreSQL Derived and Infrastructure Tables
 
-PostgreSQL may also contain derived projections such as:
+A small number of tables are not authoritative:
 
-- User profile read model;
-- Session view;
-- authorization current state;
-- moderation case view;
-- notification view;
-- upload status;
-- operational account status.
+- `outbox_messages` — infrastructure. Messages waiting to reach Kafka, written
+  in the same transaction as the change they describe.
+- `projection_processed_events` — infrastructure. What a consumer has already
+  applied, so that repeated delivery is safe.
 
-These read tables are rebuildable if their authoritative input is retained.
+These are rebuildable or discardable. Nothing else in PostgreSQL is.
 
 ---
 
@@ -275,7 +154,6 @@ Every PostgreSQL table should be classified as one of:
 
 ```text
 authoritative
-projection
 operational
 infrastructure
 ```
@@ -283,89 +161,98 @@ infrastructure
 Examples:
 
 ```text
-idempotency_keys
+users, sessions, uploads, locations, identity_emails
+    → authoritative
+
+magic_link_tokens
+    → operational; short-lived security artifacts
+
+auth_audit_events, authorization_audit_events
+    → authoritative; evidence, written with the change it describes
+
+outbox_messages, projection_processed_events, schema_migrations
     → infrastructure
-
-projection_checkpoints
-    → infrastructure
-
-user_profile_read
-    → projection
-
-temporary_magic_links
-    → operational/security
-
-notification_state
-    → authoritative or projection depending on final notification architecture
 ```
 
-The classification should be documented in schema migrations or data docs.
+There is deliberately no `projection` classification for a PostgreSQL table
+holding domain state. A table that mirrors authoritative state living elsewhere
+is the thing this architecture removed.
+
+The classification should be stated in the migration that creates the table.
 
 ---
 
 # PostgreSQL Constraints
 
-Authoritative relational tables should use database constraints to reinforce invariants where appropriate.
+Authoritative tables should use database constraints to reinforce invariants,
+and in several places the constraint *is* the invariant.
 
 Examples:
 
-- unique identifiers;
-- unique normalized username;
-- unique provider linkage;
-- foreign keys where ownership semantics are relational;
-- check constraints.
+- unique normalized email, which is what makes two simultaneous first sign-ins
+  resolve to one Identity rather than two;
+- unique normalized handle, which decides who wins a race for a name;
+- unique source reference on a location, so two people choosing the same search
+  result reach one place;
+- check constraints on coordinates and precision;
+- foreign keys where ownership semantics are relational.
 
-Application/domain logic remains primary, but the database should prevent impossible duplicate states where it can do so safely.
+Deciding a uniqueness rule in application code — read, then write if absent —
+leaves a gap that a concurrent request commits inside. The constraint has no gap.
+
+Foreign keys are currently absent from the schema, a legacy of the period when
+referential integrity was an aggregate's job. Adding them is worthwhile and is
+its own piece of work.
 
 ---
 
 # PostgreSQL Transactions
 
-Use local PostgreSQL transactions for operations whose authoritative state lives in PostgreSQL.
+Use local PostgreSQL transactions for authoritative changes.
 
-Do not extend PostgreSQL transactions across:
+Do not extend a transaction across:
 
-- EventStoreDB;
 - Kafka;
 - ClickHouse;
 - object storage;
 - external providers.
 
-Use outbox/workflows instead.
+Use the outbox instead. Do not hold a transaction open across a network
+conversation with any of them — an SMTP exchange inside a transaction ties a
+database connection to a remote server's latency, and a slow decoder would do
+the same.
+
+Expensive CPU work belongs outside the transaction too. Password hashing is
+deliberately slow, and holding a connection for its duration would exhaust the
+pool under exactly the load that endpoint attracts.
 
 ---
 
 # PostgreSQL Outbox
 
-Where relational authority must publish events reliably:
+Every Integration Event reaches Kafka this way, and only this way (ADR-093):
 
 ```text
 transaction
-    ├── authoritative state
+    ├── authoritative state change
     └── outbox message
 ```
 
-The outbox publisher later emits Kafka messages.
+Both commit or neither does. A publisher then claims batches with
+`FOR UPDATE SKIP LOCKED`, publishes them, and marks them published inside the
+same transaction that claimed them — so a crash mid-publish re-delivers rather
+than losing the message, and several publisher instances can run without
+coordinating.
 
-Outbox rows are infrastructure data.
+Outbox rows are infrastructure. They are not the domain record of anything, and
+nothing reads them to learn what happened.
 
-They are not Domain Events by themselves.
+Because the outbox is append-only and feeds Kafka, erasable personal data must
+not be written into it (ADR-095). What a consumer needs is an identifier and
+enough to act; what it does not need must not become impossible to erase.
 
----
-
-# PostgreSQL Projection Checkpoints
-
-Projection/replay checkpoints may live in PostgreSQL.
-
-They should track:
-
-- projection name/version;
-- source;
-- partition/stream;
-- position;
-- last successful update.
-
-Checkpoints should be durable and observable.
+Two operational questions remain open: retention of published rows, and when to
+stop retrying a message that cannot succeed.
 
 ---
 
@@ -405,7 +292,6 @@ ClickHouse is not authoritative.
 
 A ClickHouse row must always be traceable conceptually back to:
 
-- EventStoreDB history;
 - authoritative PostgreSQL state;
 - another explicitly canonical source.
 
@@ -438,7 +324,7 @@ ClickHouse may contain:
 - tag/context projections;
 - Reaction summaries;
 - moderation visibility;
-- historical-significance aggregates;
+- historical-significance summaries;
 - temporal zoom buckets;
 - historical-jump indexes.
 
@@ -521,7 +407,7 @@ The feed aggregator should not have:
 
 - schema-admin permission;
 - unrestricted mutation permission;
-- EventStoreDB credentials.
+- credentials for any authoritative store.
 
 Projection workers have only the write privileges required for their target tables.
 
@@ -595,7 +481,7 @@ That consequence must be explicit.
 
 # Media Metadata
 
-Media metadata should live in PostgreSQL or an authoritative/event-sourced Upload/Media model.
+Media metadata is authoritative in PostgreSQL, on the Upload's row. What the server measured by opening the file outranks anything the client declared.
 
 Examples:
 
@@ -773,11 +659,10 @@ It must obey:
 May access:
 
 ```text
-EventStoreDB
 PostgreSQL
 Object Storage
-Kafka
-ClickHouse only for projection/operations where justified
+Kafka, through the outbox
+ClickHouse only where an operational need is justified
 ```
 
 The HTTP API should not use ClickHouse for normal Timeline reads.
@@ -787,7 +672,7 @@ The HTTP API should not use ClickHouse for normal Timeline reads.
 May access:
 
 ```text
-EventStoreDB / Kafka
+Kafka
 PostgreSQL target projections
 ClickHouse target projections
 Search target
@@ -826,7 +711,9 @@ Mobile
   ↓
 API
   ↓
-EventStoreDB
+PostgreSQL          authoritative state, and the outbox message, in one transaction
+  ↓
+Outbox publisher
   ↓
 Kafka
   ↓
@@ -844,15 +731,15 @@ Media flows separately:
 ```text
 Mobile
   ↓
-authorized upload
+authorized upload          registered by the API, written directly to storage
   ↓
 Object Storage
   ↓
-media workflow
+finalize                   verifies what arrived, enqueues the arrival
   ↓
-processing
+media worker               opens the file, measures it, produces derivatives
   ↓
-PostgreSQL/Event-sourced media state
+PostgreSQL                 authoritative media state
   ↓
 read projections
 ```
@@ -936,7 +823,6 @@ All datastore communication should use encrypted transport in production.
 
 This includes:
 
-- EventStoreDB;
 - PostgreSQL;
 - ClickHouse;
 - Kafka;
@@ -1027,12 +913,6 @@ The architecture must define:
 # Data Deletion
 
 Deletion semantics vary by store.
-
-## EventStoreDB
-
-- tombstone/domain event;
-- externalized PII erasure;
-- exceptional redaction/hard deletion.
 
 ## PostgreSQL
 
@@ -1127,11 +1007,11 @@ Different data classes use different consistency levels.
 
 Required for:
 
-- aggregate writes;
-- role assignment;
-- session revocation;
+- every authoritative write;
+- role assignment and removal;
+- session revocation, which takes effect on the next request;
 - critical privacy state;
-- command invariants.
+- domain invariants.
 
 ## Eventual consistency
 
@@ -1153,9 +1033,9 @@ Chronologity does not attempt synchronous ACID consistency across all stores.
 Instead:
 
 ```text
-authoritative commit
+authoritative commit, with its outbox message
     ↓
-events
+Integration Events
     ↓
 eventual derived convergence
 ```
@@ -1172,8 +1052,8 @@ Example:
 
 ```text
 timeline_moment
-    ← Moment aggregate events
-    ← User profile projection inputs
+    ← Moment Integration Events
+    ← User profile inputs
     ← moderation state
     ← privacy state
 ```
@@ -1189,10 +1069,7 @@ Choose a datastore based on query responsibility.
 Examples:
 
 ```text
-aggregate command state
-    → EventStoreDB
-
-current operational account state
+current authoritative state
     → PostgreSQL
 
 Timeline chronological slice
@@ -1216,8 +1093,6 @@ For example, the feed aggregator should not need:
 
 ```text
 ClickHouse
-+
-EventStoreDB
 +
 PostgreSQL
 +
@@ -1278,9 +1153,11 @@ for rolling compatibility.
 
 Prefer new tables/projection versions for material changes.
 
-## EventStoreDB
+## Kafka
 
-Event schemas evolve through event versioning/upcasters rather than ordinary table migration.
+Integration Event payloads evolve through explicit versioning. A published event
+is immutable and a consumer may be older than the producer, so a change that
+removes or repurposes a field is a new version rather than an edit.
 
 ## Object Storage
 
@@ -1425,7 +1302,6 @@ A checksum does not automatically imply cross-User media deduplication is produc
 
 Large binary values must not live in:
 
-- EventStoreDB;
 - Kafka;
 - ClickHouse;
 - ordinary PostgreSQL rows
@@ -1460,7 +1336,7 @@ Avoid one universal:
 Repository<T>
 ```
 
-across EventStoreDB, PostgreSQL, ClickHouse, and object storage.
+across PostgreSQL, ClickHouse, and object storage.
 
 These systems have different semantics.
 
@@ -1572,18 +1448,6 @@ Exact partition keys belong in `docs/data/clickhouse.md`.
 
 ---
 
-# Scaling EventStoreDB
-
-Scale should preserve:
-
-- stream ordering;
-- optimistic concurrency;
-- durable subscriptions.
-
-Cluster/sharding topology belongs in infrastructure documentation.
-
----
-
 # Scaling Object Storage
 
 Object storage/CDN handles large binary scale naturally.
@@ -1596,7 +1460,6 @@ Application design must avoid routing all media bytes through API servers.
 
 Storage cost must be measured separately for:
 
-- EventStoreDB history;
 - PostgreSQL;
 - ClickHouse;
 - media originals;
@@ -1612,13 +1475,11 @@ Media and Timeline history are likely major cost centers.
 
 Metrics should include:
 
-## EventStoreDB
+## Outbox
 
-- append latency;
-- read latency;
-- concurrency conflicts;
-- subscription lag;
-- storage growth.
+- depth of unpublished messages;
+- publication lag;
+- messages whose attempts keep climbing.
 
 ## PostgreSQL
 
@@ -1666,15 +1527,14 @@ Each authoritative store requires tested recovery.
 
 Derived stores may be rebuilt, but backups may still reduce recovery time.
 
-## EventStoreDB
-
-Must have tested authoritative recovery.
-
 ## PostgreSQL
 
-Authoritative tables require backups/PITR according to RPO/RTO.
+PostgreSQL is the only authoritative store, which makes its recovery the whole
+of the system's recovery. Backups and PITR according to RPO/RTO, and tested.
 
-Projection-only tables may be rebuildable.
+Infrastructure tables — the outbox, processed-event records — are rebuildable
+only in the sense that losing them costs undelivered messages rather than
+authoritative facts. They are backed up with everything else.
 
 ## ClickHouse
 
@@ -1735,8 +1595,8 @@ The system should detect:
 - media metadata without object;
 - object without metadata;
 - projection row without valid source;
-- stuck outbox message;
-- stale projection checkpoint.
+- outbox message whose attempts keep climbing without succeeding;
+- published outbox rows that nothing ever removes.
 
 ---
 
@@ -1747,7 +1607,7 @@ A new datastore may be introduced only when existing stores cannot appropriately
 Before adding one, document:
 
 1. required workload;
-2. why EventStoreDB/PostgreSQL/ClickHouse/object storage are insufficient;
+2. why PostgreSQL, ClickHouse, and object storage are insufficient;
 3. authority status;
 4. consistency model;
 5. backup/rebuild strategy;
@@ -1824,7 +1684,6 @@ Before launch, Chronologity must define and implement:
 
 - authoritative-store matrix;
 - PostgreSQL table classifications;
-- EventStoreDB aggregate ownership;
 - PostgreSQL migration framework;
 - ClickHouse migration/projection version strategy;
 - object-storage provider;
@@ -1849,20 +1708,11 @@ Before launch, Chronologity must define and implement:
 
 ## PostgreSQL Authority
 
-- Which tables are authoritative versus projections?
-- Is Notification relational-authoritative?
-- Is Upload relational-authoritative or event sourced?
-- Where does workflow/process-manager state live?
 - Where do idempotency records live?
-- Where do auth verification artifacts live?
-
-## EventStoreDB
-
-- Confirm final event-sourced aggregates.
-- Which streams require snapshots?
-- What provider/topology?
-- What backup strategy?
-- How are stream deletions/redactions operated?
+- What are the retention rules for published outbox rows?
+- When does a repeatedly failing outbox message stop being retried, and where
+  does it go?
+- When are foreign keys added across the schema?
 
 ## ClickHouse
 
@@ -1906,7 +1756,6 @@ Before launch, Chronologity must define and implement:
 
 ## Backups
 
-- What RPO/RTO for EventStoreDB?
 - PostgreSQL?
 - Object storage?
 - Are ClickHouse backups necessary or is replay sufficient?
@@ -1924,17 +1773,17 @@ Before launch, Chronologity must define and implement:
 
 1. Every important data category has one clear authoritative owner.
 2. Durability alone does not make a datastore authoritative.
-3. EventStoreDB is authoritative only for explicitly event-sourced aggregates.
-4. PostgreSQL may contain both authoritative and derived data, but each table is classified.
+3. PostgreSQL holds authoritative state for every feature; there is no second write store.
+4. PostgreSQL also holds a small number of infrastructure tables, and each table is classified.
 5. ClickHouse is always derived product-read state.
 6. Object storage owns media bytes, not Moment semantics.
 7. Caches are always disposable.
 8. Kafka is not an authoritative datastore.
 9. Multiple writable copies of the same domain state are prohibited.
-10. EventStoreDB is not used as the routine UI query store.
-11. EventStoreDB does not store media binaries.
+10. No table in PostgreSQL mirrors domain state that lives authoritatively elsewhere.
+11. A uniqueness rule is enforced by a constraint, not by reading before writing.
 12. PostgreSQL local transactions do not extend across other stores.
-13. Relational-authoritative publication uses outbox or equivalent reliability.
+13. Every Integration Event reaches Kafka through the transactional outbox, enqueued in the same transaction as the change it describes.
 14. ClickHouse read models are rebuildable.
 15. Backfilled history must be supported in ClickHouse.
 16. ClickHouse event arrival time does not define chronology.
@@ -1966,11 +1815,11 @@ Before launch, Chronologity must define and implement:
 42. Migrations are owned by the schema owner.
 43. PostgreSQL rolling migrations prefer expand/migrate/contract.
 44. ClickHouse material changes prefer versioned tables/projections.
-45. EventStoreDB schema evolution uses event versioning, not table-style migration.
+45. Integration Event schemas evolve through explicit versioning, because a published event is immutable and consumers may be older than producers.
 46. Application-generated stable IDs are preferred where cross-store identity is needed.
 47. Historical time semantics are preserved explicitly.
 48. False temporal precision is prohibited.
-49. Large binaries stay out of relational/event/message stores.
+49. Large binaries stay out of relational and message stores.
 50. JSON columns do not replace schema design casually.
 51. Universal repository abstractions across heterogeneous datastores are avoided.
 52. Processes reuse managed connection pools.
