@@ -18,7 +18,6 @@ import {
 } from "../../integrations/storage/storage-client.js";
 import { migrate } from "../../lib/database/migrations.js";
 import { createDatabase, type Database } from "../../lib/database/postgres.js";
-import { createEventStore, type EventStore } from "../../lib/eventstore/client.js";
 import { systemContext } from "../../types/request-context.js";
 
 /**
@@ -50,7 +49,6 @@ const fixture = (name: string) =>
 
 describe("producing derivatives", () => {
   let database: Database;
-  let eventStore: EventStore;
   let uploads: UploadService;
   let repository: UploadRepository;
   let storage: StorageClient;
@@ -64,9 +62,6 @@ describe("producing derivatives", () => {
       database: process.env.POSTGRES_DATABASE ?? "chronologity",
       user: process.env.POSTGRES_USER ?? "chronologity",
       password: process.env.POSTGRES_PASSWORD ?? "chronologity",
-    });
-    eventStore = createEventStore({
-      connectionString: process.env.EVENTSTOREDB_URL ?? "esdb://localhost:2113?tls=false",
     });
     await migrate(database.pool);
 
@@ -109,7 +104,6 @@ describe("producing derivatives", () => {
   afterAll(async () => {
     storage.close();
     s3.destroy();
-    await eventStore.close();
     await database.close();
   });
 

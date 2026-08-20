@@ -25,8 +25,6 @@ export const envSchema = z.object({
   POSTGRES_USER: z.string().min(1),
   POSTGRES_PASSWORD: z.string(),
 
-  EVENTSTOREDB_URL: z.string().startsWith("esdb://"),
-
   KAFKA_BROKERS: z.string().min(1),
 
   // No default for the signing secret: a development fallback would eventually

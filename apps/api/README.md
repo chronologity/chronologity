@@ -23,7 +23,7 @@ pnpm --filter @chronologity/api start
 | `/health/live`  | Is the process running?                    |
 | `/health/ready` | Can this instance serve traffic right now? |
 
-These are deliberately different questions. Liveness consults nothing, because a database outage should stop traffic being routed here — not cause an orchestrator to kill and restart a healthy process. Readiness performs a real round trip to PostgreSQL, EventStoreDB, and Kafka on every request, returns 503 when any of them fails, and names which one, so an operator sees the scope of an outage rather than only its first symptom.
+These are deliberately different questions. Liveness consults nothing, because a database outage should stop traffic being routed here — not cause an orchestrator to kill and restart a healthy process. Readiness performs a real round trip to PostgreSQL and Kafka on every request, returns 503 when any of them fails, and names which one, so an operator sees the scope of an outage rather than only its first symptom.
 
 ## Structure
 

@@ -17,7 +17,6 @@ COMPOSE=(bash "$ROOT/scripts/compose.sh")
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 POSTGRES_USER="${POSTGRES_USER:-chronologity}"
 POSTGRES_DATABASE="${POSTGRES_DATABASE:-chronologity}"
-EVENTSTOREDB_PORT="${EVENTSTOREDB_PORT:-2113}"
 KAFKA_PORT="${KAFKA_PORT:-9092}"
 CLICKHOUSE_HTTP_PORT="${CLICKHOUSE_HTTP_PORT:-8123}"
 CLICKHOUSE_USERNAME="${CLICKHOUSE_USERNAME:-chronologity}"
@@ -60,36 +59,6 @@ if "${COMPOSE[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -q \
   pass "create table, insert, select, drop"
 else
   fail "could not complete a write/read cycle"
-fi
-
-# ─────────────────────────────────────────────────────────────────
-section "EventStoreDB (localhost:${EVENTSTOREDB_PORT})"
-
-if host_can_reach 127.0.0.1 "$EVENTSTOREDB_PORT"; then
-  pass "host reaches port ${EVENTSTOREDB_PORT}"
-else
-  fail "host cannot reach port ${EVENTSTOREDB_PORT}"
-fi
-
-ES="http://127.0.0.1:${EVENTSTOREDB_PORT}"
-if curl --fail --silent "${ES}/health/live" >/dev/null 2>&1; then
-  pass "reports healthy"
-else
-  fail "health endpoint did not respond"
-fi
-
-# Append one event to a scratch stream and read it back: the smallest real
-# exercise of the write path this database exists for.
-if curl --fail --silent -X POST "${ES}/streams/${RUN_ID}" \
-  -H "Content-Type: application/vnd.eventstore.events+json" \
-  -d "[{\"eventId\":\"$(uuidgen | tr '[:upper:]' '[:lower:]')\",\"eventType\":\"ProbeRecorded\",\"data\":{\"ok\":true}}]" \
-  >/dev/null 2>&1 &&
-  curl --fail --silent -H "Accept: application/vnd.eventstore.atom+json" \
-    "${ES}/streams/${RUN_ID}/head" | grep -q "ProbeRecorded"; then
-  pass "append event to stream, read it back"
-  curl --fail --silent -X DELETE "${ES}/streams/${RUN_ID}" >/dev/null 2>&1
-else
-  fail "could not append and read back an event"
 fi
 
 # ─────────────────────────────────────────────────────────────────

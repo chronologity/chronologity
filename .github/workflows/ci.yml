@@ -4,9 +4,9 @@ name: CI
 #
 # Integration tests run here rather than on a developer's machine, and that is
 # a deliberate reversal. Running the full stack locally means PostgreSQL,
-# EventStoreDB, Kafka, object storage and a mail sink competing with the editor
+# Kafka, ClickHouse, object storage and a mail sink competing with the editor
 # and the tests themselves; the roadmap adds four more workers, a second
-# application, and eventually ClickHouse on top of that. A laptop runs out
+# application, and eventually a projector on top of that. A laptop runs out
 # first, and when it does the failures look like code failures — as they did
 # when Docker exhausted its disk and half the suite reported as failed or
 # skipped.

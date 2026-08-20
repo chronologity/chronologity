@@ -32,7 +32,6 @@
         "NODE_ENV",
         "LOG_LEVEL",
         "POSTGRES_*",
-        "EVENTSTOREDB_*",
         "KAFKA_*",
         "CLICKHOUSE_*",
         "AUTH_*",

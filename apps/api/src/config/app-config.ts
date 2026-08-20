@@ -3,7 +3,6 @@ import { toAuthConfig, type AuthConfig } from "./auth-config.js";
 import { toDatabaseConfig, type DatabaseConfig } from "./database-config.js";
 import { toEmailConfig, type EmailConfig } from "./email-config.js";
 import { envSchema, type Env } from "./env.js";
-import { toEventStoreConfig, type EventStoreConfig } from "./eventstore-config.js";
 import { toMessagingConfig, type MessagingConfig } from "./messaging-config.js";
 import { toPlacesConfig, type PlacesConfig } from "./places-config.js";
 import {
@@ -25,7 +24,6 @@ export interface AppConfig {
   readonly host: string;
   readonly port: number;
   readonly database: DatabaseConfig;
-  readonly eventStore: EventStoreConfig;
   readonly messaging: MessagingConfig;
   readonly auth: AuthConfig;
   /** Minimum age, in whole years, for creating an account. */
@@ -58,7 +56,6 @@ export function loadConfig(source: Record<string, string | undefined> = process.
     host: env.API_HOST,
     port: env.API_PORT,
     database: toDatabaseConfig(env),
-    eventStore: toEventStoreConfig(env),
     messaging: toMessagingConfig(env),
     auth: toAuthConfig(env),
     minimumAgeYears: env.USER_MINIMUM_AGE_YEARS,

@@ -70,12 +70,16 @@ describe("PostgreSQL foundation against a real database", () => {
 
       for (const expected of [
         "outbox_messages",
-        "projection_checkpoints",
         "projection_processed_events",
-        "publisher_checkpoints",
         "schema_migrations",
       ]) {
         assert.ok(tables.includes(expected), `expected table ${expected}`);
+      }
+
+      // Dropped with the code that wrote them: both recorded a position in an
+      // EventStoreDB stream, and there is no such stream to hold one in.
+      for (const gone of ["projection_checkpoints", "publisher_checkpoints"]) {
+        assert.ok(!tables.includes(gone), `expected table ${gone} to be gone`);
       }
     });
   });

@@ -38,9 +38,6 @@ const config: AppConfig = {
     user: process.env.POSTGRES_USER ?? "chronologity",
     password: process.env.POSTGRES_PASSWORD ?? "chronologity",
   },
-  eventStore: {
-    connectionString: process.env.EVENTSTOREDB_URL ?? "esdb://localhost:2113?tls=false",
-  },
   messaging: { brokers: ["localhost:9092"], clientId: "authorization-integration" },
   auth: {
     jwtSecret: new TextEncoder().encode("integration-test-secret-long-enough-for-hs256"),

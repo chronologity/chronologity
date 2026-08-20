@@ -2,11 +2,6 @@ packages:
   - "apps/*"
   - "packages/*"
 
-# Dependencies permitted to run install scripts. A dependency must be named
-# here before its build script runs, so adding one is a deliberate act.
-#
-# protobufjs arrives via @eventstore/db-client. Its postinstall builds the
-# pbjs/pbts CLI, which nothing in this repository uses; the runtime library
-# needs no build step.
-allowBuilds:
-  protobufjs: false
+# No dependency is permitted to run install scripts. pnpm blocks them unless a
+# package is named under `allowBuilds`, and nothing here needs one — so adding
+# the key back is a deliberate act rather than a default anyone drifted into.

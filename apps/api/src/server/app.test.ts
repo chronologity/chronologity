@@ -18,7 +18,6 @@ const config: AppConfig = {
     user: "unused",
     password: "unused",
   },
-  eventStore: { connectionString: "esdb://unused:2113?tls=false" },
   messaging: { brokers: ["unused:9092"], clientId: "test" },
   auth: {
     jwtSecret: new TextEncoder().encode("test-secret-value-long-enough-for-hs256"),
@@ -85,7 +84,7 @@ describe("liveness", () => {
 
 describe("readiness", () => {
   it("is ready when every dependency answers", async () => {
-    const app = await appWith([healthy("postgres"), healthy("eventstore"), healthy("kafka")]);
+    const app = await appWith([healthy("postgres"), healthy("kafka"), healthy("storage")]);
     onTestFinished(() => app.close());
 
     const response = await app.inject({ method: "GET", url: "/health/ready" });
@@ -97,8 +96,8 @@ describe("readiness", () => {
   it("reports 503 and names the dependency that failed", async () => {
     const app = await appWith([
       healthy("postgres"),
-      failing("eventstore", "connection refused"),
-      healthy("kafka"),
+      failing("kafka", "connection refused"),
+      healthy("storage"),
     ]);
     onTestFinished(() => app.close());
 
@@ -108,11 +107,11 @@ describe("readiness", () => {
     assert.equal(response.statusCode, 503);
     assert.equal(body.status, "degraded");
 
-    const eventstore = body.dependencies.find(
-      (dependency: { name: string }) => dependency.name === "eventstore",
+    const broker = body.dependencies.find(
+      (dependency: { name: string }) => dependency.name === "kafka",
     );
-    assert.equal(eventstore.healthy, false);
-    assert.equal(eventstore.error, "connection refused");
+    assert.equal(broker.healthy, false);
+    assert.equal(broker.error, "connection refused");
 
     // The healthy dependencies are still reported, so an operator can see the
     // scope of the outage rather than only its first symptom.

@@ -42,33 +42,6 @@ services:
       start_period: 10s
 
   # ───────────────────────────────────────────────────────────────
-  # EventStoreDB — authoritative event history for event-sourced domains.
-  #
-  # Single node, insecure mode. Standard projections are enabled because
-  # projection replay is exercised from Phase 4 onward.
-  # ───────────────────────────────────────────────────────────────
-  eventstore:
-    image: eventstore/eventstore:24.10.14
-    restart: unless-stopped
-    environment:
-      EVENTSTORE_CLUSTER_SIZE: 1
-      EVENTSTORE_INSECURE: "true"
-      EVENTSTORE_RUN_PROJECTIONS: All
-      EVENTSTORE_START_STANDARD_PROJECTIONS: "true"
-      EVENTSTORE_ENABLE_ATOM_PUB_OVER_HTTP: "true"
-    ports:
-      - "${EVENTSTOREDB_PORT:-2113}:2113"
-    volumes:
-      - eventstore-data:/var/lib/eventstore
-      - eventstore-logs:/var/log/eventstore
-    healthcheck:
-      test: ["CMD-SHELL", "curl --fail --silent http://localhost:2113/health/live"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-      start_period: 15s
-
-  # ───────────────────────────────────────────────────────────────
   # Kafka — asynchronous transport. Never a source of truth (ADR-013).
   #
   # KRaft mode, single combined broker/controller node. Two listeners:
@@ -249,8 +222,6 @@ services:
 
 volumes:
   postgres-data:
-  eventstore-data:
-  eventstore-logs:
   kafka-data:
   clickhouse-data:
   clickhouse-logs:

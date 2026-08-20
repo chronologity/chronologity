@@ -15,7 +15,6 @@ import {
 } from "../../integrations/storage/storage-client.js";
 import { migrate } from "../../lib/database/migrations.js";
 import { createDatabase, type Database } from "../../lib/database/postgres.js";
-import { createEventStore, type EventStore } from "../../lib/eventstore/client.js";
 import type { ConsumedEvent } from "../../lib/messaging/consumer.js";
 import { systemContext } from "../../types/request-context.js";
 import { checkArrivedMedia } from "./check-media.js";
@@ -49,7 +48,6 @@ const fixture = (name: string) =>
 
 describe("checking media", () => {
   let database: Database;
-  let eventStore: EventStore;
   let uploads: UploadService;
   let repository: UploadRepository;
   let storage: StorageClient;
@@ -61,9 +59,6 @@ describe("checking media", () => {
       database: process.env.POSTGRES_DATABASE ?? "chronologity",
       user: process.env.POSTGRES_USER ?? "chronologity",
       password: process.env.POSTGRES_PASSWORD ?? "chronologity",
-    });
-    eventStore = createEventStore({
-      connectionString: process.env.EVENTSTOREDB_URL ?? "esdb://localhost:2113?tls=false",
     });
     await migrate(database.pool);
 
@@ -105,7 +100,6 @@ describe("checking media", () => {
 
   afterAll(async () => {
     storage.close();
-    await eventStore.close();
     await database.close();
   });
 
@@ -303,7 +297,6 @@ describe("checking media", () => {
 
 describe("handling a note from the queue", () => {
   let database: Database;
-  let eventStore: EventStore;
   let uploads: UploadService;
   let repository: UploadRepository;
   let storage: StorageClient;
@@ -315,9 +308,6 @@ describe("handling a note from the queue", () => {
       database: process.env.POSTGRES_DATABASE ?? "chronologity",
       user: process.env.POSTGRES_USER ?? "chronologity",
       password: process.env.POSTGRES_PASSWORD ?? "chronologity",
-    });
-    eventStore = createEventStore({
-      connectionString: process.env.EVENTSTOREDB_URL ?? "esdb://localhost:2113?tls=false",
     });
 
     storage = createStorageClient(storageConfig);
@@ -337,7 +327,6 @@ describe("handling a note from the queue", () => {
 
   afterAll(async () => {
     storage.close();
-    await eventStore.close();
     await database.close();
   });
 
