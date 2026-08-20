@@ -149,9 +149,14 @@ describe("recording places", () => {
 
     it("reaches one place when they choose it at the same moment", async () => {
       // The check for an existing place and the write that follows it are two
-      // moments, and two people can arrive between them. Under the previous
+      // moments, and people can arrive between them. Under the previous
       // arrangement the loser's insert raised a unique violation nothing
       // caught, and they received a 500 for having been slightly too quick.
+      //
+      // Eight at once rather than two. With two, both can complete their check
+      // before either writes, and the losing path this test exists for never
+      // runs — the assertion holds either way, so the test would pass while
+      // proving nothing. Eight makes the losing path certain.
       const reference = `way:${randomUUID().slice(0, 8)}`;
 
       const place = () => ({
@@ -161,12 +166,45 @@ describe("recording places", () => {
         sourceReference: reference,
       });
 
-      const [first, second] = await Promise.all([
-        locations.record(randomUUID(), place()),
-        locations.record(randomUUID(), place()),
-      ]);
+      const recorded = await Promise.all(
+        Array.from({ length: 8 }, () => locations.record(randomUUID(), place())),
+      );
 
-      assert.equal(first.locationId, second.locationId);
+      const identifiers = new Set(recorded.map((location) => location.locationId));
+      assert.equal(identifiers.size, 1, "eight simultaneous choices produced more than one place");
+
+      // The assertion that the returned identifiers agree can be satisfied by
+      // eight reads of one committed row. This one cannot: it says the
+      // database holds a single place, which is the property the conditional
+      // insert exists for.
+      const { rows } = await database.pool.query<{ count: string }>(
+        `SELECT count(*) FROM locations WHERE source_reference = $1`,
+        [reference],
+      );
+      assert.equal(rows[0]?.count, "1");
+    });
+
+    it("keeps the losing recorder's name off the place they lost", async () => {
+      // Two people, two names, one map-service result. The first to commit
+      // names it; the loser receives that place rather than their own name,
+      // because a Moment recorded at that time should carry what it was called
+      // then, not what the next person typed.
+      const reference = `way:${randomUUID().slice(0, 8)}`;
+
+      const recorded = await Promise.all(
+        Array.from({ length: 8 }, (_unused, index) =>
+          locations.record(randomUUID(), {
+            name: `Contender ${index}`,
+            coordinates: { latitude: 5, longitude: 6 },
+            precision: "exact",
+            sourceReference: reference,
+          }),
+        ),
+      );
+
+      const names = new Set(recorded.map((location) => location.name));
+      assert.equal(names.size, 1, "callers disagreed about what the place is called");
+      assert.match([...names][0] ?? "", /^Contender \d$/);
     });
 
     it("records a place the map service has never heard of", async () => {
