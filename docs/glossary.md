@@ -140,7 +140,7 @@ See `product/discovery.md`.
 
 See **Real-World Event**.
 
-The unqualified word "event" should be avoided in architecture documentation where it could be confused with an event-sourcing domain event. Use **Real-World Event** for the historical product concept and **Domain Event** for an event-sourcing record.
+The unqualified word "event" should be avoided in architecture documentation where it could be confused with a software event. Use **Real-World Event** for the historical product concept, **Domain Event** for a past-tense fact the API accepted, and **Integration Event** for a message published across a boundary.
 
 ## Feed
 
@@ -396,7 +396,7 @@ A Real-World Event is not a Moment and does not replace Moment chronology.
 
 Multiple Users may contribute Moments associated with the same Real-World Event.
 
-Use the full term when confusion with event-sourcing Domain Events is possible.
+Use the full term when confusion with software events is possible.
 
 See `product/real-world-events.md`.
 
@@ -592,7 +592,7 @@ Do not describe a Timeline as an arbitrary User-created container unless a futur
 
 Use **Real-World Event** for the historical product concept.
 
-Use **Domain Event** for an event-sourcing event.
+Use **Domain Event** for a past-tense fact the API accepted, and **Integration Event** for a message published to consumers outside it.
 
 Avoid unqualified **Event** in architecture documentation when the meaning would be ambiguous.
 

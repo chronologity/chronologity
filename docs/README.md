@@ -36,7 +36,7 @@ Documentation should explain **why a constraint exists**, define the invariants 
 4.  Open questions should remain explicit rather than being answered accidentally during implementation.
 5.  Resolved decisions should be removed from open-question lists and stated as invariants or requirements.
 6.  Documentation should distinguish conceptual models from required persistence models.
-7.  A domain concept does not automatically require a dedicated service, database, aggregate, table, topic, or API.
+7.  A domain concept does not automatically require a dedicated service, database, table, topic, or API.
 8.  Derived data must preserve the semantics, privacy, and integrity of its source information.
 9.  Documentation should be updated when a product or architecture decision changes.
 10. Architectural decisions with meaningful alternatives or long-term consequences should be captured in ADRs.
@@ -116,7 +116,7 @@ It defines the documentation taxonomy, responsibilities of each documentation ar
 
 Defines canonical Chronologity terminology used across product and engineering documentation.
 
-It should resolve ambiguous terms such as Moment, Timeline, Feed, Event, occurrence time, creation time, context, historical jump, temporal zoom, projection, aggregate, domain event, and read model.
+It should resolve ambiguous terms such as Moment, Timeline, Feed, Event, occurrence time, creation time, context, historical jump, temporal zoom, projection, domain event, integration event, and read model.
 
 The glossary should describe terminology rather than replace the deeper specifications that define each concept.
 
@@ -274,7 +274,7 @@ These documents should describe boundaries, flows, guarantees, tradeoffs, and ar
 
 Provides the authoritative high-level architecture of Chronologity.
 
-It should describe the API, EventStoreDB, PostgreSQL, Kafka, ClickHouse, media infrastructure, Feed Aggregator, mobile application, web application, shared packages, and major data flows.
+It should describe the API, PostgreSQL, Kafka, ClickHouse, media infrastructure, Feed Aggregator, mobile application, web application, shared packages, and major data flows.
 
 ## `architecture/principles.md`
 
@@ -356,7 +356,7 @@ It should cover event triggers, projection/state requirements, deduplication, ag
 
 ## `architecture/data-storage.md`
 
-Provides the high-level allocation of data responsibilities across EventStoreDB, PostgreSQL, ClickHouse, object storage, caches, and any future stores.
+Provides the high-level allocation of data responsibilities across PostgreSQL, ClickHouse, object storage, caches, and any future stores.
 
 It should explain why each store exists and prohibit casual duplication of authoritative responsibilities.
 
@@ -370,7 +370,7 @@ It should cover cache eligibility, invalidation, authorization-sensitive data, m
 
 Translates `product/privacy.md` into cross-system technical guarantees.
 
-It should address authorization-aware projections, deletion, revocation, caches, Kafka, EventStoreDB, PostgreSQL, ClickHouse, media storage, logs, analytics, and derived data.
+It should address authorization-aware projections, deletion, revocation, caches, Kafka, PostgreSQL, ClickHouse, media storage, logs, analytics, and derived data.
 
 ## `architecture/security.md`
 
@@ -640,7 +640,7 @@ Privacy applies to source and derived data.
 Timeline context cannot bypass Moment privacy.
 Temporal zoom cannot bypass privacy.
 Historical jumps cannot bypass privacy.
-Event sourcing does not override deletion or erasure requirements.
+Append-only storage does not override deletion or erasure requirements.
 ```
 
 ## Historical Significance

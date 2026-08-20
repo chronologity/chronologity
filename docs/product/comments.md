@@ -287,7 +287,7 @@ Chronologity may retain the latest edit time separately.
 
 Chronologity does not need to expose a public Comment revision history in the initial product.
 
-Internal revision information may be retained where required for moderation, abuse investigation, legal compliance, or event-sourced correctness.
+Internal revision information may be retained where required for moderation, abuse investigation, or legal compliance.
 
 Internal retention must remain subject to privacy and retention requirements.
 
@@ -965,7 +965,7 @@ Authorization must be enforceable consistently across authoritative and derived 
 
 The system must also support large discussions without requiring an entire thread to be loaded or rewritten for ordinary operations.
 
-If Chronologity uses event sourcing for Comment writes, that architectural choice must not force internal historical revisions to become publicly visible or prevent privacy-compliant deletion and suppression behavior.
+Whatever Chronologity stores internally about a Comment's revisions must not force those revisions to become publicly visible, and must not prevent privacy-compliant deletion and suppression.
 
 ## Guiding Principle
 

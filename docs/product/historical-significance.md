@@ -1155,7 +1155,7 @@ Deleting a Moment removes it from ordinary significance-driven product experienc
 
 Derived significance calculations must eventually stop selecting or exposing deleted content.
 
-If internal records must be retained for legal, safety, audit, or event-sourcing reasons, that retention does not imply continued product visibility.
+If internal records must be retained for legal, safety, or audit reasons, that retention does not imply continued product visibility.
 
 Deleting one Moment may also change the computed significance of other Moments if the deleted Moment participated in a derived graph calculation.
 

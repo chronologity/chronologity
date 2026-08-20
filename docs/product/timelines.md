@@ -73,9 +73,9 @@ Chronological structure
 
 Users record history. Chronologity organizes that history chronologically.
 
-## Timeline Is Not an Aggregate Root by Product Definition
+## Timeline Is Not a Stored Entity by Product Definition
 
-The word "Timeline" being a major product concept does not imply that it must become an independently persisted domain aggregate.
+The word "Timeline" being a major product concept does not imply that it must become an independently persisted thing.
 
 The product model does not require:
 
