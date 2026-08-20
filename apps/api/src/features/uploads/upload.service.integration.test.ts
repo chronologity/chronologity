@@ -10,6 +10,7 @@ import type { MetadataClient } from "../../integrations/metadata/metadata-client
 import { createMetadataClient } from "../../integrations/metadata/metadata-client.js";
 import { createStorageClient, type StorageClient } from "../../integrations/storage/storage-client.js";
 import { migrate } from "../../lib/database/migrations.js";
+import { withTransaction } from "../../lib/database/transaction.js";
 import { createDatabase, type Database } from "../../lib/database/postgres.js";
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
@@ -444,6 +445,48 @@ describe("uploads", () => {
 
       const record = await repository.findById(uploadId);
       assert.equal(record?.state, "ready");
+    });
+  });
+
+  describe("what the row records when storage says little", () => {
+    it("records an arrival even when storage reported no type and no checksum", async () => {
+      // Both are optional in the S3 API. SeaweedFS returns them, so the service
+      // never produces this — but another implementation may, and an arrival
+      // must still be recorded rather than lost to a null.
+      const { uploadId } = await upload("photo.jpg", "image");
+
+      const moved = await withTransaction(database.pool, (tx) =>
+        repository.markReceived(tx, {
+          uploadId,
+          byteSize: 1234,
+          contentType: undefined,
+          checksum: undefined,
+          receivedAt: new Date(),
+        }),
+      );
+
+      assert.equal(moved, true);
+
+      const record = await repository.findById(uploadId);
+      assert.equal(record?.state, "received");
+      assert.equal(record?.contentType, null);
+      assert.equal(record?.checksum, null);
+      assert.equal(record?.byteSize, 1234);
+    });
+
+    it("has nothing to read for an upload that does not exist", async () => {
+      assert.equal(await repository.findById(randomUUID()), undefined);
+      assert.equal(await repository.findRecord(randomUUID()), undefined);
+    });
+
+    it("counts no attempts against an upload that does not exist", async () => {
+      const attempts = await withTransaction(database.pool, (tx) =>
+        repository.countAttempt(tx, randomUUID(), new Date()),
+      );
+
+      // Nothing to count and nothing to fail: a note about a file that has
+      // since been erased must not take the checker down with it.
+      assert.equal(attempts, 0);
     });
   });
 

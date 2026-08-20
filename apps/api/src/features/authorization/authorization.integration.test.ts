@@ -5,6 +5,7 @@ import type { FastifyInstance } from "fastify";
 import type { AppConfig } from "../../config/app-config.js";
 import { migrate } from "../../lib/database/migrations.js";
 import { createDatabase, type Database } from "../../lib/database/postgres.js";
+import { withTransaction } from "../../lib/database/transaction.js";
 import { buildApp } from "../../server/app.js";
 import { createTestAuthentication, type TestAuthentication } from "../../testing/authentication.js";
 import { UserRepository } from "../users/user.repository.js";
@@ -368,6 +369,36 @@ describe("authorization", () => {
       });
 
       assert.equal(response.statusCode, 404);
+    });
+
+    it("records an audit row for a change no request asked for", async () => {
+      // Roles can be granted outside a request — the first administrator has to
+      // come from somewhere, and `removedBy: undefined` is the command line.
+      // Such a change has no trace to attribute it to, and must still leave
+      // evidence: audit is where privileged operations are accounted for.
+      const subject = await onboard();
+      const roles = new AuthorizationRepository(database.pool);
+
+      await withTransaction(database.pool, (tx) =>
+        roles.recordAudit(tx, {
+          eventType: "user_role_assigned",
+          outcome: "success",
+          actorUserId: undefined,
+          subjectUserId: subject.user.userId,
+          role: "moderator",
+          reason: "bootstrapped from the command line",
+          context: { source: "cli" },
+        }),
+      );
+
+      const { rows } = await database.pool.query<{ trace_id: string | null; context: unknown }>(
+        `SELECT trace_id, context FROM authorization_audit_events WHERE subject_user_id = $1`,
+        [subject.user.userId],
+      );
+
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0]?.trace_id, null);
+      assert.deepEqual(rows[0]?.context, { source: "cli" });
     });
 
     it("refuses to take a role from an account that does not exist", async () => {

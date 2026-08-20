@@ -147,6 +147,30 @@ describe("accounts", () => {
       now = new Date();
     });
 
+    it("applies the default minimum age when none is configured", async () => {
+      // Every other test configures one. Nothing in the process is obliged to,
+      // and an unconfigured age gate that admits everyone would be worse than
+      // no gate at all, because it would look like one.
+      const unconfigured = new UserService(database.pool, new UserRepository(database.pool));
+
+      await assert.rejects(
+        unconfigured.create(randomUUID(), {
+          handle: uniqueHandle(),
+          displayName: "Too Young",
+          dateOfBirth: new Date(Date.now() - 12 * 365.25 * DAY_MS).toISOString().slice(0, 10),
+        }),
+        ValidationError,
+      );
+
+      await assert.doesNotReject(
+        unconfigured.create(randomUUID(), {
+          handle: uniqueHandle(),
+          displayName: "Old Enough",
+          dateOfBirth: "1990-01-01",
+        }),
+      );
+    });
+
     it("refuses a malformed handle", async () => {
       await assert.rejects(
         users.create(randomUUID(), {

@@ -560,6 +560,35 @@ describe("authentication", () => {
     }
   });
 
+  it("protects the endpoints with default limits when none are configured", async () => {
+    // Every other application in this suite raises the limits so the tests do
+    // not trip them. Nothing obliges a deployment to configure any, and an
+    // unconfigured endpoint must still be bounded.
+    const { rateLimits: _unused, ...unconfigured } = authentication;
+    const app = await buildApp({ config, dependencies: [], authentication: unconfigured });
+
+    try {
+      const email = uniqueEmail();
+      const statuses: number[] = [];
+
+      for (let attempt = 0; attempt < 7; attempt += 1) {
+        const response = await app.inject({
+          method: "POST",
+          url: "/auth/magic-link",
+          payload: { email },
+        });
+        statuses.push(response.statusCode);
+      }
+
+      assert.ok(
+        statuses.includes(429),
+        `an unconfigured endpoint accepted every request: ${statuses.join(", ")}`,
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
   describe("password authentication", () => {
     const strongPassword = "a perfectly reasonable passphrase";
 
