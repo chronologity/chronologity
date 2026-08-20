@@ -1557,13 +1557,13 @@ Before launch, Chronologity must define and implement:
 ## Replay
 
 - Should projection rebuilds read authoritative PostgreSQL state directly?
-- Recommended: yes for event-sourced authority.
+- Recommended: yes. Reading current state is what keeps a rebuild from resurrecting something since erased.
 - When is Kafka replay appropriate?
 - How are live side-effect consumers isolated from replay?
 
 ## PostgreSQL Outbox
 
-- Which non-event-sourced authoritative features require an outbox?
+- Which features publish at all, and which deliberately publish nothing?
 - Where does the outbox publisher run?
 - How are rows archived/deleted after publication?
 

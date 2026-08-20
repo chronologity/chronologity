@@ -238,37 +238,14 @@ The notification merely references it.
 
 ---
 
-# Event-Sourced Versus Relational Notification State
+# Where Notification State Lives
 
-Notification is one of the features that should be evaluated pragmatically.
+PostgreSQL, authoritatively, as for every other feature (ADR-092).
 
-Two viable models exist.
-
-## Event-sourced notification
-
-Potential benefits:
-
-- lifecycle auditability;
-- clear read/dismiss state history;
-- consistent event model.
-
-Potential costs:
-
-- very high event volume;
-- limited value from full history;
-- more replay complexity.
-
-## Relational-authoritative notification
-
-Potential benefits:
-
-- simple high-volume updates;
-- natural unread/read queries;
-- easier aggregation.
-
-The recommended initial direction is:
-
-> **PostgreSQL is the authoritative notification store, as it is for every other feature (ADR-092).**
+Notification suits that particularly well. Volume is high, the useful queries
+are "what is unread" and "what happened recently", read and dismiss state change
+frequently, and almost nothing benefits from the full history of a notification's
+lifecycle. A relational table answers all of that directly.
 
 Notification-related Integration Events may still be published regardless.
 
