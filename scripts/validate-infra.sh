@@ -181,7 +181,10 @@ import { S3Client, CreateBucketCommand, PutObjectCommand, HeadObjectCommand,
          DeleteObjectCommand, DeleteBucketCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
-const bucket = `probe-${Date.now()}`;
+// Fixed rather than unique per run. Every bucket becomes a SeaweedFS
+// collection that claims volumes of its own, so a fresh name each time
+// leaks a collection per validation until nothing can allocate.
+const bucket = "infra-probe";
 const key = "uploads/probe/original";
 const client = new S3Client({
   endpoint: `http://127.0.0.1:${process.env.S3_PORT}`,
@@ -193,7 +196,14 @@ const client = new S3Client({
   },
 });
 
-await client.send(new CreateBucketCommand({ Bucket: bucket }));
+try {
+  await client.send(new CreateBucketCommand({ Bucket: bucket }));
+} catch (error) {
+  // Left behind by a previous run that failed before cleaning up. Reusing it
+  // is the point of a fixed name.
+  const name = error?.name;
+  if (name !== "BucketAlreadyOwnedByYou" && name !== "BucketAlreadyExists") throw error;
+}
 const url = await getSignedUrl(client,
   new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: "image/jpeg" }),
   { expiresIn: 120 });

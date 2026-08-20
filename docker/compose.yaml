@@ -208,14 +208,21 @@ services:
       # filled this machine's Docker disk and took Kafka down with it. Test
       # media is a few kilobytes.
       #
-      # The size limit is what bounds the disk; the count only has to clear
-      # what a growth request asks for. SeaweedFS grows a collection seven
-      # volumes at a time, so a maximum below that can never satisfy one — the
-      # first buckets work, and every bucket afterwards fails to allocate with
-      # "Not enough data nodes found". Eight volumes of 64MB is half a gigabyte
-      # at worst, which is the intended ceiling rather than a concession.
-      - -master.volumeSizeLimitMB=64
-      - -volume.max=8
+      # Two separate limits, and they bound different things. The size limit
+      # bounds the disk; the count bounds how many *collections* can exist at
+      # once, because every bucket becomes a collection and each one claims
+      # volumes of its own. Too low a count and a new bucket cannot allocate at
+      # all, failing with "Not enough data nodes found" — which reads like a
+      # clustering problem and is really a quota.
+      #
+      # SeaweedFS grows a collection seven volumes at a time, so the count has
+      # to be a multiple of seven per collection rather than a round number.
+      # Three collections exist here — the filer's own, the application's
+      # bucket, and the one `infra:validate` writes to — which needs twenty-one.
+      # Twenty-four leaves a little room and still costs at most 768MB, since
+      # nothing preallocates and local fixtures are a few kilobytes each.
+      - -master.volumeSizeLimitMB=32
+      - -volume.max=24
       # Explicit rather than assumed: never reserve a volume's space up front.
       # A local volume should cost what it holds.
       - -master.volumePreallocate=false
