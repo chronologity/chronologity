@@ -353,25 +353,68 @@ describe("accounts", () => {
       now = new Date();
     });
 
-    it("refuses to restyle the capitalisation of a handle its own holder already has", async () => {
+    it("lets someone restyle the capitalisation of the handle they hold", async () => {
       const { userId, handle } = await account();
 
-      // Recorded as it stands, not as it should be. Nothing else can be
-      // affected by this change — the normalised form is unchanged, so no
-      // reservation and no other account is involved — and yet the holder is
-      // told their own handle is unavailable.
-      //
-      // The release is skipped because the normalised form matches, so the
-      // claim then finds an unreleased row and calls it taken without noticing
-      // whose it is. Left alone deliberately: this migration must not change
-      // what the API does, and correcting it is a change.
-      await assert.rejects(users.updateHandle(userId, handle.toUpperCase()), (error: unknown) => {
-        assert.ok(error instanceof ValidationError);
-        assert.match(error.message, /not available/);
-        return true;
-      });
+      // Nothing else can be affected: the normalised form is unchanged, so no
+      // reservation and no other account is involved. The claim used to find
+      // an unreleased row and call it taken without noticing whose it was,
+      // which told the holder their own handle was unavailable.
+      await users.updateHandle(userId, handle.toUpperCase());
 
-      assert.equal((await users.getAccount(userId)).handle, handle);
+      assert.equal((await users.getAccount(userId)).handle, handle.toUpperCase());
+      assert.equal(
+        (await users.getByHandle(handle)).handle,
+        handle.toUpperCase(),
+        "the handle must still resolve in any casing",
+      );
+    });
+
+    it("treats a restyle as presentation rather than taking the handle again", async () => {
+      const { userId, handle } = await account();
+
+      const before = await database.pool.query<{ assigned_at: Date }>(
+        `SELECT assigned_at FROM user_handles WHERE normalized_handle = $1`,
+        [handle.toLowerCase()],
+      );
+
+      await users.updateHandle(userId, handle.toUpperCase());
+
+      const after = await database.pool.query<{ assigned_at: Date; released_at: Date | null }>(
+        `SELECT assigned_at, released_at FROM user_handles WHERE normalized_handle = $1`,
+        [handle.toLowerCase()],
+      );
+
+      // The moment it was acquired stands: it was not acquired again. Moving it
+      // would restart a cooldown measured from the wrong instant.
+      assert.deepEqual(after.rows[0]?.assigned_at, before.rows[0]?.assigned_at);
+      assert.equal(after.rows[0]?.released_at, null);
+
+      // And no second row: a restyle must not leave the old casing behind as a
+      // released handle nobody can claim.
+      const { rows } = await database.pool.query<{ count: string }>(
+        `SELECT count(*) FROM user_handles WHERE user_id = $1`,
+        [userId],
+      );
+      assert.equal(rows[0]?.count, "1");
+    });
+
+    it("still refuses a restyle of a handle somebody else holds", async () => {
+      const { userId } = await account();
+      const other = await account();
+
+      // The holder check must distinguish "mine" from "unreleased", not
+      // weaken the rule that an unreleased handle belongs to whoever has it.
+      await assert.rejects(
+        users.updateHandle(userId, other.handle.toUpperCase()),
+        (error: unknown) => {
+          assert.ok(error instanceof ValidationError);
+          assert.match(error.message, /not available/);
+          return true;
+        },
+      );
+
+      assert.equal((await users.getAccount(other.userId)).handle, other.handle);
     });
 
     it("never leaves an account holding two handles or none", async () => {

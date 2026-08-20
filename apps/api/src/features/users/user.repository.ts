@@ -333,11 +333,18 @@ export class UserRepository {
    * attempt the insert, and the database picks one. Checking availability and
    * then inserting would let both succeed.
    *
+   * Three ways a claim succeeds, and they are not the same thing. The handle is
+   * unheld; or it was released and is being taken back by its previous holder
+   * or has outlived its cooldown; or it is already held by whoever is claiming
+   * it, which is a change of capitalisation rather than an acquisition.
+   *
    * @param tx - The caller's transaction. The claim and whatever else the
    *   request records must commit together.
    * @param input - The handle in both forms, who is claiming it, the current
    *   instant, and how long a released handle stays reserved.
-   * @returns Success, or why the handle is unavailable.
+   * @returns Success, or why the handle is unavailable. A handle held by the
+   *   claimant is never unavailable to them: it is restyled in place, and the
+   *   moment it was acquired is left alone because it was not acquired again.
    */
   async claimHandle(
     tx: Transaction,
@@ -358,7 +365,20 @@ export class UserRepository {
 
     if (row !== undefined) {
       if (row.released_at === null) {
-        return { ok: false, reason: "taken" };
+        if (row.user_id !== input.userId) {
+          return { ok: false, reason: "taken" };
+        }
+
+        // Held by whoever is claiming it. A handle is not taken from its own
+        // holder, so this is a restyle — `Richard` for `richard` — which
+        // changes how the handle is written and nothing else. The moment it
+        // was acquired stands, because it was not acquired again.
+        await tx.query(
+          `UPDATE user_handles SET handle = $2 WHERE normalized_handle = $1`,
+          [input.normalizedHandle, input.handle],
+        );
+
+        return { ok: true };
       }
 
       if (
