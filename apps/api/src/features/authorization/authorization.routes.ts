@@ -65,7 +65,10 @@ export function authorizationRoutes(authorization: AuthorizationService) {
       {
         schema: {
           params: roleParams,
-          body: roleChangeRequestSchema.optional(),
+          // Nullish rather than optional: a request with no body arrives as
+          // null, not undefined, so `.optional()` alone refuses the plainest
+          // way to call this endpoint — a delete with nothing to say.
+          body: roleChangeRequestSchema.nullish(),
           response: { 200: userRolesSchema },
         },
         preHandler: requirePermission("admin:user-role-manage"),
