@@ -127,7 +127,7 @@ The scope is authoritative. The Timeline is not, and the scope is not a Timeline
 
 Every Timeline scope shipping at launch is derived from existing domain facts; none has a persisted authoritative definition (ADR-084).
 
-The API's canonical `features/timelines/` module owns the projections that maintain Timeline read models. It owns no Timeline aggregate, no lifecycle commands, and no Timeline query handlers: read composition belongs to `apps/feed-aggregator`, and defining a Timeline is not an operation the product has.
+The API's canonical `features/timelines/` module owns the projections that maintain Timeline read models. It owns no Timeline service and no write operations: read composition belongs to `apps/feed-aggregator`, and defining a Timeline is not an operation the product has.
 
 ---
 
@@ -230,7 +230,6 @@ It must not use:
 
 - publication time;
 - upload time;
-- EventStoreDB position;
 - Kafka offset;
 - projection time.
 
@@ -716,7 +715,7 @@ A Timeline Moment row may include:
 - moderation state;
 - Reaction summary;
 - significance metadata;
-- source aggregate versions.
+- source record versions.
 
 The exact schema belongs in `docs/data/clickhouse.md`.
 
@@ -999,8 +998,7 @@ Read models and DataLoaders should batch or denormalize.
 
 The feed aggregator should avoid per-Moment synchronous calls to:
 
-- EventStoreDB;
-- API;
+- the API;
 - object-storage metadata service;
 - PostgreSQL.
 
@@ -1663,7 +1661,7 @@ Before launch, Chronologity must define and implement:
 The recommended starting model is:
 
 ```text
-EventStoreDB / authoritative PostgreSQL
+authoritative PostgreSQL, through the outbox
         ↓
 Kafka
         ↓

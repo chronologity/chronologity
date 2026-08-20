@@ -69,7 +69,7 @@ It does not create that fact.
 Conceptually:
 
 ```text
-Domain Event
+Integration Event
     ↓
 notification generation
     ↓
@@ -264,12 +264,11 @@ Potential benefits:
 
 - simple high-volume updates;
 - natural unread/read queries;
-- easier aggregation;
-- lower EventStoreDB pressure.
+- easier aggregation.
 
 The recommended initial direction is:
 
-> **Use PostgreSQL as the authoritative notification store unless a concrete audit/history requirement justifies Event Sourcing.**
+> **PostgreSQL is the authoritative notification store, as it is for every other feature (ADR-092).**
 
 Notification-related Integration Events may still be published regardless.
 
@@ -304,7 +303,7 @@ Each logical notification has a stable application-generated Notification ID.
 
 It is separate from:
 
-- Domain Event ID;
+- the identifier of the Integration Event that prompted it;
 - provider message ID;
 - push token;
 - delivery-attempt ID.
@@ -353,7 +352,7 @@ eligibility/preferences/aggregation
 Notification
 ```
 
-Not every Domain Event must produce a notification.
+Not every change must produce a notification.
 
 ---
 
@@ -1069,11 +1068,9 @@ Account deletion should:
 
 # Notification Read Models
 
-If notifications are relational-authoritative, the notification table itself may directly serve API queries.
+The notification table is authoritative and serves API reads directly.
 
-If event sourced, a PostgreSQL projection serves reads.
-
-Either way, mobile should not query EventStoreDB.
+Mobile never reads a store other than through the API or the feed aggregator.
 
 ---
 
@@ -1256,7 +1253,7 @@ Important metrics include:
 A notification should be traceable:
 
 ```text
-source Domain Event
+source Integration Event
     ↓
 notification generation
     ↓
@@ -1484,7 +1481,7 @@ not APNs/FCM-specific operations.
 
 Verify:
 
-- expected Domain Event creates candidate;
+- the expected Integration Event creates a candidate;
 - self-action suppression;
 - privacy/blocking suppression;
 - preference handling;
@@ -1607,7 +1604,7 @@ Before launch, Chronologity must define and implement:
 # Recommended Initial Architecture
 
 ```text
-authoritative Domain Event
+authoritative change, published through the outbox
         ↓
 Kafka
         ↓
@@ -1642,10 +1639,7 @@ current Timeline context
 
 ## Authoritative Model
 
-- Confirm PostgreSQL as authoritative notification store?
-- Recommended: yes initially.
-- Is any notification lifecycle worth Event Sourcing?
-- Are security/moderation notifications stored differently?
+- Are security and moderation notifications stored differently from ordinary ones?
 
 ## Notification Types
 
@@ -1720,9 +1714,9 @@ current Timeline context
 1. Notifications do not create the underlying domain fact.
 2. Notification state is distinct from provider delivery state.
 3. Provider success does not define notification existence.
-4. Notification IDs are distinct from Domain Event IDs and provider IDs.
+4. Notification IDs are distinct from Integration Event IDs and provider IDs.
 5. Notification generation is normally asynchronous.
-6. Not every Domain Event produces a notification.
+6. Not every change produces a notification.
 7. Eligibility is evaluated before creation/delivery.
 8. Notifications must not reveal inaccessible content.
 9. Notification deep links reauthorize destinations.

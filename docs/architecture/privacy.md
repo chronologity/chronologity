@@ -10,7 +10,6 @@ It is an architectural constraint that affects:
 
 - authoritative state;
 - authorization;
-- Event Sourcing;
 - projections;
 - Timeline composition;
 - Search and Discovery;
@@ -45,7 +44,6 @@ This document defines:
 - historical privacy semantics;
 - data minimization;
 - PII handling;
-- Event Sourcing constraints;
 - projections and read models;
 - media privacy;
 - notification privacy;
@@ -194,7 +192,7 @@ Raw:
 
 must never appear in:
 
-- Domain Events;
+- Integration Events;
 - Kafka;
 - logs;
 - analytics;
@@ -455,23 +453,30 @@ It must not emerge accidentally from event replay.
 
 ---
 
-# Event Sourcing and Privacy
+# Append-Only Storage and Privacy
 
-Event Sourcing creates a privacy challenge because events are append-only.
+Anything append-only creates a privacy challenge, because what is written cannot
+be corrected. Chronologity has two such surfaces: the transactional outbox and
+Kafka topics (ADR-095).
 
-The architecture must minimize sensitive immutable content.
+The architecture must keep erasable content out of both.
 
 Prefer:
 
 ```text
-event references sensitive record ID
+message references the record by identifier
 ```
 
 over:
 
 ```text
-event contains raw sensitive value
+message contains the raw sensitive value
 ```
+
+The consumer then reads what it needs from PostgreSQL, which can be corrected,
+erased, or refused. This is why authentication publishes nothing at all: its
+accountability requirement is met by a relational audit trail that erasure can
+reach.
 
 where erasure may be required.
 
@@ -1112,7 +1117,6 @@ Both may be required in different stores.
 
 Deletion must reach:
 
-- EventStoreDB-sensitive external records/redactions;
 - PostgreSQL;
 - ClickHouse;
 - Search;
@@ -1712,7 +1716,7 @@ Sensitive values that may require erasure should remain outside immutable event 
 2. Privacy is a backend authorization concern.
 3. Privacy is broader than visibility.
 4. Data minimization applies at collection, storage, replication, and logging.
-5. Authentication secrets never enter Domain Events, Kafka, logs, analytics, or read models.
+5. Authentication secrets never enter the outbox, Kafka, logs, analytics, or read models.
 6. Moment visibility is authoritative state.
 7. Current privacy state governs current access.
 8. Past public visibility does not imply permanent future access.
@@ -1722,7 +1726,7 @@ Sensitive values that may require erasure should remain outside immutable event 
 12. Location access may be precision-based.
 13. Exact Location is minimized and tightly controlled.
 14. Embedded GPS does not automatically become public Location.
-15. Event Sourcing does not permit indefinite retention of erasable PII.
+15. Append-only storage does not permit indefinite retention of erasable personal data.
 16. Sensitive values should be externalized from immutable events where practical.
 17. Event metadata follows the same privacy rules as payloads.
 18. Event redaction is exceptional but possible.

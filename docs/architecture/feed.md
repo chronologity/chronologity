@@ -172,7 +172,7 @@ The feed aggregator must not own:
 - historical-significance authority;
 - media processing;
 - projection generation during requests;
-- EventStoreDB aggregate reconstruction for ordinary reads.
+- reconstructing authoritative state for ordinary reads.
 
 Those responsibilities remain elsewhere.
 
@@ -216,10 +216,9 @@ The GraphQL schema represents read contracts.
 
 It should not mirror:
 
-- EventStoreDB aggregates;
 - PostgreSQL tables;
 - ClickHouse rows;
-- internal Domain Events.
+- the API's internal changes.
 
 The schema should use product/read terminology.
 
@@ -319,11 +318,12 @@ If PostgreSQL becomes required for every Timeline item, the read model should be
 
 ---
 
-# EventStoreDB Access
+# Authoritative Store Access
 
-Normal feed queries must not read EventStoreDB.
+Normal feed queries must not read the API's authoritative PostgreSQL tables.
 
-EventStoreDB is command-side authoritative history, not the Timeline query engine.
+Those hold write-side state. The Timeline query engine is ClickHouse, and the
+separation is what lets write scale and read scale be independent problems.
 
 ---
 
@@ -681,7 +681,7 @@ A resolver that performs one remote query per Moment is not acceptable at Timeli
 
 # Moment Depth
 
-Moment depth is a read composition, not a command-side aggregate load.
+Moment depth is a read composition, not a load of authoritative write-side state.
 
 It may require richer data than a Timeline summary.
 
@@ -1189,7 +1189,7 @@ If ClickHouse is unavailable, core Timeline reads cannot be served normally.
 
 The service should return a controlled availability error.
 
-Do not fall back to EventStoreDB reconstruction for ordinary traffic.
+Do not fall back to reading authoritative PostgreSQL for ordinary traffic.
 
 ---
 
@@ -1479,7 +1479,6 @@ cache read/write if introduced
 It should not have:
 
 ```text
-EventStoreDB append
 PostgreSQL domain-write
 object-storage administrative
 Kafka producer
@@ -1797,7 +1796,7 @@ The service remains read-only.
 8. GraphQL resolvers remain thin.
 9. SQL does not live in resolvers.
 10. ClickHouse is the primary high-volume Timeline read store.
-11. Normal feed queries do not read EventStoreDB.
+11. Normal feed queries do not read authoritative PostgreSQL.
 12. Cross-store fan-out is minimized.
 13. The feed aggregator does not fetch media bytes.
 14. API command handling does not depend synchronously on feed convergence.
@@ -1843,8 +1842,8 @@ The service remains read-only.
 54. Sticky sessions are not required.
 55. Optional enrichments may degrade; access correctness may not.
 56. Authorization failures fail closed.
-57. ClickHouse outage does not trigger EventStoreDB-as-feed fallback.
-58. Feed projection lag does not change authoritative command success.
+57. A ClickHouse outage does not trigger a fallback to authoritative PostgreSQL.
+58. Feed projection lag does not change whether an authoritative write succeeded.
 59. Logs avoid sensitive GraphQL payloads.
 60. Metrics expose query, datastore, loader, filtering, and cache performance.
 61. Health reflects dependency readiness.
