@@ -793,7 +793,7 @@ session.aggregate.ts
 
 which suggests Event Sourcing for Identity and Session.
 
-That direction is reasonable because authentication lifecycle and revocation history benefit from auditability, but the decision should be confirmed in `docs/architecture/event-sourcing.md`.
+That direction was reasonable because authentication lifecycle and revocation history benefit from auditability. It has since been settled differently: the `sessions` table is authoritative and the audit trail is relational (ADR-092, ADR-094). Auditability did not require an event log, because `auth_audit_events` is written in the same transaction as the change it describes.
 
 If Identity and Session are event sourced:
 

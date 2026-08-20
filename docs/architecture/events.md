@@ -40,9 +40,7 @@ This document is grounded in:
 
 - `docs/architecture/overview.md`;
 - `docs/architecture/principles.md`;
-- `docs/architecture/api.md`;
-- `docs/architecture/cqrs.md`;
-- `docs/architecture/event-sourcing.md`.
+- `docs/architecture/api.md`.
 
 ---
 

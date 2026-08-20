@@ -81,8 +81,6 @@ docs/
     ├── api.md
     ├── authentication.md
     ├── authorization.md
-    ├── cqrs.md
-    ├── event-sourcing.md
     ├── events.md
     ├── messaging.md
     ├── projections.md
@@ -308,23 +306,11 @@ Defines how Chronologity decides whether an authenticated actor may perform an o
 
 It should address source data and derived views, including Timeline projections, ClickHouse, search, media, historical jumps, and contextual aggregates.
 
-## `architecture/cqrs.md`
-
-Defines Chronologity's CQRS model and the boundary between commands and queries.
-
-It should explain why CQRS is used, where it applies, where it does not, and how consistency expectations differ between write state and read models.
-
-## `architecture/event-sourcing.md`
-
-Defines the use of Event Sourcing within Chronologity.
-
-It should establish aggregate persistence semantics, event append behavior, concurrency, replay, snapshots if used, deletion/privacy constraints, and boundaries where event sourcing is intentionally not used.
-
 ## `architecture/events.md`
 
 Explains the architectural role of domain and integration events.
 
-It should distinguish event-store events from Kafka messages and from the product concept of real-world Events.
+It should distinguish the Integration Events that cross service boundaries from the product concept of real-world Events, and say what belongs in a published payload.
 
 ## `architecture/messaging.md`
 

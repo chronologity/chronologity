@@ -51,7 +51,6 @@ This document is grounded in:
 - `docs/architecture/api.md`;
 - `docs/architecture/authentication.md`;
 - `docs/architecture/authorization.md`;
-- `docs/architecture/cqrs.md`;
 - `docs/architecture/events.md`;
 - `docs/architecture/messaging.md`;
 - `docs/architecture/projections.md`;

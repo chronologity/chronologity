@@ -39,7 +39,6 @@ This document is grounded in:
 - `docs/architecture/principles.md`;
 - `docs/architecture/monorepo.md`;
 - `docs/architecture/api.md`;
-- `docs/architecture/cqrs.md`;
 - `docs/architecture/events.md`;
 - `docs/architecture/messaging.md`;
 - `docs/architecture/projections.md`;
