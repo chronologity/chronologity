@@ -101,16 +101,14 @@ Kafka should not be introduced for synchronous request/response behavior.
 
 ---
 
-# Kafka Is Not the Event Store
+# Kafka Is Not a Source of Truth
 
-EventStoreDB remains authoritative for event-sourced aggregate history.
-
-Kafka is a transport log.
+PostgreSQL holds authoritative state (ADR-092). Kafka is a transport log.
 
 Therefore:
 
 ```text
-EventStoreDB stream version
+committed row
         ≠
 Kafka offset
 ```
@@ -123,31 +121,16 @@ Kafka retention
 domain retention
 ```
 
-A lost Kafka cluster should be recoverable from authoritative sources for critical projections where practical.
+A lost Kafka cluster is recoverable: projections are rebuilt from current
+authoritative state rather than by replaying a log. That is also what keeps
+erasure enforceable — a rebuild consults PostgreSQL, which can be corrected,
+rather than a topic, which cannot.
 
 ---
 
-# Authoritative Publication Sources
+# Authoritative Publication
 
-Chronologity may have more than one authoritative persistence model.
-
-## EventStoreDB-backed authority
-
-For event-sourced aggregates:
-
-```text
-EventStoreDB
-    ↓
-durable subscription
-    ↓
-publisher
-    ↓
-Kafka
-```
-
-## PostgreSQL-backed authority
-
-For relational authoritative state:
+There is one publication path (ADR-093):
 
 ```text
 PostgreSQL transaction
@@ -159,55 +142,32 @@ outbox publisher
 Kafka
 ```
 
-Both paths must preserve the same invariant:
+Both parts of that transaction commit or neither does. This is the whole of the
+mechanism, and having only one is deliberate: the previous architecture had two
+authoritative stores and two publication paths, which is what made an unsafe
+dual write possible in the first place.
 
-> **A committed authoritative change required downstream must eventually become publishable.**
+The invariant:
 
----
-
-# EventStoreDB Publication
-
-The recommended direction for EventStoreDB-backed aggregates is a durable subscription-based publisher.
-
-Conceptually:
-
-```text
-EventStoreDB
-    ↓
-persistent/catch-up subscription
-    ↓
-publisher process
-    ↓
-Integration Event transformation
-    ↓
-Kafka
-    ↓
-checkpoint
-```
-
-The exact EventStoreDB subscription mechanism should be chosen based on:
-
-- durability;
-- checkpoint control;
-- consumer recovery;
-- operational simplicity.
+> **A committed authoritative change required downstream must eventually become
+> publishable, and an uncommitted one must never appear downstream at all.**
 
 ---
 
-# Publication Checkpoints
+# Publisher Progress
 
-The EventStoreDB→Kafka publisher must track progress durably.
+The outbox publisher keeps no checkpoint.
 
-Checkpoint state should identify:
+It claims a batch of unpublished rows with `FOR UPDATE SKIP LOCKED`, publishes
+them, and marks them published inside the same transaction that claimed them.
+Progress is therefore the state of the rows themselves.
 
-- subscription/publisher name;
-- source position;
-- event type/version if needed;
-- publisher version.
+That is what allows several publisher instances to run at once. A shared
+checkpoint would have forced a single reader, and the table that held one was
+removed with the architecture that needed it.
 
-A checkpoint is operational state.
-
-It is not a Domain Event.
+A crash between publishing and marking re-delivers the batch, which is why
+consumers must be idempotent.
 
 ---
 
@@ -445,7 +405,7 @@ Partition keys must align with the smallest boundary requiring ordered processin
 Potential keys:
 
 ```text
-aggregateId
+uploadId
 momentId
 userId
 authorizationUserId
@@ -458,21 +418,23 @@ That would serialize unrelated traffic.
 
 ---
 
-# Aggregate Ordering
+# Per-Subject Ordering
 
-For Domain Events from one aggregate, using aggregate ID as partition key preserves event order for that aggregate within the Kafka topic.
-
-This is often appropriate.
+Using a subject's identifier as the partition key preserves the order of messages
+about that subject within a topic. This is usually what a consumer needs: the
+messages about one upload, or one Moment, arrive in the order they were
+published.
 
 Consumers must still account for duplicate delivery.
 
 ---
 
-# Cross-Aggregate Ordering
+# Cross-Subject Ordering
 
-Chronologity must not depend on global ordering across aggregates.
+Chronologity must not depend on global ordering across subjects.
 
-If a workflow requires one event to causally precede another, that relationship should be represented explicitly through workflow/causation semantics.
+If one change must causally precede another, represent that relationship
+explicitly through causation metadata rather than assuming arrival order.
 
 Do not rely on Kafka arrival timing across partitions.
 
@@ -525,7 +487,7 @@ Examples:
 ```text
 momentId
 userId
-aggregateId
+uploadId
 ```
 
 The key is infrastructure routing metadata.
@@ -812,18 +774,6 @@ Projection rebuild should preferably replay from authoritative sources rather th
 
 # Replay Paths
 
-## EventStoreDB-backed projections
-
-Preferred:
-
-```text
-EventStoreDB
-    ↓
-projection replay
-```
-
-## PostgreSQL-backed authority
-
 Preferred:
 
 ```text
@@ -1040,9 +990,9 @@ workflow consumer
   ↓
 workflow state
   ↓
-command
+the owning service
   ↓
-aggregate event
+authoritative change
 ```
 
 Workflow consumers must be idempotent.
@@ -1053,7 +1003,7 @@ Workflow consumers must be idempotent.
 
 A process manager may be introduced for workflows that:
 
-- span multiple aggregates;
+- span multiple features;
 - persist over time;
 - need retries;
 - require compensation.
@@ -1092,7 +1042,7 @@ If Kafka is used for an asynchronous command, the consumer owns the decision and
 
 A command topic/message is not proof the action occurred.
 
-The resulting Domain Event is the accepted fact.
+The resulting authoritative change is the accepted fact.
 
 ---
 
@@ -1116,7 +1066,7 @@ The architecture requires that publication is considered successful only after t
 
 # Transactions
 
-Kafka transactions may be useful in narrow cases but should not be used as a substitute for authoritative DB/EventStore atomicity.
+Kafka transactions may be useful in narrow cases but are not a substitute for committing a change and its outbox message together.
 
 Chronologity avoids cross-system distributed transactions.
 
@@ -1179,7 +1129,7 @@ Delete/restriction events must remove or hide documents predictably.
 
 # Notification Consumer Semantics
 
-Notification creation should use stable deduplication keys where one domain event should create at most one logical notification.
+Notification creation should use stable deduplication keys where one change should create at most one logical notification.
 
 Provider delivery retries remain separate.
 
@@ -1326,9 +1276,9 @@ Trace context should flow:
 ```text
 API request
     ↓
-Domain Event
+authoritative change + outbox record
     ↓
-publisher
+outbox publisher
     ↓
 Kafka
     ↓
@@ -1540,7 +1490,6 @@ Before launch, Chronologity must define and implement:
 - partition-key rules;
 - Integration Event envelope;
 - producer configuration;
-- EventStoreDB publication mechanism;
 - publication checkpoints;
 - PostgreSQL outbox where needed;
 - consumer groups;
@@ -1571,12 +1520,11 @@ Before launch, Chronologity must define and implement:
 - What availability target?
 - What regional topology?
 
-## EventStoreDB Publisher
+## Outbox Publisher
 
-- Persistent subscription or catch-up subscription?
-- One shared publisher or feature-specific publishers?
-- Where are checkpoints stored?
-- Does publisher transform Domain Events to Integration Events directly?
+- How many publisher instances, and does batch size need tuning under load?
+- What retention applies to published rows, and what removes them?
+- When does a repeatedly failing message stop being retried, and where does it go?
 
 ## Topic Design
 
@@ -1587,7 +1535,7 @@ Before launch, Chronologity must define and implement:
 
 ## Partitioning
 
-- Aggregate ID for event-sourced features?
+- Subject ID for feature topics?
 - User ID for authorization?
 - Moment ID for Timeline projections?
 - How many partitions initially?
@@ -1608,7 +1556,7 @@ Before launch, Chronologity must define and implement:
 
 ## Replay
 
-- Should projection rebuilds consume EventStoreDB directly?
+- Should projection rebuilds read authoritative PostgreSQL state directly?
 - Recommended: yes for event-sourced authority.
 - When is Kafka replay appropriate?
 - How are live side-effect consumers isolated from replay?
@@ -1645,12 +1593,12 @@ Before launch, Chronologity must define and implement:
 1. Kafka is transport, not authoritative truth.
 2. Authoritative state commits before publication.
 3. Required downstream publication must not be permanently lost.
-4. EventStoreDB-backed authority uses durable subscription/checkpoint publication.
-5. Relational authority uses an outbox or equivalent reliable mechanism where downstream delivery matters.
+4. Every Integration Event reaches Kafka through the transactional outbox, and there is no second publication path.
+5. A change and the message announcing it commit in one transaction, or neither does.
 6. Cross-system distributed transactions are avoided.
 7. At-least-once delivery is assumed.
 8. Durable consumers are idempotent.
-9. Kafka offsets are not aggregate versions.
+9. Kafka offsets are not domain versions.
 10. Kafka retention is not domain retention.
 11. Topic design reflects stable integration boundaries.
 12. One topic per event type is not the default.
