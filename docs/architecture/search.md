@@ -59,7 +59,7 @@ apps/api ── search read path ──▶ search index
    │                                  ▲
    │                              Kafka topics
    │                                  ▲
-   └── authoritative writes ──▶ EventStoreDB / PostgreSQL
+   └── authoritative writes ──▶ PostgreSQL
 ```
 
 `apps/feed-aggregator` does not own Search. It resolves a selected Search result into Timeline context, as established in `architecture/feed.md`. Search ranking stops at entry-point selection; Timeline chronology resumes after entry.

@@ -4,7 +4,7 @@
 
 This document defines the media architecture for Chronologity.
 
-Media is central to the Moment model, but media files themselves are not Moments and must not become embedded directly into EventStoreDB, Kafka, or ordinary relational payloads.
+Media is central to the Moment model, but media files themselves are not Moments and must not become embedded directly into Kafka messages or ordinary relational payloads.
 
 Chronologity must support:
 
@@ -695,7 +695,7 @@ They never carry media bytes.
 
 ## Storage Responsibilities
 
-EventStoreDB may record authoritative Upload/Moment lifecycle events.
+PostgreSQL records authoritative Upload and Moment lifecycle state.
 
 PostgreSQL may store metadata, processing state, provider job IDs, callback deduplication, workflow state, and projections.
 
@@ -1017,8 +1017,7 @@ mobile
 
 ### Upload Model
 
-- Is Upload definitively event sourced?
-- Is there a separate Media entity/aggregate?
+- Is there a separate Media entity distinct from Upload?
 - Or does Upload become Media when ready?
 - Which identifiers are canonical?
 
@@ -1137,7 +1136,7 @@ mobile
 36. Embedded metadata does not automatically become historical truth.
 37. EXIF capture time is distinct from Moment occurrence time.
 38. GPS metadata is sensitive.
-39. Media binaries never go into EventStoreDB.
+39. Media binaries never go into Kafka or relational payloads.
 40. Media binaries never go through Kafka.
 41. ClickHouse stores summaries, not media bytes.
 42. Moderation signals do not automatically become authoritative enforcement.

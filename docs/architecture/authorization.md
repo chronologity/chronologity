@@ -623,23 +623,21 @@ High-volume Timeline queries cannot perform one network call per Moment.
 
 Chronologity therefore needs bulk-friendly authorization representations such as denormalized visibility metadata, relationship sets, block lists, permission scopes, audience classes, or query-time joins against read-side eligibility state.
 
-## Authorization and CQRS
+## Authorization on Both Sides
 
-Authorization appears on both sides of CQRS.
+Authorization applies to writes and to reads.
 
-The command side decides whether mutation is permitted.
+The API decides whether a mutation is permitted.
 
-The query side decides whether derived state may be returned.
+The feed aggregator decides whether derived state may be returned to this Viewer.
 
-The semantics must remain consistent.
+The semantics must remain consistent, which is why the policy lives in one place and both sides consult it.
 
-## Authorization and Event Sourcing
+## Reading Roles
 
-Authorization checks should not require replaying large unrelated event histories.
+Roles are read from authoritative state on each privileged request rather than taken from a token claim. A token claim is a cache of authorization state, and the simplest way to honour that is not to cache it: removing a role stops the next request rather than the next token refresh.
 
-Authoritative role changes may be event sourced, with current permission state projected for efficient checks.
-
-Sensitive actions may still re-evaluate current authoritative policy state where required.
+The cost is one indexed lookup on a request that already makes several.
 
 ## Authorization Events
 
@@ -672,7 +670,7 @@ features/authorization/
 
 module.
 
-This feature owns authoritative role assignment, permission policy, current authorization read state, privileged role-management commands, authorization-related Domain Events, and reusable platform authorization policies.
+This feature owns authoritative role assignment, permission policy, current authorization read state, privileged role-management operations, the audit trail of every role change, and reusable platform authorization policies.
 
 The initial canonical structure deliberately excludes arbitrary direct per-User permission grants. Roles grant permissions. Direct grants require a future explicit architecture decision.
 
@@ -685,7 +683,7 @@ The authoritative source of role assignments and permissions must be explicit.
 Potentially:
 
 ```text
-authorization aggregate/event stream
+authoritative role tables
         ↓
 authorization read model
         ↓
@@ -801,7 +799,7 @@ The following questions require explicit resolution before privileged functional
 - Is there a support role?
 - Is there a security-operations role?
 - What are the canonical permission identifiers?
-- Which aggregate owns role assignment?
+- Which service owns role assignment?
 - Where are role events stored?
 - Can moderators view private reported content, and only within active moderation cases?
 - Do administrators automatically have moderator permissions? Recommended default: only if explicitly assigned.
@@ -864,8 +862,8 @@ The following questions require explicit resolution before privileged functional
 40. Sensitive resources may hide existence from unauthorized Viewers.
 41. Authorization and domain invariants are both required for writes.
 42. High-volume reads require bulk-friendly authorization representations.
-43. CQRS read and write authorization semantics must remain consistent.
-44. Event Sourcing must not force authorization checks to replay large histories.
+43. Read and write authorization semantics must remain consistent.
+44. Authorization checks read current authoritative state; they never replay history.
 45. Role-management ownership must be explicit before implementation.
 46. The dedicated `features/authorization/` module is the canonical owner of platform role assignment and permission policy.
 47. Mobile navigation permissions never substitute for backend checks.

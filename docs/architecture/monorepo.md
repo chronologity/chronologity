@@ -66,7 +66,6 @@ chronologity/
 │   └── generate-feature.sh
 ├── docker/
 │   ├── clickhouse/
-│   ├── eventstore/
 │   └── postgres/
 ├── .gitignore
 ├── package.json
@@ -1077,7 +1076,7 @@ Applications must never work around this boundary by importing API implementatio
 It should contain canonical serialized boundary definitions such as:
 
 - command DTOs where shared across a boundary;
-- Domain Event/integration event schemas where shared;
+- Integration Event schemas where shared;
 - validation schemas;
 - API request and response contracts;
 - shared query response contracts;
