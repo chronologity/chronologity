@@ -1,12 +1,15 @@
 import { ConfigurationError } from "@chronologity/config";
 import { loadConfig } from "./config/app-config.js";
 import { createDatabase } from "./lib/database/postgres.js";
-import { createEventStore } from "./lib/eventstore/client.js";
 import { createMessaging } from "./lib/messaging/kafka.js";
 import { createEmailClient } from "./integrations/email/email-client.js";
 import { createStorageClient } from "./integrations/storage/storage-client.js";
 import { createPlaceSearchClient } from "./integrations/places/place-search-client.js";
 import { loadBreachedPasswordIndex } from "./lib/auth/breached-passwords.js";
+import { IdentityRepository } from "./features/authentication/identity.repository.js";
+import { IdentityService } from "./features/authentication/identity.service.js";
+import { SessionRepository } from "./features/authentication/session.repository.js";
+import { SessionService } from "./features/authentication/session.service.js";
 import { AuthorizationRepository } from "./features/authorization/authorization.repository.js";
 import { AuthorizationService } from "./features/authorization/authorization.service.js";
 import { LocationRepository } from "./features/locations/location.repository.js";
@@ -34,9 +37,8 @@ async function main(): Promise<void> {
   loadBreachedPasswordIndex();
 
   const database = createDatabase(config.database);
-  const eventStore = createEventStore(config.eventStore);
   const messaging = createMessaging(config.messaging);
-  const dependencies = [database, eventStore, messaging];
+  const dependencies = [database, messaging];
 
   const email = createEmailClient(config.email);
   const storage = createStorageClient(config.storage);
@@ -44,16 +46,33 @@ async function main(): Promise<void> {
   // file: authorising and verifying an upload does not require reading it.
   const places = createPlaceSearchClient(config.places);
 
+  const accounts = new UserRepository(database.pool);
+
+  // Sessions are built before identities because proving who someone is ends in
+  // granting them one: the dependency runs that way and only that way.
+  const sessions = new SessionService(
+    database.pool,
+    new SessionRepository(database.pool),
+    accounts,
+    config.auth,
+  );
+
   const app = await buildApp({
     config,
     dependencies,
-    auth: {
-      client: eventStore.client,
-      pool: database.pool,
+    authentication: {
+      identities: new IdentityService(
+        database.pool,
+        new IdentityRepository(database.pool),
+        sessions,
+        email,
+        config.auth,
+      ),
+      sessions,
       config: config.auth,
-      email,
+      pool: database.pool,
     },
-    users: new UserService(database.pool, new UserRepository(database.pool), {
+    users: new UserService(database.pool, accounts, {
       minimumAgeYears: config.minimumAgeYears,
     }),
     authorization: new AuthorizationService(

@@ -4,7 +4,6 @@ import { afterAll, beforeAll, describe, it } from "vitest";
 import { CreateBucketCommand, S3Client } from "@aws-sdk/client-s3";
 import type { FastifyInstance } from "fastify";
 import type { AppConfig } from "../../config/app-config.js";
-import { createEmailClient } from "../../integrations/email/email-client.js";
 import { createDerivativeClient } from "../../integrations/metadata/derivative-client.js";
 import { createMetadataClient } from "../../integrations/metadata/metadata-client.js";
 import {
@@ -13,9 +12,8 @@ import {
 } from "../../integrations/storage/storage-client.js";
 import { migrate } from "../../lib/database/migrations.js";
 import { createDatabase, type Database } from "../../lib/database/postgres.js";
-import { createEventStore, type EventStore } from "../../lib/eventstore/client.js";
 import { buildApp } from "../../server/app.js";
-import type { AuthDependencies } from "../auth/dependencies.js";
+import { createTestAuthentication, type TestAuthentication } from "../../testing/authentication.js";
 import { UploadRepository } from "./upload.repository.js";
 import { UploadService } from "./upload.service.js";
 import { UserRepository } from "../users/user.repository.js";
@@ -107,15 +105,13 @@ const uniqueHandle = () => `h${randomUUID().replaceAll("-", "").slice(0, 12)}`;
 describe("uploads", () => {
   let app: FastifyInstance;
   let database: Database;
-  let eventStore: EventStore;
-  let auth: AuthDependencies;
+  let authentication: TestAuthentication;
   let users: UserService;
   let uploads: UploadService;
   let storage: StorageClient;
 
   beforeAll(async () => {
     database = createDatabase(config.database);
-    eventStore = createEventStore(config.eventStore);
     await migrate(database.pool);
 
     // Created if absent, tolerated if present: the bucket is shared across runs.
@@ -144,19 +140,7 @@ describe("uploads", () => {
 
     storage = createStorageClient(config.storage);
 
-    auth = {
-      client: eventStore.client,
-      pool: database.pool,
-      config: config.auth,
-      email: createEmailClient(config.email),
-      rateLimits: {
-        magicLinkRequestsPerWindow: 1000,
-        sessionCreationsPerWindow: 1000,
-        passwordAttemptsPerWindow: 1000,
-        registrationsPerWindow: 1000,
-        windowMinutes: 15,
-      },
-    };
+    authentication = createTestAuthentication(database.pool, config.auth, config.email);
 
     users = new UserService(database.pool, new UserRepository(database.pool), {
       minimumAgeYears: config.minimumAgeYears,
@@ -170,14 +154,13 @@ describe("uploads", () => {
       { metadata: createMetadataClient(), derivatives: createDerivativeClient() },
     );
 
-    app = await buildApp({ config, dependencies: [], auth, users, uploads });
+    app = await buildApp({ config, dependencies: [], authentication, users, uploads });
   });
 
   afterAll(async () => {
     await app.close();
-    await auth.email.close();
+    await authentication.close();
     storage.close();
-    await eventStore.close();
     await database.close();
   });
 

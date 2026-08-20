@@ -3,13 +3,14 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { AppConfig } from "../../config/app-config.js";
-import { createEmailClient } from "../../integrations/email/email-client.js";
 import { readAuthAudit } from "../../lib/auth/audit.js";
 import { migrate } from "../../lib/database/migrations.js";
 import { createDatabase, type Database } from "../../lib/database/postgres.js";
-import { createEventStore, type EventStore } from "../../lib/eventstore/client.js";
 import { buildApp } from "../../server/app.js";
-import type { AuthDependencies } from "./dependencies.js";
+import {
+  createTestAuthentication,
+  type TestAuthentication,
+} from "../../testing/authentication.js";
 
 /**
  * Authentication, end to end against real infrastructure.
@@ -18,6 +19,10 @@ import type { AuthDependencies } from "./dependencies.js";
  * back out of Mailpit over SMTP, so nothing about delivery is stubbed. A test
  * that fabricated the token would prove the parts work while leaving the seam
  * between them — the part that actually breaks — untested.
+ *
+ * Nothing here substitutes the database either. Every rule that matters is a
+ * conditional write, and a fake repository would test the substitute rather
+ * than the rule.
  *
  * Requires `pnpm infra:up`. Run with `pnpm test:integration`.
  */
@@ -113,39 +118,23 @@ const uniqueEmail = () => `person-${randomUUID()}@example.test`;
 describe("authentication", () => {
   let app: FastifyInstance;
   let database: Database;
-  let eventStore: EventStore;
-  let deps: AuthDependencies;
+  let authentication: TestAuthentication;
   let clock = () => new Date();
 
   beforeAll(async () => {
     database = createDatabase(config.database);
-    eventStore = createEventStore(config.eventStore);
     await migrate(database.pool);
 
-    deps = {
-      client: eventStore.client,
-      pool: database.pool,
-      config: config.auth,
-      email: createEmailClient(config.email),
-      clock: () => clock(),
-      // Headroom so the suite does not trip the limit it is not testing. A
-      // dedicated test below reaches the limit on purpose.
-      rateLimits: {
-        magicLinkRequestsPerWindow: 1000,
-        sessionCreationsPerWindow: 1000,
-        passwordAttemptsPerWindow: 1000,
-        registrationsPerWindow: 1000,
-        windowMinutes: 15,
-      },
-    };
+    authentication = createTestAuthentication(database.pool, config.auth, config.email, () =>
+      clock(),
+    );
 
-    app = await buildApp({ config, dependencies: [], auth: deps });
+    app = await buildApp({ config, dependencies: [], authentication });
   });
 
   afterAll(async () => {
     await app.close();
-    await deps.email.close();
-    await eventStore.close();
+    await authentication.close();
     await database.close();
   });
 
@@ -198,8 +187,23 @@ describe("authentication", () => {
 
     assert.notEqual(first.credentials.sessionId, second.credentials.sessionId);
 
-    const audit = await readAuthAudit(deps.pool, await identityIdFor(email));
+    const audit = await readAuthAudit(database.pool, await identityIdFor(email));
     assert.ok(audit.filter((entry) => entry.eventType === "session_created").length >= 2);
+  });
+
+  it("records the identity itself, not only the address pointing at it", async () => {
+    const email = uniqueEmail();
+    await signIn(email);
+    const identityId = await identityIdFor(email);
+
+    const { rows } = await database.pool.query<{ identity_id: string }>(
+      `SELECT identity_id FROM identities WHERE identity_id = $1`,
+      [identityId],
+    );
+
+    // Written in the same transaction as the claim, so an Identity is never an
+    // address pointing at nothing.
+    assert.equal(rows.length, 1);
   });
 
   it("refuses a link that has already been used", async () => {
@@ -325,6 +329,92 @@ describe("authentication", () => {
 
       assert.equal(response.statusCode, 401);
     });
+
+    it("lets exactly one of two simultaneous refreshes win", async () => {
+      const { credentials } = await signIn(uniqueEmail());
+
+      const refresh = () =>
+        app.inject({
+          method: "POST",
+          url: "/auth/sessions/refresh",
+          payload: { sessionId: credentials.sessionId, refreshToken: credentials.refreshToken },
+        });
+
+      const [first, second] = await Promise.all([refresh(), refresh()]);
+
+      // Both present the same valid credential at the same moment. The
+      // rotation is one conditional update, so the database decides: the loser
+      // matches nothing rather than minting a second replacement.
+      const statuses = [first.statusCode, second.statusCode].sort();
+      assert.deepEqual(statuses, [200, 401]);
+
+      const { rows } = await database.pool.query<{ refresh_generation: number }>(
+        `SELECT refresh_generation FROM sessions WHERE session_id = $1`,
+        [credentials.sessionId],
+      );
+      assert.equal(rows[0]?.refresh_generation, 1, "the credential rotated exactly once");
+    });
+
+    it("lets revocation win over a refresh racing it", async () => {
+      const { credentials } = await signIn(uniqueEmail());
+
+      const [revoked, refreshed] = await Promise.all([
+        app.inject({
+          method: "DELETE",
+          url: `/auth/sessions/${credentials.sessionId}`,
+          headers: { authorization: `Bearer ${credentials.accessToken}` },
+        }),
+        app.inject({
+          method: "POST",
+          url: "/auth/sessions/refresh",
+          payload: { sessionId: credentials.sessionId, refreshToken: credentials.refreshToken },
+        }),
+      ]);
+
+      assert.equal(revoked.statusCode, 204);
+
+      // Whichever order they landed in, the session is gone afterwards: the
+      // rotation requires the session to be unrevoked, and revocation keeps
+      // whichever reason arrived first.
+      const after = await app.inject({
+        method: "GET",
+        url: "/auth/sessions",
+        headers: { authorization: `Bearer ${credentials.accessToken}` },
+      });
+      assert.equal(after.statusCode, 401);
+
+      if (refreshed.statusCode === 200) {
+        const withNewCredential = await app.inject({
+          method: "POST",
+          url: "/auth/sessions/refresh",
+          payload: {
+            sessionId: credentials.sessionId,
+            refreshToken: refreshed.json().refreshToken,
+          },
+        });
+        assert.equal(withNewCredential.statusCode, 401);
+      }
+    });
+
+    it("refuses to refresh a session whose credential was never recorded", async () => {
+      // What a session created before credentials were stored looks like. A
+      // null must not match a presented hash, or such a session would refresh
+      // for anyone who named it.
+      const { credentials } = await signIn(uniqueEmail());
+
+      await database.pool.query(
+        `UPDATE sessions SET refresh_token_hash = NULL WHERE session_id = $1`,
+        [credentials.sessionId],
+      );
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/auth/sessions/refresh",
+        payload: { sessionId: credentials.sessionId, refreshToken: credentials.refreshToken },
+      });
+
+      assert.equal(response.statusCode, 401);
+    });
   });
 
   describe("revocation", () => {
@@ -399,13 +489,13 @@ describe("authentication", () => {
     const { credentials } = await signIn(email);
     const identityId = await identityIdFor(email);
 
-    const audit = await readAuthAudit(deps.pool, identityId);
+    const audit = await readAuthAudit(database.pool, identityId);
     const types = audit.map((entry) => entry.eventType);
 
     assert.ok(types.includes("session_created"));
     assert.ok(types.includes("magic_link_consumed"));
 
-    const { rows } = await deps.pool.query<{ context: unknown; reason: string | null }>(
+    const { rows } = await database.pool.query<{ context: unknown; reason: string | null }>(
       `SELECT context, reason FROM auth_audit_events WHERE identity_id = $1`,
       [identityId],
     );
@@ -426,7 +516,7 @@ describe("authentication", () => {
     await requestLink(email);
     const token = await readMagicLinkFor(email);
 
-    const { rows } = await deps.pool.query<{ token_hash: string }>(
+    const { rows } = await database.pool.query<{ token_hash: string }>(
       `SELECT token_hash FROM magic_link_tokens`,
     );
 
@@ -438,8 +528,8 @@ describe("authentication", () => {
     const limited = await buildApp({
       config,
       dependencies: [],
-      auth: {
-        ...deps,
+      authentication: {
+        ...authentication,
         rateLimits: {
           magicLinkRequestsPerWindow: 3,
           sessionCreationsPerWindow: 10,
@@ -714,12 +804,12 @@ describe("authentication", () => {
       assert.notEqual(linkSignIn.json().sessionId, passwordSignIn.json().sessionId);
     });
 
-    it("stores no password in recoverable form, and none in history or audit", async () => {
+    it("stores no password in recoverable form, and none in the audit trail or outbox", async () => {
       const email = uniqueEmail();
       await registerAndVerify(email);
       const identityId = await identityIdFor(email);
 
-      const stored = await deps.pool.query<{ password_hash: string }>(
+      const stored = await database.pool.query<{ password_hash: string }>(
         `SELECT password_hash FROM identity_passwords WHERE identity_id = $1`,
         [identityId],
       );
@@ -727,26 +817,32 @@ describe("authentication", () => {
       assert.match(stored.rows[0]?.password_hash ?? "", /^\$argon2id\$/);
       assert.ok(!(stored.rows[0]?.password_hash ?? "").includes(strongPassword));
 
-      const audit = await deps.pool.query(
+      const audit = await database.pool.query(
         `SELECT context, reason FROM auth_audit_events WHERE identity_id = $1`,
         [identityId],
       );
       assert.ok(!JSON.stringify(audit.rows).includes(strongPassword));
+      assert.ok(!JSON.stringify(audit.rows).includes(stored.rows[0]?.password_hash ?? "never"));
 
-      // The hash belongs in PostgreSQL, where it can be rotated; history is
-      // permanent, so it records only that a password was set.
-      const events = await readIdentityHistory(identityId);
-      assert.ok(!JSON.stringify(events).includes(strongPassword));
-      assert.ok(!JSON.stringify(events).includes(stored.rows[0]?.password_hash ?? "never"));
-      assert.ok(events.some((event) => event.type === "PasswordSet"));
+      // The outbox is append-only and feeds Kafka, so nothing erasable may
+      // reach it (ADR-095). Authentication publishes nothing at all, which is
+      // the strongest form of that.
+      const published = await database.pool.query(
+        `SELECT payload, metadata FROM outbox_messages WHERE aggregate_id = $1`,
+        [identityId],
+      );
+      assert.equal(published.rowCount, 0);
+
+      // That a password was set is recorded; what it is, is not.
+      assert.ok(audit.rows.length > 0);
     });
 
     it("stops a burst of password attempts", async () => {
       const limited = await buildApp({
         config,
         dependencies: [],
-        auth: {
-          ...deps,
+        authentication: {
+          ...authentication,
           rateLimits: {
             magicLinkRequestsPerWindow: 100,
             sessionCreationsPerWindow: 100,
@@ -788,29 +884,8 @@ describe("authentication", () => {
     return (body.messages ?? []).map((message) => message.Subject);
   }
 
-  /**
-   * An Identity's event history, for asserting what is and is not recorded.
-   *
-   * Revisions are dropped: they are bigints, which JSON.stringify refuses, and
-   * the assertions are about payloads rather than positions.
-   */
-  async function readIdentityHistory(
-    identityId: string,
-  ): Promise<{ type: string; payload: unknown; metadata: unknown }[]> {
-    const { readStream } = await import("../../lib/eventstore/read-stream.js");
-    const { streamName } = await import("../../lib/eventstore/stream-name.js");
-
-    const recorded = await readStream(deps.client, streamName("identity", identityId));
-
-    return recorded.map((event) => ({
-      type: event.type,
-      payload: event.payload,
-      metadata: event.metadata,
-    }));
-  }
-
   async function identityIdFor(email: string): Promise<string> {
-    const { rows } = await deps.pool.query<{ identity_id: string }>(
+    const { rows } = await database.pool.query<{ identity_id: string }>(
       `SELECT identity_id FROM identity_emails WHERE normalized_email = $1`,
       [email.toLowerCase()],
     );

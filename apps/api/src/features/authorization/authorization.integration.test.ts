@@ -3,12 +3,10 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { AppConfig } from "../../config/app-config.js";
-import { createEmailClient } from "../../integrations/email/email-client.js";
 import { migrate } from "../../lib/database/migrations.js";
 import { createDatabase, type Database } from "../../lib/database/postgres.js";
-import { createEventStore, type EventStore } from "../../lib/eventstore/client.js";
 import { buildApp } from "../../server/app.js";
-import type { AuthDependencies } from "../auth/dependencies.js";
+import { createTestAuthentication, type TestAuthentication } from "../../testing/authentication.js";
 import { UserRepository } from "../users/user.repository.js";
 import { UserService } from "../users/user.service.js";
 import { AuthorizationRepository } from "./authorization.repository.js";
@@ -88,30 +86,16 @@ const uniqueHandle = () => `h${randomUUID().replaceAll("-", "").slice(0, 12)}`;
 describe("authorization", () => {
   let app: FastifyInstance;
   let database: Database;
-  let eventStore: EventStore;
-  let auth: AuthDependencies;
+  let authentication: TestAuthentication;
   let users: UserService;
   let authorization: AuthorizationService;
   let roles: AuthorizationRepository;
 
   beforeAll(async () => {
     database = createDatabase(config.database);
-    eventStore = createEventStore(config.eventStore);
     await migrate(database.pool);
 
-    auth = {
-      client: eventStore.client,
-      pool: database.pool,
-      config: config.auth,
-      email: createEmailClient(config.email),
-      rateLimits: {
-        magicLinkRequestsPerWindow: 1000,
-        sessionCreationsPerWindow: 1000,
-        passwordAttemptsPerWindow: 1000,
-        registrationsPerWindow: 1000,
-        windowMinutes: 15,
-      },
-    };
+    authentication = createTestAuthentication(database.pool, config.auth, config.email);
 
     users = new UserService(database.pool, new UserRepository(database.pool), {
       minimumAgeYears: config.minimumAgeYears,
@@ -120,13 +104,12 @@ describe("authorization", () => {
     roles = new AuthorizationRepository(database.pool);
     authorization = new AuthorizationService(database.pool, roles);
 
-    app = await buildApp({ config, dependencies: [], auth, users, authorization });
+    app = await buildApp({ config, dependencies: [], authentication, users, authorization });
   });
 
   afterAll(async () => {
     await app.close();
-    await auth.email.close();
-    await eventStore.close();
+    await authentication.close();
     await database.close();
   });
 

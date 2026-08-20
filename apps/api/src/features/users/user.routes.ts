@@ -10,9 +10,7 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { requireSession, requireUser } from "../../plugins/auth.plugin.js";
-import type { AuthDependencies } from "../auth/index.js";
-import { revokeAllUserSessions } from "../auth/commands/revoke-all-user-sessions.command.js";
-import { handleRevokeAllUserSessions } from "../auth/commands/revoke-all-user-sessions.handler.js";
+import type { AuthenticationWiring } from "../authentication/authentication.types.js";
 import type { UserService } from "./user.service.js";
 
 /**
@@ -24,13 +22,13 @@ import type { UserService } from "./user.service.js";
  * discovering the absence halfway through a handler.
  *
  * @param users - The service these routes delegate to.
- * @param auth - Session revocation, which the auth feature owns and
+ * @param authentication - Session revocation, which authentication owns and
  *   deactivation reuses. Composed here rather than inside the User service:
  *   sessions belong to authentication, and a service reaching across to end
  *   them would put that ownership in two places.
  * @returns A Fastify plugin registering the User endpoints.
  */
-export function userRoutes(users: UserService, auth: AuthDependencies) {
+export function userRoutes(users: UserService, authentication: AuthenticationWiring) {
   return async function register(instance: FastifyInstance): Promise<void> {
     const app = instance.withTypeProvider<ZodTypeProvider>();
 
@@ -106,11 +104,11 @@ export function userRoutes(users: UserService, auth: AuthDependencies) {
 
         // Deactivating an account that leaves its sessions signed in would
         // deactivate nothing anyone can observe.
-        const sessionsRevoked = await handleRevokeAllUserSessions(
-          auth,
-          revokeAllUserSessions(request.session.identityId, "account_deactivated"),
-          request.requestContext,
-        );
+        const sessionsRevoked = await authentication.sessions.revokeAll({
+          identityId: request.session.identityId,
+          reason: "account_deactivated",
+          context: request.requestContext,
+        });
 
         return { sessionsRevoked };
       },

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
-import { authRoutes } from "../features/auth/routes/auth.routes.js";
-import type { AuthDependencies } from "../features/auth/index.js";
+import { authenticationRoutes } from "../features/authentication/authentication.routes.js";
+import type { AuthenticationWiring } from "../features/authentication/authentication.types.js";
 import { authorizationRoutes } from "../features/authorization/authorization.routes.js";
 import type { AuthorizationService } from "../features/authorization/authorization.service.js";
 import { healthRoutes } from "../features/health/index.js";
@@ -18,8 +18,9 @@ import type { UserService } from "../features/users/user.service.js";
  * file only decides which features are mounted, and where.
  *
  * @param app - The instance to mount on.
- * @param auth - Authentication wiring; when absent the auth routes are skipped.
- * @param users - The User service; mounted only alongside auth.
+ * @param authentication - Authentication wiring; when absent the authentication
+ *   routes are skipped.
+ * @param users - The User service; mounted only alongside authentication.
  * @param authorization - The Authorization service; mounted only alongside users,
  *   since every role belongs to a User.
  * @param uploads - The Upload service; mounted only alongside users, since every
@@ -30,7 +31,7 @@ import type { UserService } from "../features/users/user.service.js";
  */
 export async function registerRoutes(
   app: FastifyInstance,
-  auth?: AuthDependencies | undefined,
+  authentication?: AuthenticationWiring | undefined,
   users?: UserService | undefined,
   authorization?: AuthorizationService | undefined,
   uploads?: UploadService | undefined,
@@ -38,13 +39,14 @@ export async function registerRoutes(
 ): Promise<void> {
   await app.register(healthRoutes);
 
-  if (auth !== undefined) {
-    await app.register(authRoutes(auth));
+  if (authentication !== undefined) {
+    await app.register(authenticationRoutes(authentication));
 
     if (users !== undefined) {
-      // Mounted only alongside auth: every User route needs an authenticated
-      // caller, and account creation needs the Identity auth establishes.
-      await app.register(userRoutes(users, auth));
+      // Mounted only alongside authentication: every User route needs an
+      // authenticated caller, and account creation needs the Identity that
+      // authentication establishes.
+      await app.register(userRoutes(users, authentication));
 
       if (authorization !== undefined) {
         await app.register(authorizationRoutes(authorization));

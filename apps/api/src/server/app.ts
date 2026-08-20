@@ -3,7 +3,7 @@ import type { AppConfig } from "../config/app-config.js";
 import { toErrorResponse } from "../lib/errors/to-error-response.js";
 import type { HealthCheckable } from "../lib/health.js";
 import { loggerOptions } from "../lib/logger/logger.js";
-import type { AuthDependencies } from "../features/auth/index.js";
+import type { AuthenticationWiring } from "../features/authentication/authentication.types.js";
 import type { AuthorizationService } from "../features/authorization/authorization.service.js";
 import type { LocationService } from "../features/locations/location.service.js";
 import type { UploadService } from "../features/uploads/upload.service.js";
@@ -33,9 +33,9 @@ export interface BuildAppOptions {
    *
    * Optional so a test can build an application without it — health checks and
    * error mapping do not need authentication, and tests for them should not
-   * have to provide a database and an event store.
+   * have to provide a database.
    */
-  auth?: AuthDependencies | undefined;
+  authentication?: AuthenticationWiring | undefined;
   /** The User service. Mounted only alongside authentication. */
   users?: UserService | undefined;
   /** The Authorization service. Mounted only alongside users. */
@@ -54,13 +54,13 @@ export interface BuildAppOptions {
  * port is a test suite that fails in parallel.
  *
  * @param options - Configuration, the infrastructure this instance depends on,
- *   and optional authentication and User wiring.
+ *   and optional authentication and feature wiring.
  * @returns The application, ready to inject into or to bind to a port.
  */
 export async function buildApp({
   config,
   dependencies,
-  auth,
+  authentication,
   users,
   authorization,
   uploads,
@@ -102,8 +102,8 @@ export async function buildApp({
     }),
   );
 
-  await registerPlugins(app, auth);
-  await registerRoutes(app, auth, users, authorization, uploads, locations);
+  await registerPlugins(app, authentication);
+  await registerRoutes(app, authentication, users, authorization, uploads, locations);
 
   return app;
 }

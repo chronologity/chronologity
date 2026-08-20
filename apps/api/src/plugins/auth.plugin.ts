@@ -1,8 +1,7 @@
 import type { Permission, Role } from "@chronologity/contracts";
 import fp from "fastify-plugin";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { handleValidateSession } from "../features/auth/queries/validate-session.handler.js";
-import type { AuthDependencies } from "../features/auth/dependencies.js";
+import type { AuthenticationWiring } from "../features/authentication/authentication.types.js";
 import { hasPermission } from "../features/authorization/authorization.policy.js";
 import { AuthorizationRepository } from "../features/authorization/authorization.repository.js";
 import { OnboardingRequiredError } from "../lib/errors/onboarding-required-error.js";
@@ -41,7 +40,10 @@ export interface AuthenticatedUser {
  * Every failure is the same 401. The caller learns that they are not
  * authenticated, and nothing about which of the checks refused them.
  */
-export const authPlugin = fp(async function authPlugin(app, options: { deps: AuthDependencies }) {
+export const authPlugin = fp(async function authPlugin(
+  app,
+  options: { deps: AuthenticationWiring },
+) {
   const accounts = new UserRepository(options.deps.pool);
 
   app.decorate("resolveUserId", (identityId: string) => accounts.findIdForIdentity(identityId));
@@ -76,7 +78,7 @@ export const authPlugin = fp(async function authPlugin(app, options: { deps: Aut
       throw new UnauthenticatedError("Authentication required");
     }
 
-    const session = await handleValidateSession(options.deps, { sessionId: claims.sessionId });
+    const session = await options.deps.sessions.validate(claims.sessionId);
 
     if (session === undefined || session.identityId !== claims.identityId) {
       throw new UnauthenticatedError("Authentication required");
