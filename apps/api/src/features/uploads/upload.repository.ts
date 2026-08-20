@@ -27,7 +27,7 @@ interface UploadRow {
   checksum: string | null;
   failure_reason: string | null;
   media_kind: string | null;
-  derivatives: string[] | null;
+  derivatives: string[];
   width: number | null;
   height: number | null;
   duration_seconds: string | null;
@@ -58,7 +58,7 @@ function toUpload(row: UploadRow): Upload {
     checksum: row.checksum,
     failureReason: row.failure_reason,
     mediaKind: row.media_kind === null ? null : (row.media_kind as MediaKind),
-    derivatives: (row.derivatives ?? []) as DerivativeKind[],
+    derivatives: row.derivatives as DerivativeKind[],
     width: row.width,
     height: row.height,
     // numeric arrives as a string, since it can hold more precision than a
@@ -100,7 +100,7 @@ export class UploadRepository {
       owner_user_id: string;
       kind: string;
       storage_key: string;
-      derivatives: string[] | null;
+      derivatives: string[];
       state: string;
       expires_at: Date;
     }>(
@@ -120,7 +120,7 @@ export class UploadRepository {
       ownerUserId: row.owner_user_id,
       kind: row.kind as MediaKind,
       storageKey: row.storage_key,
-      derivatives: (row.derivatives ?? []) as DerivativeKind[],
+      derivatives: row.derivatives as DerivativeKind[],
       status: row.state as UploadStatus,
       expiresAt: row.expires_at,
     };

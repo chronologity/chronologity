@@ -44,8 +44,25 @@ export type MediaRejection =
   | "unknown_duration"
   | "too_long";
 
+/**
+ * What opening a file established.
+ *
+ * An accepted verdict carries the measurements rather than leaving the caller
+ * to take them off the probe again. It has already proved they are there —
+ * that is most of what accepting means — and re-reading the probe would force
+ * the caller to invent fallbacks for values this type guarantees.
+ */
 export type MediaVerdict =
-  | { readonly ok: true; readonly kind: MediaKind; readonly durationSeconds: number | undefined }
+  | {
+      readonly ok: true;
+      readonly kind: MediaKind;
+      readonly codec: string;
+      /** The first container format the decoder recognised. */
+      readonly container: string;
+      readonly width: number;
+      readonly height: number;
+      readonly durationSeconds: number | undefined;
+    }
   | { readonly ok: false; readonly reason: MediaRejection };
 
 /**
@@ -68,17 +85,22 @@ const VIDEO_CODECS = new Set(["h264", "hevc", "vp8", "vp9", "av1", "mpeg4"]);
  * @param maximumVideoSeconds - The limit to apply. Passed in rather than read
  *   from the constant so a test can prove the boundary without a 90-second
  *   fixture.
- * @returns The accepted kind and duration, or why it was refused. A video's
- *   duration is returned; an image's is undefined, because a still has none.
+ * @returns The accepted kind, what was measured, and the duration, or why it
+ *   was refused. A video's duration is returned; an image's is undefined,
+ *   because a still has none.
  */
 export function checkMedia(
   probe: ProbedMedia,
   declaredKind: MediaKind,
   maximumVideoSeconds: number = MAXIMUM_VIDEO_SECONDS,
 ): MediaVerdict {
+  const container = probe.formats[0];
+
   // Nothing recognisable came back. A PDF renamed to .jpg lands here, which is
-  // the hole this whole sub-phase exists to close.
-  if (probe.formats.length === 0 || probe.codec === undefined) {
+  // the hole this whole sub-phase exists to close. Asking for the first format
+  // rather than the count states the same condition in the form the rest of
+  // this function needs it: a container it can name.
+  if (container === undefined || probe.codec === undefined) {
     return { ok: false, reason: "not_media" };
   }
 
@@ -106,8 +128,17 @@ export function checkMedia(
     return { ok: false, reason: "no_dimensions" };
   }
 
+  // Established above and carried forward: the container was recognised, the
+  // codec is permitted, and the dimensions are real.
+  const measured = {
+    codec: probe.codec,
+    container,
+    width: probe.width,
+    height: probe.height,
+  };
+
   if (actualKind === "image") {
-    return { ok: true, kind: "image", durationSeconds: undefined };
+    return { ok: true, kind: "image", ...measured, durationSeconds: undefined };
   }
 
   // A video whose length cannot be determined cannot be checked against the
@@ -120,7 +151,7 @@ export function checkMedia(
     return { ok: false, reason: "too_long" };
   }
 
-  return { ok: true, kind: "video", durationSeconds: probe.durationSeconds };
+  return { ok: true, kind: "video", ...measured, durationSeconds: probe.durationSeconds };
 }
 
 /**
@@ -242,9 +273,12 @@ const ACCEPTED: Readonly<Record<string, MediaKind>> = {
  * @returns The media kind, or undefined if the type is not accepted.
  */
 export function inferMediaKind(contentType: string): MediaKind | undefined {
-  const normalized = contentType.split(";")[0]?.trim().toLowerCase();
+  // Trimming the parameters off rather than splitting and taking the first
+  // piece. The two are equivalent, but indexing is typed as possibly absent
+  // and would need a fallback for a case that cannot arise.
+  const normalized = contentType.replace(/;[\s\S]*$/, "").trim().toLowerCase();
 
-  return normalized === undefined ? undefined : ACCEPTED[normalized];
+  return ACCEPTED[normalized];
 }
 
 /**

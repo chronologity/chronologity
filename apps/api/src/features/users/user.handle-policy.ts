@@ -142,9 +142,10 @@ export function describeHandleRejection(reason: HandleRejection): string {
       return `A handle must be at most ${HANDLE_MAXIMUM_LENGTH} characters`;
     case "invalid_characters":
       return "A handle may contain letters, numbers, and underscores, and nothing else";
-    case "reserved":
-      return "That handle is not available";
     default:
+      // Covers "reserved", and anything a later change adds. Whether a handle
+      // is reserved or merely held is not information anyone needs, and
+      // revealing which maps out the reserved list.
       return "That handle is not available";
   }
 }

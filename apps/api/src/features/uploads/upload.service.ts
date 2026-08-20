@@ -372,10 +372,13 @@ export class UploadService {
       this.uploads.markReady(tx, {
         uploadId,
         kind: verdict.kind,
-        codec: probe.codec ?? "",
-        container: probe.formats[0] ?? "",
-        width: probe.width ?? 0,
-        height: probe.height ?? 0,
+        // Taken from the verdict rather than the probe: accepting the file is
+        // what established these, and reading them off the probe again would
+        // mean inventing fallbacks for values that are already guaranteed.
+        codec: verdict.codec,
+        container: verdict.container,
+        width: verdict.width,
+        height: verdict.height,
         durationSeconds: verdict.durationSeconds,
         hasAudio: probe.hasAudio,
         derivatives: produced,

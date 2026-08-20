@@ -413,8 +413,9 @@ export class UserRepository {
     );
 
     // The insert conflicted, so someone committed between the read above and
-    // this write. They won.
-    if ((inserted.rowCount ?? 0) === 0) {
+    // this write. They won. Written as "not exactly one" rather than "zero" so
+    // there is no fallback for a count that this statement cannot produce.
+    if (inserted.rowCount !== 1) {
       return { ok: false, reason: "taken" };
     }
 

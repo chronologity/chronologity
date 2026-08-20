@@ -39,6 +39,10 @@ describe("checkMedia — what the file actually is", () => {
     assert.deepEqual(checkMedia(image(), "image"), {
       ok: true,
       kind: "image",
+      codec: "mjpeg",
+      container: "image2",
+      width: 1920,
+      height: 1080,
       durationSeconds: undefined,
     });
   });
@@ -47,6 +51,11 @@ describe("checkMedia — what the file actually is", () => {
     assert.deepEqual(checkMedia(video(), "video"), {
       ok: true,
       kind: "video",
+      codec: "h264",
+      // The first the decoder named, not all of them: one file is stored once.
+      container: "mov",
+      width: 1920,
+      height: 1080,
       durationSeconds: 12,
     });
   });
@@ -82,6 +91,11 @@ describe("checkMedia — what the file actually is", () => {
     assert.deepEqual(checkMedia(stillInVideoContainer, "image"), {
       ok: true,
       kind: "image",
+      codec: "mjpeg",
+      container: "mov",
+      width: 1920,
+      height: 1080,
+      // A still has no length, whatever container it arrived in.
       durationSeconds: undefined,
     });
   });
