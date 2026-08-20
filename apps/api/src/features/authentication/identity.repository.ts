@@ -54,6 +54,14 @@ export class IdentityRepository {
     const normalizedEmail = normalizeEmail(input.email);
     const identityId = generateId();
 
+    // The Identity first, because the address references it. Speculative: this
+    // call may turn out to have lost the claim below, in which case the row is
+    // removed again before the transaction ends.
+    await tx.query(`INSERT INTO identities (identity_id, created_at) VALUES ($1, $2)`, [
+      identityId,
+      input.now.toISOString(),
+    ]);
+
     const inserted = await tx.query<{ identity_id: string }>(
       `INSERT INTO identity_emails (normalized_email, email, identity_id, verified_at)
        VALUES ($1, $2, $3, $4)
@@ -68,16 +76,13 @@ export class IdentityRepository {
     );
 
     if (inserted.rows[0] !== undefined) {
-      // Written in the same transaction as the claim, so an Identity never
-      // exists as an address pointing at nothing.
-      await tx.query(
-        `INSERT INTO identities (identity_id, created_at) VALUES ($1, $2)
-         ON CONFLICT (identity_id) DO NOTHING`,
-        [identityId, input.now.toISOString()],
-      );
-
       return { identityId, created: true };
     }
+
+    // The claim conflicted, so this call did not create the Identity after all.
+    // Nothing references the row yet — the address that would have is the one
+    // that just failed — so it goes, in the same transaction that made it.
+    await tx.query(`DELETE FROM identities WHERE identity_id = $1`, [identityId]);
 
     // The insert conflicted, so someone else owns this address — either an
     // earlier sign-in or a concurrent one that committed first.

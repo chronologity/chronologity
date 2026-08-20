@@ -119,19 +119,11 @@ export class UserService {
 
     const userId = randomUUID();
 
-    const claimed = await withTransaction(this.pool, async (tx) => {
-      const claim = await this.users.claimHandle(tx, {
-        handle: handle.trim(),
-        normalizedHandle: check.normalized,
-        userId,
-        now: at,
-        cooldownDays: this.cooldownDays,
-      });
-
-      if (!claim.ok) {
-        return false;
-      }
-
+    // The account before the handle, because a handle references the account it
+    // belongs to. A refused claim throws rather than returning, so the
+    // transaction rolls the account back with it and nothing survives a
+    // registration that did not complete.
+    await withTransaction(this.pool, async (tx) => {
       await this.users.insert(tx, {
         userId,
         identityId,
@@ -145,12 +137,18 @@ export class UserService {
       // erasable by a targeted delete rather than buried in a wider row.
       await this.users.recordDateOfBirth(tx, userId, dateOfBirth, this.minimumAge);
 
-      return true;
-    });
+      const claim = await this.users.claimHandle(tx, {
+        handle: handle.trim(),
+        normalizedHandle: check.normalized,
+        userId,
+        now: at,
+        cooldownDays: this.cooldownDays,
+      });
 
-    if (!claimed) {
-      throw new ValidationError("That handle is not available", { field: "handle" });
-    }
+      if (!claim.ok) {
+        throw new ValidationError("That handle is not available", { field: "handle" });
+      }
+    });
 
     return userId;
   }
