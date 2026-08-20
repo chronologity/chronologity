@@ -370,6 +370,44 @@ describe("authorization", () => {
       assert.equal(response.statusCode, 404);
     });
 
+    it("refuses to take a role from an account that does not exist", async () => {
+      const admin = await onboardAdministrator();
+
+      // Granting already refuses this. Removing has its own existence check,
+      // and an unchecked remove would report success for an account nobody has.
+      const response = await app.inject({
+        method: "DELETE",
+        url: `/users/${randomUUID()}/roles/moderator`,
+        headers: authed(admin.credentials.accessToken),
+      });
+
+      assert.equal(response.statusCode, 404, response.body);
+    });
+
+    it("takes a role away without being sent a body", async () => {
+      const admin = await onboardAdministrator();
+      const subject = await onboard();
+
+      await app.inject({
+        method: "PUT",
+        url: `/users/${subject.user.userId}/roles/moderator`,
+        headers: authed(admin.credentials.accessToken),
+        payload: {},
+      });
+
+      // No payload at all, which is the plainest way to call a delete. The
+      // body is declared optional, and a request that omits it must be
+      // accepted rather than refused for arriving as null.
+      const response = await app.inject({
+        method: "DELETE",
+        url: `/users/${subject.user.userId}/roles/moderator`,
+        headers: authed(admin.credentials.accessToken),
+      });
+
+      assert.equal(response.statusCode, 200, response.body);
+      assert.deepEqual(response.json().roles, []);
+    });
+
     it("rejects a role the platform does not define", async () => {
       const admin = await onboardAdministrator();
       const subject = await onboard();
