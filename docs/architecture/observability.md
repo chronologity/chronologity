@@ -8,8 +8,8 @@ Observability must allow engineers and operators to understand the behavior of C
 
 - public API requests;
 - authentication and authorization;
-- authoritative commands;
-- EventStoreDB;
+- authoritative writes;
+- the outbox;
 - Kafka;
 - projection workers;
 - PostgreSQL;
@@ -61,7 +61,7 @@ This document defines:
 - testing;
 - and open architectural questions.
 
-This document is grounded in the finalized product specifications and the established architecture documents for the API, authentication, authorization, CQRS, Event Sourcing, events, messaging, projections, data storage, Timeline, feed aggregator, media, notifications, caching, privacy, and security.
+This document is grounded in the finalized product specifications and the established architecture documents for the API, authentication, authorization, events, messaging, projections, data storage, Timeline, feed aggregator, media, notifications, caching, privacy, and security.
 
 ---
 
@@ -228,8 +228,8 @@ It should propagate through:
 
 ```text
 HTTP
-command
-Domain Event metadata where appropriate
+service
+outbox message metadata
 Kafka headers
 consumer
 projection
@@ -282,8 +282,7 @@ Safe telemetry may include:
 - Moment ID;
 - Upload ID;
 - Notification ID;
-- aggregate ID;
-- event/message ID.
+- message ID.
 
 However, logs should avoid unnecessary high-cardinality duplication.
 
@@ -439,7 +438,6 @@ At minimum, trace propagation should work across:
 - API HTTP;
 - feed GraphQL;
 - PostgreSQL;
-- EventStoreDB;
 - Kafka producer/consumer;
 - ClickHouse;
 - external provider calls;
@@ -506,9 +504,9 @@ The exact backend remains an infrastructure choice.
 - route/operation;
 - authentication failures;
 - authorization denials;
-- command duration;
-- EventStoreDB append latency;
+- write duration;
 - PostgreSQL latency;
+- outbox enqueue and publication latency;
 - external provider latency.
 
 ---
@@ -532,43 +530,29 @@ idempotency outcome
 
 # Concurrency Conflicts
 
-Optimistic concurrency conflicts should be metrics, not just logs.
+A conditional update that matches nothing should be a metric, not just a log.
 
 Useful metric:
 
 ```text
-conflicts by aggregate type / command
+zero-row transitions by operation
 ```
 
-An unexpected spike may indicate:
+Some rate is expected: it is what correctness under concurrency looks like. An
+unexpected spike may indicate:
 
-- aggregate hotspot;
-- retry bug;
-- workflow issue.
-
----
-
-# EventStoreDB Observability
-
-Important signals:
-
-- append latency;
-- append failure rate;
-- stream read latency;
-- concurrency conflicts;
-- subscription lag;
-- subscription disconnects;
-- storage growth;
-- node/cluster health.
+- a contended row that too many writers must touch;
+- a retry bug;
+- an operation shaped so that callers routinely race.
 
 ---
 
 # Event Publication Observability
 
-The EventStoreDB→Kafka publication path must expose:
+The outbox-to-Kafka publication path must expose:
 
-- source checkpoint;
-- last published source position;
+- depth of unpublished messages;
+- age of the oldest unpublished message;
 - publication throughput;
 - publication retries;
 - publication failures;
@@ -764,7 +748,7 @@ Useful dimensions:
 - scale;
 - range width;
 - rows scanned;
-- aggregate source;
+- source table;
 - latency.
 
 ---
@@ -1108,7 +1092,7 @@ Examples:
 
 ```text
 API
-    → cannot safely perform authoritative writes if EventStoreDB is unavailable
+    → cannot perform authoritative writes if PostgreSQL is unavailable
 
 feed aggregator
     → cannot serve Timeline if ClickHouse unavailable
@@ -1233,7 +1217,7 @@ Potential panels:
 - latency;
 - error rate;
 - command failure;
-- EventStoreDB latency;
+- PostgreSQL latency;
 - PostgreSQL latency;
 - auth failures;
 - authorization denials.
@@ -1371,7 +1355,7 @@ Potential examples:
 - role revocation projection severely delayed;
 - media pipeline fully stalled;
 - critical provider outage;
-- EventStoreDB unavailable;
+- PostgreSQL unavailable;
 - Kafka publication checkpoint stalled.
 
 Concrete thresholds belong in operations docs.
@@ -1652,9 +1636,9 @@ API authentication
     ↓
 authorization
     ↓
-command
+service
     ↓
-EventStoreDB append
+PostgreSQL commit, with the outbox message
     ↓
 Kafka publication
     ↓
@@ -1777,7 +1761,7 @@ Before launch, Chronologity must define and implement:
 - trace propagation through Kafka;
 - stable error classification;
 - API metrics;
-- EventStoreDB metrics;
+- outbox metrics;
 - Kafka metrics;
 - projection lag metrics;
 - PostgreSQL metrics;
@@ -1933,10 +1917,10 @@ The exact backend should be chosen later based on hosting, cost, and operational
 8. Correlation and causation identifiers retain distinct semantics.
 9. Full request/event payloads are not added to traces by default.
 10. API requests expose count, latency, and error telemetry.
-11. Significant commands are observable by type/result/duration.
-12. Optimistic concurrency conflicts are measurable.
-13. EventStoreDB append/subscription behavior is observable.
-14. EventStoreDB→Kafka publisher checkpoints are observable.
+11. Significant writes are observable by type, result, and duration.
+12. Zero-row conditional transitions are measurable.
+13. Outbox depth and the age of the oldest unpublished message are observable.
+14. Publication throughput, retries, and failures are observable.
 15. Kafka producer/consumer lag and errors are observable.
 16. Consumer lag severity depends on consumer responsibility.
 17. Every projection exposes position, lag, rate, and failure telemetry.

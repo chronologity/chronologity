@@ -16,7 +16,6 @@ Chronologity must protect:
 - Location information;
 - moderation capabilities;
 - administrative capabilities exposed through the consumer application;
-- EventStoreDB;
 - PostgreSQL;
 - ClickHouse;
 - Kafka;
@@ -843,7 +842,7 @@ Example:
 feed aggregator
     → read ClickHouse
     → call permitted API authorization/read endpoints if needed
-    → no EventStoreDB write access
+    → no write access to authoritative PostgreSQL
 ```
 
 ---
@@ -867,11 +866,12 @@ Different workloads may receive:
 
 ---
 
-# EventStoreDB Security
+# Outbox Security
 
-Only authorized command-side services should append to authoritative streams.
+Only the API writes to the outbox, and only the publisher reads and marks it.
 
-Read/projection workers should receive only the permissions they require.
+A projection worker has no reason to write there, and granting it the ability
+would let a downstream consumer manufacture an event the API never accepted.
 
 ---
 
@@ -948,7 +948,7 @@ Events should minimize:
 - raw media metadata;
 - provider credentials.
 
-EventStoreDB and Kafka retention increase the impact of sensitive payload mistakes.
+Outbox and Kafka retention increase the impact of sensitive payload mistakes, because neither can be corrected after the fact (ADR-095).
 
 ---
 
@@ -1069,7 +1069,6 @@ Potential secrets include:
 
 - database credentials;
 - Kafka credentials;
-- EventStoreDB credentials;
 - OAuth client secrets;
 - signing keys;
 - email/push provider credentials;
@@ -1092,7 +1091,7 @@ feed aggregator
 not:
     → OAuth client secret
     → media transcoder admin key
-    → EventStoreDB write credential
+    → authoritative database write credential
 ```
 
 ---
@@ -1215,7 +1214,7 @@ Publicly reachable components should be intentionally limited.
 
 Primary public ingress should terminate through controlled edge/load-balancing infrastructure.
 
-Direct database/Kafka/EventStoreDB exposure to the Internet is prohibited.
+Direct database or Kafka exposure to the Internet is prohibited.
 
 ---
 
@@ -1725,7 +1724,7 @@ It must:
 
 # Feed Aggregator Trust
 
-The feed aggregator should not be able to mutate authoritative EventStoreDB state.
+The feed aggregator should not be able to mutate authoritative PostgreSQL state.
 
 This is an architectural security boundary.
 
@@ -2063,7 +2062,7 @@ Examples:
 ```text
 feed aggregator cannot INSERT into ClickHouse projection tables
 API runtime cannot perform schema migration
-projection worker cannot append arbitrary EventStoreDB streams unless required
+projection worker cannot write to the outbox
 ```
 
 ---
@@ -2163,7 +2162,7 @@ apps/api / apps/feed-aggregator
           ↓
 scoped workload identities
           ↓
-EventStoreDB / PostgreSQL / ClickHouse / Kafka
+PostgreSQL / ClickHouse / Kafka
 
 mobile
     ↓ scoped direct upload
@@ -2308,7 +2307,7 @@ apps/api / workers
 29. Service identity does not imply unrestricted service authorization.
 30. Applications use distinct datastore credentials.
 31. Runtime database users do not receive unnecessary migration/admin privileges.
-32. Feed aggregator does not gain authoritative EventStoreDB write access.
+32. The feed aggregator does not gain authoritative write access.
 33. Kafka uses authenticated/scoped clients where supported.
 34. Kafka messages are schema validated.
 35. Integration Events do not become unrestricted commands.
