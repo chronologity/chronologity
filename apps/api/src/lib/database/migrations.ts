@@ -39,6 +39,23 @@ const MIGRATIONS_DIRECTORY = new URL("../../../migrations/", import.meta.url);
 /** `YYYYMMDDHHMMSS-<kebab-case-name>`, e.g. `20260815031100-foundation`. */
 const VERSION_PATTERN = /^\d{14}-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
+/**
+ * Whether a migration filename follows the convention.
+ *
+ * Exported because it is the whole of the rule, and a rule that can only be
+ * reached by putting a badly-named file into the migrations directory is a rule
+ * nothing will test.
+ *
+ * @param file - A filename, with or without its `.sql` suffix.
+ * @returns Whether it sorts where its timestamp says it should. Ordering is a
+ *   property of the name, so a name outside the convention sorts somewhere
+ *   unintended — and a migration applied out of order is not something a schema
+ *   can be talked out of afterwards.
+ */
+export function isValidMigrationName(file: string): boolean {
+  return VERSION_PATTERN.test(file.replace(/\.sql$/, ""));
+}
+
 export interface MigrationResult {
   readonly applied: readonly string[];
   readonly alreadyApplied: number;
@@ -72,7 +89,7 @@ async function readMigrations(): Promise<{ version: string; sql: string }[]> {
 
   const files = entries.filter((entry) => entry.endsWith(".sql")).sort();
 
-  const malformed = files.filter((file) => !VERSION_PATTERN.test(file.replace(/\.sql$/, "")));
+  const malformed = files.filter((file) => !isValidMigrationName(file));
 
   if (malformed.length > 0) {
     // Refused rather than tolerated: a name outside the convention sorts
