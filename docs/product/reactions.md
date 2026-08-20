@@ -809,7 +809,7 @@ Authorization and privacy revocation must propagate to every derived surface tha
 
 The system must support Moments with very large Reaction counts without requiring synchronous work proportional to all reactors for an individual Reaction operation.
 
-If Reaction state is event sourced, retained historical events must not force previous Reaction states to remain publicly visible or prevent privacy-compliant deletion and suppression behavior.
+Whatever Chronologity retains internally about previous Reaction states must not force those states to remain publicly visible, and must not prevent privacy-compliant deletion and suppression.
 
 ## Guiding Principle
 

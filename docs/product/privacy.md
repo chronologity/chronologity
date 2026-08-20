@@ -623,11 +623,11 @@ Chronologity should distinguish between concepts that may have different technic
 
 The user-facing model should be understandable even if backend deletion occurs across multiple systems.
 
-## Deletion and Event Sourcing
+## Deletion and Append-Only Storage
 
-Chronologity's architecture may use event sourcing for portions of the system.
+Chronologity's architecture uses append-only storage in places, currently the transactional outbox and Kafka topics.
 
-Event sourcing does not override privacy requirements.
+Append-only storage does not override privacy requirements.
 
 The architecture must not interpret "events are immutable" as "personal data can never be removed."
 
@@ -787,7 +787,7 @@ Any future advertising model would require separate scrutiny regarding whether i
 19. Historical jumps must resolve only within information the viewer is authorized to access.
 20. Shared history does not erase individual Moment privacy.
 21. Privacy-setting changes must propagate consistently across derived product surfaces.
-22. Event sourcing does not override deletion or erasure requirements.
+22. Append-only storage does not override deletion or erasure requirements.
 23. Deleting media must account for derived copies such as thumbnails and transcodes.
 24. Logs and analytics must not become uncontrolled copies of personal history.
 25. Security does not eliminate the need for data minimization.
@@ -922,7 +922,7 @@ The architecture must support:
 - provenance for privacy-sensitive associations where required; and
 - scalable handling of Moments containing potentially large numbers of media assets.
 
-Event sourcing, Kafka, ClickHouse, PostgreSQL, object storage, search systems, caches, and analytics systems must each participate in the privacy model. No component becomes exempt merely because it stores a projection or derivative rather than the original record.
+Kafka, ClickHouse, PostgreSQL, object storage, search systems, caches, and analytics systems must each participate in the privacy model. No component becomes exempt merely because it stores a projection or derivative rather than the original record.
 
 ## Guiding Principle
 

@@ -10,7 +10,7 @@ The central question is:
 
 > **When should multiple Moments be understood as perspectives on the same real-world occurrence, and what does that shared Event mean?**
 
-This document concerns historical real-world Events. It does not define software, domain, integration, or event-sourcing events.
+This document concerns historical real-world Events. It does not define software, domain, or integration events.
 
 ## Definition
 

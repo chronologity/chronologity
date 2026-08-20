@@ -606,7 +606,7 @@ The unlimited-media decision does not weaken privacy requirements. Every media a
 
 This document defines product semantics, not implementation boundaries.
 
-A Moment does not necessarily require a dedicated microservice, database, Kafka topic, event-sourced aggregate, API shape, or storage technology.
+A Moment does not necessarily require a dedicated microservice, database, Kafka topic, API shape, or storage technology.
 
 The unlimited-media requirement does, however, impose an important architectural constraint:
 

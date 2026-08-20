@@ -1006,7 +1006,7 @@ A high removal count is not inherently evidence of a good moderation system.
 45. Consequential moderation decisions should have a meaningful appeal path where appropriate.
 46. Appeals should allow relevant historical context to be reconsidered.
 47. Restored content returns according to normal historical and privacy semantics rather than receiving artificial ranking compensation.
-48. Append-only or event-sourced architecture must not prevent enforceable moderation, deletion, redaction, or erasure.
+48. Append-only storage must not prevent enforceable moderation, deletion, redaction, or erasure.
 49. Internal moderation provenance should support auditability and appeals without becoming public historical metadata by default.
 50. Automated moderation is assistive and fallible.
 51. AI moderation must not silently determine historical truth, significance, Person identity, Event membership, or causality.
@@ -1200,7 +1200,7 @@ The following questions require deliberate resolution:
 - How quickly to Timeline/zoom projections?
 - How quickly to media CDN caches?
 - What user-facing guarantee can realistically be made?
-- How should moderation state interact with EventStoreDB's append-only history?
+- How should moderation state interact with append-only surfaces such as published Integration Events?
 - Which event payloads may contain content that later requires erasure?
 - Should sensitive content be stored outside immutable event payloads with references from events?
 - This is primarily an architecture decision, but the product requires enforceable removal and erasure.
@@ -1385,7 +1385,7 @@ Moderation actions must be idempotent and traceable enough to support retries, a
 
 Restoration must be possible without rewriting historical occurrence timestamps or treating restored content as newly occurring history.
 
-Event sourcing and append-only logs must not make prohibited content permanently retrievable through ordinary product paths.
+Append-only logs must not make prohibited content permanently retrievable through ordinary product paths.
 
 Where immutable records contain references to content that must later be erased, architecture must permit the sensitive payload itself to become inaccessible while preserving only legally and product-appropriate structural history.
 
