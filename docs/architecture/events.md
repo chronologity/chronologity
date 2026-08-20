@@ -1589,7 +1589,7 @@ This classification can inform:
 
 # Events and Encryption
 
-Kafka/EventStoreDB transport and storage should be encrypted according to infrastructure/security policy.
+Kafka transport and storage should be encrypted according to infrastructure and security policy.
 
 Field-level encryption may be used for selected sensitive data, but the preferred strategy is often not to include unnecessary sensitive values at all.
 
@@ -1706,7 +1706,7 @@ Useful metrics include:
 - unsupported event versions;
 - processing latency.
 
-Avoid high-cardinality labels such as aggregate IDs in metrics.
+Avoid high-cardinality labels such as subject identifiers in metrics.
 
 ---
 
@@ -1833,7 +1833,7 @@ Before launch, Chronologity must define:
 
 - How are Integration Events grouped into Kafka topics?
 - Feature topics?
-- Aggregate topics?
+- One topic per subject type?
 - Consumer-purpose topics?
 - How are ordering and throughput balanced?
 
