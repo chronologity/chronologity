@@ -16,6 +16,7 @@ import {
 import { migrate } from "../../lib/database/migrations.js";
 import { createDatabase, type Database } from "../../lib/database/postgres.js";
 import type { ConsumedEvent } from "../../lib/messaging/consumer.js";
+import { createUser } from "../../testing/fixtures.js";
 import { systemContext } from "../../types/request-context.js";
 import { checkArrivedMedia } from "./check-media.js";
 
@@ -110,7 +111,7 @@ describe("checking media", () => {
    * Stops short of checking, which is what each test then exercises.
    */
   const arrive = async (file: string, declaredKind: "image" | "video") => {
-    const ownerUserId = randomUUID();
+    const { userId: ownerUserId } = await createUser(database.pool);
     const contentType = declaredKind === "image" ? "image/jpeg" : "video/mp4";
     const bytes = await readFile(fixture(file));
 

@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, it } from "vitest";
 import { createRecordedPlaceSearchClient } from "../../integrations/places/recorded-place-search-client.js";
 import { migrate } from "../../lib/database/migrations.js";
 import { createDatabase, type Database } from "../../lib/database/postgres.js";
+import { createUser } from "../../testing/fixtures.js";
 import { LocationRepository } from "./location.repository.js";
 import { LocationService } from "./location.service.js";
 
@@ -47,6 +48,9 @@ describe("recording places", () => {
     await database.close();
   });
 
+  /** Somebody who can record a place. A Location references its recorder. */
+  const recorder = async (): Promise<string> => (await createUser(database.pool)).userId;
+
   describe("searching", () => {
     it("returns candidates without creating anything", async () => {
       // Measured as a change rather than an absolute. An earlier version
@@ -89,7 +93,7 @@ describe("recording places", () => {
       const found = await locations.searchPlaces("Madison Square Garden");
       const chosen = found.suggestions[0]!;
 
-      const location = await locations.record(randomUUID(), {
+      const location = await locations.record(await recorder(), {
         name: chosen.name,
         coordinates: chosen.coordinates,
         precision: "exact",
@@ -108,7 +112,7 @@ describe("recording places", () => {
       // The property the whole design exists for. A venue is renamed; a
       // photograph from before the rename must keep the name it was recorded
       // with, rather than being relabelled with today's.
-      const original = await locations.record(randomUUID(), {
+      const original = await locations.record(await recorder(), {
         name: "The Old Vic Tavern",
         coordinates: { latitude: 51.5, longitude: -0.1 },
         precision: "exact",
@@ -116,7 +120,7 @@ describe("recording places", () => {
       });
 
       // The service now returns something different for the same reference.
-      const later = await locations.record(randomUUID(), {
+      const later = await locations.record(await recorder(), {
         name: "Shiny New Bar",
         coordinates: { latitude: 51.5, longitude: -0.1 },
         precision: "exact",
@@ -130,14 +134,14 @@ describe("recording places", () => {
     it("reaches one place when two people choose the same result", async () => {
       const reference = `way:${randomUUID().slice(0, 8)}`;
 
-      const first = await locations.record(randomUUID(), {
+      const first = await locations.record(await recorder(), {
         name: "Somewhere Shared",
         coordinates: { latitude: 1, longitude: 2 },
         precision: "exact",
         sourceReference: reference,
       });
 
-      const second = await locations.record(randomUUID(), {
+      const second = await locations.record(await recorder(), {
         name: "Somewhere Shared",
         coordinates: { latitude: 1, longitude: 2 },
         precision: "exact",
@@ -166,8 +170,9 @@ describe("recording places", () => {
         sourceReference: reference,
       });
 
+      const people = await Promise.all(Array.from({ length: 8 }, () => recorder()));
       const recorded = await Promise.all(
-        Array.from({ length: 8 }, () => locations.record(randomUUID(), place())),
+        people.map((userId) => locations.record(userId, place())),
       );
 
       const identifiers = new Set(recorded.map((location) => location.locationId));
@@ -191,9 +196,10 @@ describe("recording places", () => {
       // then, not what the next person typed.
       const reference = `way:${randomUUID().slice(0, 8)}`;
 
+      const people = await Promise.all(Array.from({ length: 8 }, () => recorder()));
       const recorded = await Promise.all(
-        Array.from({ length: 8 }, (_unused, index) =>
-          locations.record(randomUUID(), {
+        people.map((userId, index) =>
+          locations.record(userId, {
             name: `Contender ${index}`,
             coordinates: { latitude: 5, longitude: 6 },
             precision: "exact",
@@ -208,7 +214,7 @@ describe("recording places", () => {
     });
 
     it("records a place the map service has never heard of", async () => {
-      const location = await locations.record(randomUUID(), {
+      const location = await locations.record(await recorder(), {
         name: "Nana's house",
         coordinates: { latitude: 53.4, longitude: -2.9 },
         precision: "exact",
@@ -219,7 +225,7 @@ describe("recording places", () => {
     });
 
     it("records a place nobody can locate, without inventing a position", async () => {
-      const location = await locations.record(randomUUID(), {
+      const location = await locations.record(await recorder(), {
         name: "Somewhere in the Lake District",
         precision: "unknown",
       });
@@ -231,7 +237,7 @@ describe("recording places", () => {
     it("records how precisely a position is known, separately from the position", async () => {
       // Six decimal places says nothing about confidence: a phone reports six
       // whether it is certain or guessing.
-      const broad = await locations.record(randomUUID(), {
+      const broad = await locations.record(await recorder(), {
         name: "Northern Italy",
         coordinates: { latitude: 45.4642, longitude: 9.19 },
         precision: "broad",
@@ -245,7 +251,7 @@ describe("recording places", () => {
       const found = await locations.searchPlaces("Madison Square Garden");
       const chosen = found.suggestions[0]!;
 
-      const location = await locations.record(randomUUID(), {
+      const location = await locations.record(await recorder(), {
         name: chosen.name,
         coordinates: chosen.coordinates,
         precision: "exact",
@@ -261,7 +267,7 @@ describe("recording places", () => {
       // The constraint is the guarantee; this is here so the answer is a
       // sentence about coordinates rather than a failed write.
       await assert.rejects(
-        locations.record(randomUUID(), {
+        locations.record(await recorder(), {
           name: "Nowhere In Particular",
           coordinates: { latitude: 1, longitude: 2 },
           precision: "unknown",
@@ -270,7 +276,7 @@ describe("recording places", () => {
       );
 
       await assert.rejects(
-        locations.record(randomUUID(), { name: "Somewhere Definite", precision: "exact" }),
+        locations.record(await recorder(), { name: "Somewhere Definite", precision: "exact" }),
         /needs coordinates/,
       );
     });
@@ -278,7 +284,7 @@ describe("recording places", () => {
 
   describe("reading", () => {
     it("reads a place back", async () => {
-      const created = await locations.record(randomUUID(), {
+      const created = await locations.record(await recorder(), {
         name: "Readable Place",
         coordinates: { latitude: 5, longitude: 6 },
         precision: "exact",

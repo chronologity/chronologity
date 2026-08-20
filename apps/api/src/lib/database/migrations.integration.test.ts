@@ -56,6 +56,29 @@ describe("applying migrations to an empty database", () => {
     return new pg.Pool({ ...connection, database: name });
   };
 
+  /** A User and its Identity, inserted directly. */
+  const seedUser = async (pool: pg.Pool): Promise<{ identityId: string; userId: string }> => {
+    const identityId = randomUUID();
+    const userId = randomUUID();
+    const handle = `h${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+
+    await pool.query(`INSERT INTO identities (identity_id, created_at) VALUES ($1, now())`, [
+      identityId,
+    ]);
+    await pool.query(
+      `INSERT INTO users (user_id, identity_id, handle, display_name, status, created_at, updated_at)
+       VALUES ($1, $2, $3, 'Test Person', 'active', now(), now())`,
+      [userId, identityId, handle],
+    );
+    await pool.query(
+      `INSERT INTO user_handles (normalized_handle, handle, user_id, assigned_at)
+       VALUES ($1, $2, $3, now())`,
+      [handle.toLowerCase(), handle, userId],
+    );
+
+    return { identityId, userId };
+  };
+
   const tableExists = async (pool: pg.Pool, table: string): Promise<boolean> => {
     const { rows } = await pool.query<{ exists: boolean }>(
       `SELECT to_regclass($1) IS NOT NULL AS exists`,
@@ -154,6 +177,131 @@ describe("applying migrations to an empty database", () => {
         false,
         "a rolled-back migration left a table behind",
       );
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("refuses a row whose parent does not exist", async () => {
+    const pool = await emptyDatabase();
+
+    try {
+      await migrate(pool);
+
+      // The whole purpose of the constraints. Before them a Session could name
+      // an Identity nobody had, and nothing objected.
+      await assert.rejects(
+        pool.query(
+          `INSERT INTO sessions (session_id, identity_id, created_at, expires_at, refresh_generation)
+           VALUES (gen_random_uuid(), gen_random_uuid(), now(), now() + interval '1 day', 0)`,
+        ),
+        /violates foreign key constraint/,
+      );
+
+      await assert.rejects(
+        pool.query(
+          `INSERT INTO uploads
+             (upload_id, owner_user_id, kind, declared_content_type, declared_byte_size,
+              storage_key, state, registered_at, expires_at, updated_at, attempts, derivatives)
+           VALUES (gen_random_uuid(), gen_random_uuid(), 'image', 'image/jpeg', 1,
+                   'k', 'registered', now(), now() + interval '1 hour', now(), 0, ARRAY[]::text[])`,
+        ),
+        /violates foreign key constraint/,
+      );
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("refuses to delete an account that still owns something", async () => {
+    const pool = await emptyDatabase();
+
+    try {
+      await migrate(pool);
+      const { identityId, userId } = await seedUser(pool);
+
+      await pool.query(
+        `INSERT INTO uploads
+           (upload_id, owner_user_id, kind, declared_content_type, declared_byte_size,
+            storage_key, state, registered_at, expires_at, updated_at, attempts, derivatives)
+         VALUES (gen_random_uuid(), $1, 'image', 'image/jpeg', 1,
+                 'k', 'registered', now(), now() + interval '1 hour', now(), 0, ARRAY[]::text[])`,
+        [userId],
+      );
+
+      // Account deletion is not `DELETE FROM users` (`users.md:299`). The
+      // constraint makes the database say so rather than quietly cascading and
+      // leaving the object-storage bytes behind.
+      //
+      // Which dependant objects first is not the point and not asserted: the
+      // handle happens to be checked before the upload. The point is that
+      // something does, every time, until each has been dealt with.
+      await assert.rejects(
+        pool.query(`DELETE FROM users WHERE user_id = $1`, [userId]),
+        /foreign key constraint/,
+      );
+
+      await assert.rejects(
+        pool.query(`DELETE FROM identities WHERE identity_id = $1`, [identityId]),
+        /foreign key constraint/,
+      );
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("keeps a role granted by an account that is later removed", async () => {
+    const pool = await emptyDatabase();
+
+    try {
+      await migrate(pool);
+      const subject = await seedUser(pool);
+      const admin = await seedUser(pool);
+
+      await pool.query(
+        `INSERT INTO authorization_user_roles (user_id, role, assigned_at, assigned_by)
+         VALUES ($1, 'moderator', now(), $2)`,
+        [subject.userId, admin.userId],
+      );
+
+      // The administrator's own handle is the only thing referencing them here.
+      await pool.query(`DELETE FROM user_handles WHERE user_id = $1`, [admin.userId]);
+      await pool.query(`DELETE FROM users WHERE user_id = $1`, [admin.userId]);
+
+      const { rows } = await pool.query<{ role: string; assigned_by: string | null }>(
+        `SELECT role, assigned_by FROM authorization_user_roles WHERE user_id = $1`,
+        [subject.userId],
+      );
+
+      // A role change survives the departure of whoever made it. What it loses
+      // is the attribution, not the fact.
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0]?.role, "moderator");
+      assert.equal(rows[0]?.assigned_by, null);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("keeps audit records for an identity that no longer exists", async () => {
+    const pool = await emptyDatabase();
+
+    try {
+      await migrate(pool);
+
+      // Deliberately unconstrained. Audit rows are evidence retained on their
+      // own basis, and they are meant to outlive what they describe — a foreign
+      // key here would force a choice between destroying evidence and
+      // preventing erasure.
+      await pool.query(
+        `INSERT INTO auth_audit_events (id, event_type, identity_id, outcome)
+         VALUES (gen_random_uuid(), 'session_created', gen_random_uuid(), 'success')`,
+      );
+
+      const { rows } = await pool.query<{ count: string }>(
+        `SELECT count(*) FROM auth_audit_events`,
+      );
+      assert.equal(rows[0]?.count, "1");
     } finally {
       await pool.end();
     }

@@ -2623,3 +2623,45 @@ The publisher becomes a pump with no domain knowledge, and the route registry is
 A service that publishes must construct the external payload explicitly. That is more typing than a mechanical projection of internal fields, and it is the point: the two shapes are allowed to differ, and the external one is a contract.
 
 Exactly one integration event exists today — a media upload having arrived. That is not an accident of incompleteness; registration is an intention rather than a fact about a file, and failure and deletion are the API's own business.
+
+---
+
+# ADR-097 — Enforce Referential Integrity, and Restrict Deletion Rather Than Cascade It
+
+**Status:** Accepted
+
+## Decision
+
+Every relational reference between authoritative PostgreSQL tables is a foreign key. All of them are `ON DELETE RESTRICT`, with a single `ON DELETE SET NULL` exception for `authorization_user_roles.assigned_by`.
+
+The two audit tables — `auth_audit_events` and `authorization_audit_events` — deliberately have none.
+
+## Alternatives Considered
+
+`ON DELETE CASCADE`, which is the usual default and would make removing an account a single statement.
+
+Leaving the schema without foreign keys, which is what it had.
+
+## Rationale
+
+The absence of foreign keys was a consequence of event sourcing: referential integrity was the aggregate's job, and these tables were treated as projections rather than as the record. ADR-092 made PostgreSQL the sole authority, which makes the database the right place for those relationships. Nothing enforced that a Session belonged to an Identity that existed.
+
+Adding them exposed two ordering defects immediately, both writing a child before its parent: `resolveForEmail` inserted an address before the Identity it referenced, and account creation claimed a handle before the account existed. Neither could be observed before, because nothing was checking.
+
+`RESTRICT` rather than `CASCADE` follows from the product model rather than from caution. `docs/product/users.md:299` states that account deletion is not equivalent to `DELETE FROM users`, lists eleven categories of data a User may relate to, and requires the fate of each to be decided deliberately. It separately requires that deleting one User must not erase historical records created by others. Cascade would decide every one of those silently, by a schema default nobody revisits, and would leave the media bytes in object storage that no constraint reaches. Restrict blocks nothing today, because nothing deletes a User; it obliges the deletion service, when it is built, to answer the question rather than inherit an answer.
+
+`assigned_by` is the exception because it is already nullable — a role granted from the command line has no acting User — and a role change should survive the departure of whoever made it. The attribution goes; the fact stays.
+
+The audit tables are excluded because a foreign key there would force a choice between destroying evidence on deletion and preventing deletion entirely, and neither is acceptable. Audit rows are evidence retained on their own basis and their own schedule, and are meant to outlive what they describe.
+
+Three columns that resemble references are not: `outbox_messages.aggregate_id` is polymorphic, `projection_processed_events.event_id` identifies a message rather than a row, and `magic_link_tokens.email` is issued for addresses with no Identity on purpose.
+
+## Consequences
+
+Six integration suites were passing fabricated identifiers where a real parent is required, and had to be given real ones. That was the bulk of the work and it was worth doing on its own terms: those tests asserted against states the application cannot produce.
+
+`apps/api/src/testing/fixtures.ts` provides the parent rows a test needs when its subject is something else.
+
+Roughly seventeen thousand orphaned rows — development debris, plus rows predating the `identities` table — were removed by the migration that adds the constraints. It could not otherwise apply to a database that had been developed against. There is no production data.
+
+A future deletion service must remove dependants in order. That is the intended consequence.

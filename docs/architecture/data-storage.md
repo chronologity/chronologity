@@ -200,9 +200,39 @@ Examples:
 Deciding a uniqueness rule in application code — read, then write if absent —
 leaves a gap that a concurrent request commits inside. The constraint has no gap.
 
-Foreign keys are currently absent from the schema, a legacy of the period when
-referential integrity was an aggregate's job. Adding them is worthwhile and is
-its own piece of work.
+## Foreign Keys and Deletion
+
+Every relational reference between authoritative tables is a foreign key, and
+every one of them is `ON DELETE RESTRICT`.
+
+That is not caution. `docs/product/users.md:299` states that account deletion is
+not equivalent to `DELETE FROM users`, lists the categories of data a User may
+relate to, and requires the fate of each to be decided deliberately. `CASCADE`
+would decide all of them silently, by a schema default nobody revisits — and it
+would leave the media bytes in object storage that no constraint reaches.
+
+`RESTRICT` makes the database refuse a naive delete until each dependant has
+been dealt with. It blocks nothing that exists today, because nothing deletes a
+User; what it does is oblige the deletion service, when it is built, to answer
+the question rather than have a default answer it.
+
+One exception. `authorization_user_roles.assigned_by` is `ON DELETE SET NULL`:
+it is already nullable, because a role granted from the command line has no
+acting User, and a role change should survive the departure of whoever made it.
+What it loses is the attribution, not the fact.
+
+The two audit tables deliberately have none. `auth_audit_events` and
+`authorization_audit_events` reference identities, sessions, and users, and a
+foreign key on any of those would force a choice between destroying evidence on
+deletion and preventing deletion entirely. Audit rows are evidence, retained on
+their own basis and their own schedule, and they are meant to outlive what they
+describe.
+
+Three other columns look like references and are not. `outbox_messages
+.aggregate_id` is polymorphic. `projection_processed_events.event_id` identifies
+a message rather than a row. `magic_link_tokens.email` is issued for addresses
+that have no Identity on purpose — redeeming a sign-in link is what creates the
+account.
 
 ---
 

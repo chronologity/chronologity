@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, it } from "vitest";
 import { migrate } from "../../lib/database/migrations.js";
 import { createDatabase, type Database } from "../../lib/database/postgres.js";
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
+import { createIdentity } from "../../testing/fixtures.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
 import { UserRepository } from "./user.repository.js";
 import { UserService } from "./user.service.js";
@@ -59,7 +60,7 @@ describe("accounts", () => {
 
   /** An account, with the identity it belongs to and the handle it holds. */
   const account = async (handle = uniqueHandle()) => {
-    const identityId = randomUUID();
+    const identityId = await createIdentity(database.pool);
     const userId = await users.create(identityId, {
       handle,
       displayName: "A Person",
@@ -87,7 +88,7 @@ describe("accounts", () => {
       const { handle } = await account();
 
       await assert.rejects(
-        users.create(randomUUID(), {
+        users.create(await createIdentity(database.pool), {
           handle,
           displayName: "Someone Else",
           dateOfBirth: "1990-01-01",
@@ -163,7 +164,7 @@ describe("accounts", () => {
       );
 
       await assert.doesNotReject(
-        unconfigured.create(randomUUID(), {
+        unconfigured.create(await createIdentity(database.pool), {
           handle: uniqueHandle(),
           displayName: "Old Enough",
           dateOfBirth: "1990-01-01",
@@ -189,9 +190,15 @@ describe("accounts", () => {
       // it never runs.
       const handle = uniqueHandle();
 
+      // Each contender is a real Identity: they are eight different people
+      // reaching for one name, not one person racing themselves.
+      const contenders = await Promise.all(
+        Array.from({ length: 8 }, () => createIdentity(database.pool)),
+      );
+
       const attempts = await Promise.allSettled(
-        Array.from({ length: 8 }, () =>
-          users.create(randomUUID(), {
+        contenders.map((identityId) =>
+          users.create(identityId, {
             handle,
             displayName: "A Contender",
             dateOfBirth: "1990-01-01",
@@ -224,6 +231,12 @@ describe("accounts", () => {
       // hoped for.
       const handle = uniqueHandle();
       const repository = new UserRepository(database.pool);
+
+      // Two real accounts. A handle belongs to a User, so a contended claim is
+      // two people reaching for one name rather than two invented identifiers.
+      const first = await account();
+      const second = await account();
+
       const winner = await database.pool.connect();
       const loser = await database.pool.connect();
 
@@ -239,15 +252,21 @@ describe("accounts", () => {
         await winner.query("BEGIN");
         await loser.query("BEGIN");
 
+        // Each gives up the handle it currently holds first, exactly as
+        // `updateHandle` does: a User may hold only one current handle, so a
+        // contended claim is always two people mid-change.
+        await repository.releaseHandle(winner, first.handle.toLowerCase(), new Date());
+        await repository.releaseHandle(loser, second.handle.toLowerCase(), new Date());
+
         const { rows } = await loser.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
         const loserPid = rows[0]?.pid;
         assert.ok(loserPid !== undefined);
 
-        assert.deepEqual(await repository.claimHandle(winner, claim(randomUUID())), { ok: true });
+        assert.deepEqual(await repository.claimHandle(winner, claim(first.userId)), { ok: true });
 
         // Started, not awaited: its read finds the handle free, and its insert
         // then blocks on the index entry the uncommitted claim holds.
-        const contested = repository.claimHandle(loser, claim(randomUUID()));
+        const contested = repository.claimHandle(loser, claim(second.userId));
 
         await waitForLock(loserPid);
         await winner.query("COMMIT");

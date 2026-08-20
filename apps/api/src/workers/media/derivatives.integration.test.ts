@@ -18,6 +18,7 @@ import {
 } from "../../integrations/storage/storage-client.js";
 import { migrate } from "../../lib/database/migrations.js";
 import { createDatabase, type Database } from "../../lib/database/postgres.js";
+import { createUser } from "../../testing/fixtures.js";
 import { systemContext } from "../../types/request-context.js";
 
 /**
@@ -123,7 +124,7 @@ describe("producing derivatives", () => {
 
   /** Put a real file all the way through: authorised, uploaded, arrived, checked. */
   const runThrough = async (file: string, declaredKind: "image" | "video") => {
-    const ownerUserId = randomUUID();
+    const { userId: ownerUserId } = await createUser(database.pool);
     const contentType = declaredKind === "image" ? "image/jpeg" : "video/mp4";
     const bytes = await readFile(fixture(file));
 

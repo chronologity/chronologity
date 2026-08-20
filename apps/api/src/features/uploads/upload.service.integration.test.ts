@@ -14,6 +14,7 @@ import { withTransaction } from "../../lib/database/transaction.js";
 import { createDatabase, type Database } from "../../lib/database/postgres.js";
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
+import { createUser } from "../../testing/fixtures.js";
 import { systemContext } from "../../types/request-context.js";
 import { UploadRepository } from "./upload.repository.js";
 import { UploadService } from "./upload.service.js";
@@ -194,7 +195,7 @@ describe("uploads", () => {
 
   /** Authorise an upload and write the bytes, stopping short of finalizing. */
   const upload = async (file: string, declaredKind: "image" | "video") => {
-    const ownerUserId = randomUUID();
+    const { userId: ownerUserId } = await createUser(database.pool);
     const contentType = declaredKind === "image" ? "image/jpeg" : "video/mp4";
     const bytes = await readFile(fixture(file));
 

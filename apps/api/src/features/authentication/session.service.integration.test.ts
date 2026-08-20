@@ -6,6 +6,7 @@ import { migrate } from "../../lib/database/migrations.js";
 import { createDatabase, type Database } from "../../lib/database/postgres.js";
 import { UnauthenticatedError } from "../../lib/errors/unauthorized-error.js";
 import { systemContext } from "../../types/request-context.js";
+import { createIdentity } from "../../testing/fixtures.js";
 import { UserRepository } from "../users/user.repository.js";
 import { SessionRepository } from "./session.repository.js";
 import { SessionService } from "./session.service.js";
@@ -65,7 +66,7 @@ describe("sessions", () => {
 
   /** A Session belonging to a fresh Identity. */
   const open = async () => {
-    const identityId = randomUUID();
+    const identityId = await createIdentity(database.pool);
     const credentials = await sessions.issue({
       identityId,
       clientKind: "test",
@@ -160,7 +161,7 @@ describe("sessions", () => {
 
   describe("ending every session", () => {
     it("spares the one asking when told to", async () => {
-      const identityId = randomUUID();
+      const identityId = await createIdentity(database.pool);
       const issue = () =>
         sessions.issue({ identityId, clientKind: "test", method: "password", context: context() });
 
@@ -190,7 +191,7 @@ describe("sessions", () => {
     });
 
     it("records which sessions ended, not merely how many", async () => {
-      const identityId = randomUUID();
+      const identityId = await createIdentity(database.pool);
       const first = await sessions.issue({
         identityId,
         clientKind: "test",
@@ -223,7 +224,7 @@ describe("sessions", () => {
 
   describe("listing", () => {
     it("shows what is open, newest first, with the caller's own marked", async () => {
-      const identityId = randomUUID();
+      const identityId = await createIdentity(database.pool);
       const older = await sessions.issue({
         identityId,
         clientKind: "test",
@@ -255,7 +256,7 @@ describe("sessions", () => {
     });
 
     it("omits a revoked session rather than showing it as ended", async () => {
-      const identityId = randomUUID();
+      const identityId = await createIdentity(database.pool);
       const kept = await sessions.issue({
         identityId,
         clientKind: "test",
