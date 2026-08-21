@@ -2701,3 +2701,49 @@ The Location model stays as 5F-1 and 5F-2 built it: identity, name, coordinates,
 Precision reduction, when built, belongs to whatever reads a Moment — the API for authoritative reads, the feed aggregator for Timeline composition. Both must reduce, and neither may leak finer precision through a derived value: a distance computed from coordinates that are themselves withheld discloses them.
 
 `GET /locations/:locationId` currently returns a place at full precision to any authenticated caller. That is acceptable for the searched public places it was built for, and is the reason a privately typed place — a home, named and positioned by hand — must not be treated as shared reference data once Moments can point at one. How Chronologity recognises such a place is open (`locations.md`), and is part of the same work.
+
+---
+
+# ADR-099 — Reach the Database Through TypeORM, and Keep Hand-Written SQL as the Schema Authority
+
+**Status:** Accepted
+
+## Decision
+
+Repositories read and write through TypeORM rather than through hand-written SQL. Each feature declares its tables as decorated entity classes in a `*.model.ts` file beside the code that uses them: `features/users/user.model.ts`, `features/authentication/identity.model.ts`, and so on. Tables belonging to no feature — the outbox, projection checkpoints, applied migrations — live in `lib/database/outbox.model.ts`.
+
+The schema authority does not move. Timestamped SQL migrations under `apps/api/migrations/` remain the only thing that changes the database, applied by the existing runner. The DataSource runs with `synchronize: false` and `migrationsRun: false`, and TypeORM's own migration machinery is not used.
+
+One DataSource owns the only pool in the process. Raw SQL, where it is still the clearest thing to write, runs on the same connections.
+
+## Alternatives Considered
+
+Staying on hand-written SQL, which is what the six repositories were and what worked.
+
+A query builder or ORM whose models live in a separate schema language, with TypeScript types generated from them. That answers the legibility question, but in the wrong medium: the description of a table ends up outside the feature that owns it, and the types the code actually uses are generated output nobody reads.
+
+## Rationale
+
+The motivation was legibility, and specifically the ability to open a feature directory and see what its data is. Raw SQL spreads a table's shape across every query that touches it, and there is no file to open to see what a User is.
+
+Entities answer it in the medium the rest of the code is already written in: TypeScript, in the feature directory, importable, and documented in the same comment style as everything around them. A developer reading `features/users/` sees what a User is without leaving it.
+
+TypeORM was earlier rejected here on the grounds that its decorators require the legacy semantics TypeScript 7 no longer supports. **That was wrong.** `experimentalDecorators` compiles and emits correctly under TypeScript 7.0.2, verified before this decision was taken rather than assumed.
+
+`emitDecoratorMetadata` is deliberately off. It exists so an ORM can infer a column's type from the property's, and every column and relation here states its type outright. Left on, it emits a direct reference to each property's class, which throws on any entity naming one declared later in the same file — as `Identity` and `IdentityPassword` do.
+
+Every pattern this schema depends on was verified against the real database before the port: `FOR UPDATE`, `FOR UPDATE SKIP LOCKED`, `ON CONFLICT DO NOTHING`, conditional updates reporting how many rows they moved, `UPDATE ... RETURNING` with a SQL expression, advisory locks, and transaction rollback. All of them are expressible, which is what let the outbox publisher come off raw `pg` and leave one pool in the process.
+
+## Consequences
+
+**The entities can lie, and nothing in the ORM prevents it.** This is the real cost of the decision. An entity is a hand-written claim about a table, and a migration that changes the table does not change the claim. `synchronize` cannot be used to check it, because it would report every partial index and check constraint the entities deliberately do not express, so its answer would always be "different" and would mean nothing.
+
+`lib/database/schema.integration.test.ts` recovers most of the guarantee by asking the narrower question entities can answer: every column an entity claims exists, nullability agrees, and every column of every claimed table is mapped. It was verified to fail on a real added column, not merely to pass.
+
+Two things the entities cannot express stay in the migrations and are commented there: partial unique indexes — `user_handles_current_idx` is the entire mechanism preventing a User from holding two handles at once — and check constraints, including the two on `locations`.
+
+`.returning()` takes property names, not column names, and silently drops names it does not recognise, producing a statement with no `RETURNING` clause at all. That failed sixteen integration tests during the port. `orIgnore()` reports `identifiers` populated from the values handed to it whether or not a row was written, so a conflict cannot be detected from them; an explicit `.returning()` is what distinguishes a row that landed from one that did not. Both are load-bearing in five conflict checks and one rotation.
+
+`reflect-metadata` is imported at each entry point and in the Vitest setup file, before any module that declares an entity.
+
+`TYPEORM_LOG=1` prints every statement with its parameters. It is off by default and must stay off in a deployed process, since those parameters include values that must not reach a log.

@@ -237,7 +237,8 @@ features/locations/
 
 - `*.routes.ts` — Fastify registration, schemas, status codes, and preHandlers. Calls services and nothing else.
 - `*.service.ts` — a class. Orchestrates one use case per method, owns the transaction, and enqueues any integration event inside it. Methods are named for what they do without repeating the noun the class already carries: `record`, `finalize`, `updateHandle`.
-- `*.repository.ts` — a class holding the SQL. Reads take the pool; writes take a transaction, so the transaction stays visible at the call site.
+- `*.model.ts` — the feature's tables as TypeORM entities, one class per table, beside the code that uses them (ADR-099). The migrations own the schema; these describe it.
+- `*.repository.ts` — a class holding the queries, written against those entities. Reads take the DataSource; writes take a transaction, so the transaction stays visible at the call site.
 - `*.policy.ts` — pure functions. Where the rules live, and the layer that gets exhaustive unit tests.
 - `*.types.ts` — feature-local types. Types crossing the API boundary belong in `packages/contracts`.
 - `*.schemas.ts` — only when a feature needs a request shape no client shares. Otherwise validation comes from `packages/contracts`.
@@ -1303,6 +1304,7 @@ A feature may have:
 <feature>.routes.ts
 <feature>.service.ts
 <feature>.repository.ts
+<feature>.model.ts
 <feature>.policy.ts
 <feature>.types.ts
 <feature>.schemas.ts

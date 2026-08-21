@@ -553,7 +553,8 @@ A feature is a flat set of files named for what they are:
 <feature>/
 ├── <feature>.routes.ts          Fastify registration and HTTP concerns
 ├── <feature>.service.ts         class, verb-only methods, owns transactions
-├── <feature>.repository.ts      class, plain SQL
+├── <feature>.model.ts           TypeORM entities, one per table
+├── <feature>.repository.ts      class, queries
 ├── <feature>.policy.ts          pure rules, exhaustively unit tested
 ├── <feature>.policy.test.ts
 ├── <feature>.types.ts
@@ -602,19 +603,36 @@ container ceremony was hiding.
 
 # Repositories
 
-A repository owns a feature's SQL and nothing else. It is a class holding the
-pool.
+A repository owns a feature's queries and nothing else. It is a class holding
+the DataSource (ADR-099), and it uses the entities declared beside it in
+`<feature>.model.ts`.
 
-**Reads take the pool; writes take a transaction.** A write's transaction is
-therefore visible at the call site rather than hidden behind the method, which
-is what makes the transactional outbox possible: a state change and the message
-announcing it are only atomic if they share a connection.
+**Reads take the DataSource; writes take a transaction.** A write's transaction
+is therefore visible at the call site rather than hidden behind the method,
+which is what makes the transactional outbox possible: a state change and the
+message announcing it are only atomic if they share a transaction.
+`withTransaction` opens one.
 
-A repository returns domain-shaped values, not rows. Column-to-field mapping
-belongs here, so nothing above it knows a column name.
+A repository returns domain-shaped values, not rows. Entity-to-contract mapping
+belongs here, so nothing above it knows a column name — and nothing above it
+holds an entity. An entity is what the table is; a contract is what a caller
+receives, and the two are deliberately different shapes.
+
+TypeORM's own `Repository<T>` is a data-mapper helper, not this layer. A feature
+repository uses one; it does not replace one. Of the methods here, all but a
+handful are conditional writes or multi-branch policy — claiming a handle,
+moving an upload between states, rotating a credential — which is why the layer
+carries its own names rather than exposing generic CRUD.
 
 State transitions are conditional updates naming the state they expect to move
 from, and they report whether they moved anything. See **Concurrency**.
+
+Two behaviours of the query builder are load-bearing and easy to get wrong.
+`.returning()` takes property names and silently drops anything it does not
+recognise, producing a statement with no `RETURNING` clause. And an insert with
+`orIgnore()` reports identifiers taken from the values handed to it whether or
+not a row was written, so a conflict is detected from an explicit `.returning()`
+rather than from those identifiers.
 
 ---
 
