@@ -53,7 +53,7 @@ export async function registerRoutes(
       }
 
       if (uploads !== undefined) {
-        await app.register(uploadRoutes(uploads));
+        await app.register(uploadRoutes(uploads, locations));
       }
 
       if (locations !== undefined) {

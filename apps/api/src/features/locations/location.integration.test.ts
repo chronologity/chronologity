@@ -213,6 +213,41 @@ describe("recording places", () => {
       assert.match([...names][0] ?? "", /^Contender \d$/);
     });
 
+    it("records how the place came to be known", async () => {
+      const chosen = await locations.record(await recorder(), {
+        name: "Chosen From A Search",
+        coordinates: { latitude: 1, longitude: 2 },
+        precision: "exact",
+      });
+
+      // A request that says nothing about its source is describing somebody
+      // typing a name in, which is the strongest claim there is.
+      assert.equal(chosen.source, "explicit-selection");
+
+      const fromPhoto = await locations.record(await recorder(), {
+        name: "Read Out Of A Photograph",
+        coordinates: { latitude: 3, longitude: 4 },
+        precision: "exact",
+        source: "media-metadata",
+      });
+
+      // "Typed in by the person who was there" and "read out of a photograph's
+      // metadata" are different claims, and a record holding only the name has
+      // thrown the difference away (`locations.md:333`).
+      assert.equal(fromPhoto.source, "media-metadata");
+    });
+
+    it("keeps the source it was recorded with when read back", async () => {
+      const recorded = await locations.record(await recorder(), {
+        name: "Somewhere Remembered",
+        coordinates: { latitude: 5, longitude: 6 },
+        precision: "approximate",
+        source: "device-location",
+      });
+
+      assert.equal((await locations.get(recorded.locationId)).source, "device-location");
+    });
+
     it("records a place the map service has never heard of", async () => {
       const location = await locations.record(await recorder(), {
         name: "Nana's house",

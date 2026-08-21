@@ -3,6 +3,7 @@ import { loadConfig } from "./config/app-config.js";
 import { createDatabase } from "./lib/database/postgres.js";
 import { createMessaging } from "./lib/messaging/kafka.js";
 import { createEmailClient } from "./integrations/email/email-client.js";
+import { createEmbeddedLocationClient } from "./integrations/metadata/embedded-location-client.js";
 import { createStorageClient } from "./integrations/storage/storage-client.js";
 import { createPlaceSearchClient } from "./integrations/places/place-search-client.js";
 import { loadBreachedPasswordIndex } from "./lib/auth/breached-passwords.js";
@@ -84,6 +85,14 @@ async function main(): Promise<void> {
       new UploadRepository(database.pool),
       storage,
       config.uploadLimits,
+      {
+        // No decoder here on purpose: this process authorises and verifies
+        // uploads and never opens one. A photograph's coordinates sit in a
+        // header a range read reaches, so that works; a video's live in a
+        // container tag only a decoder can read, and yield nothing until a
+        // deployment provides one.
+        embeddedLocation: createEmbeddedLocationClient(storage),
+      },
     ),
     locations: new LocationService(database.pool, new LocationRepository(database.pool), places),
   });

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { CreateBucketCommand, S3Client } from "@aws-sdk/client-s3";
@@ -12,6 +14,10 @@ import {
 } from "../../integrations/storage/storage-client.js";
 import { migrate } from "../../lib/database/migrations.js";
 import { createDatabase, type Database } from "../../lib/database/postgres.js";
+import { createEmbeddedLocationClient } from "../../integrations/metadata/embedded-location-client.js";
+import { createRecordedPlaceSearchClient } from "../../integrations/places/recorded-place-search-client.js";
+import { LocationRepository } from "../locations/location.repository.js";
+import { LocationService } from "../locations/location.service.js";
 import { buildApp } from "../../server/app.js";
 import { createTestAuthentication, type TestAuthentication } from "../../testing/authentication.js";
 import { UploadRepository } from "./upload.repository.js";
@@ -87,6 +93,7 @@ const config: AppConfig = {
     endpoint: "https://nominatim.openstreetmap.org/search",
     userAgent: "Chronologity/0.1 (test)",
     minimumIntervalMs: 0,
+    reverseEndpoint: "https://nominatim.openstreetmap.org/reverse",
   },
   email: {
     host: process.env.SMTP_HOST ?? "localhost",
@@ -105,6 +112,7 @@ describe("uploads", () => {
   let authentication: TestAuthentication;
   let users: UserService;
   let uploads: UploadService;
+  let locations: LocationService;
   let storage: StorageClient;
 
   beforeAll(async () => {
@@ -148,10 +156,27 @@ describe("uploads", () => {
       new UploadRepository(database.pool),
       storage,
       config.uploadLimits,
-      { metadata: createMetadataClient(), derivatives: createDerivativeClient() },
+      {
+        metadata: createMetadataClient(),
+        derivatives: createDerivativeClient(),
+        embeddedLocation: createEmbeddedLocationClient(storage, createMetadataClient()),
+      },
     );
 
-    app = await buildApp({ config, dependencies: [], authentication, users, uploads });
+    locations = new LocationService(
+      database.pool,
+      new LocationRepository(database.pool),
+      createRecordedPlaceSearchClient(),
+    );
+
+    app = await buildApp({
+      config,
+      dependencies: [],
+      authentication,
+      users,
+      uploads,
+      locations,
+    });
   });
 
   afterAll(async () => {
@@ -233,6 +258,159 @@ describe("uploads", () => {
   /** Upload bytes the way a client does: straight to storage, not through the API. */
   const put = async (url: string, body: Buffer, contentType = "image/jpeg") =>
     fetch(url, { method: "PUT", body, headers: { "content-type": contentType } });
+
+  describe("what a photograph says about where it was taken", () => {
+    const fixture = (name: string) =>
+      fileURLToPath(new URL(`./__fixtures__/${name}`, import.meta.url));
+
+    // A separate application with a realistic size limit. The suite's own limit
+    // is deliberately tiny so that refusing an oversized file can be tested,
+    // and a real photograph is larger than that by design.
+    let roomy: FastifyInstance;
+
+    beforeAll(async () => {
+      roomy = await buildApp({
+        config: {
+          ...config,
+          uploadLimits: { ...config.uploadLimits, maxImageBytes: 26_214_400 },
+        },
+        dependencies: [],
+        authentication,
+        users,
+        uploads: new UploadService(
+          database.pool,
+          new UploadRepository(database.pool),
+          storage,
+          { ...config.uploadLimits, maxImageBytes: 26_214_400 },
+          {
+            metadata: createMetadataClient(),
+            derivatives: createDerivativeClient(),
+            embeddedLocation: createEmbeddedLocationClient(storage, createMetadataClient()),
+          },
+        ),
+        locations,
+      });
+    });
+
+    afterAll(() => roomy.close());
+
+    /** Register a real file, put it in storage, and finalize it. */
+    const arrive = async (accessToken: string, file: string) => {
+      const bytes = await readFile(fixture(file));
+      const registered = await roomy.inject({
+        method: "POST",
+        url: "/uploads",
+        headers: authed(accessToken),
+        payload: { contentType: "image/jpeg", declaredByteSize: bytes.byteLength },
+      });
+      assert.equal(registered.statusCode, 201, registered.body);
+
+      const { uploadId, uploadUrl } = registered.json();
+
+      assert.equal((await put(uploadUrl, bytes)).status, 200);
+
+      const finalized = await roomy.inject({
+        method: "POST",
+        url: `/uploads/${uploadId}/finalize`,
+        headers: authed(accessToken),
+      });
+      assert.equal(finalized.statusCode, 200, finalized.body);
+
+      return uploadId;
+    };
+
+    const askFor = async (uploadId: string, accessToken: string) =>
+      roomy.inject({
+        method: "GET",
+        url: `/uploads/${uploadId}/places`,
+        headers: authed(accessToken),
+      });
+
+    it("offers the places its own coordinates point at", async () => {
+      const { credentials } = await onboard();
+      const uploadId = await arrive(credentials.accessToken, "photo-with-gps.jpg");
+
+      const response = await askFor(uploadId, credentials.accessToken);
+
+      assert.equal(response.statusCode, 200, response.body);
+      assert.equal(response.json().found, true);
+      assert.ok(response.json().suggestions.length > 0);
+      assert.equal(response.json().suggestions[0].name, "Big Ben");
+      // ODbL requires crediting contributors wherever the data appears.
+      assert.match(response.json().attribution, /OpenStreetMap/);
+    });
+
+    it("answers with named places rather than the position it read", async () => {
+      const { credentials } = await onboard();
+      const uploadId = await arrive(credentials.accessToken, "photo-with-gps.jpg");
+
+      const body = await askFor(uploadId, credentials.accessToken).then((r) => r.json());
+
+      // The camera's position is used to ask what is there and is not a field
+      // of the answer. What comes back carries coordinates, but they are the
+      // map service's for a public landmark rather than the photograph's — the
+      // exact spot somebody stood is generalised to a place with a name
+      // (`locations.md:373`).
+      assert.deepEqual(Object.keys(body).sort(), ["attribution", "found", "suggestions"]);
+
+      const suggestion = body.suggestions[0];
+      assert.equal(suggestion.name, "Big Ben");
+      assert.ok(suggestion.coordinates !== undefined, "a named place carries its own position");
+      assert.match(suggestion.reference, /^[a-z]+:\d+$/);
+    });
+
+    it("stores nothing it read", async () => {
+      const { credentials } = await onboard();
+      const uploadId = await arrive(credentials.accessToken, "photo-with-gps.jpg");
+
+      const before = await database.pool.query<{ count: string }>(
+        `SELECT count(*) FROM locations`,
+      );
+      await askFor(uploadId, credentials.accessToken);
+      const after = await database.pool.query<{ count: string }>(`SELECT count(*) FROM locations`);
+
+      // Asking is not recording. Copying the coordinates into a database would
+      // create a second thing to leak, to keep in step with privacy rules, and
+      // to remember during erasure.
+      assert.equal(after.rows[0]?.count, before.rows[0]?.count);
+
+      // And nothing about position reached the upload's own row either. What is
+      // recorded there is what opening the file established — dimensions, codec,
+      // duration — never where it was taken.
+      const columns = await database.pool.query<{ column_name: string }>(
+        `SELECT column_name FROM information_schema.columns
+          WHERE table_name = 'uploads' AND column_name ~ 'lat|lon|location|coord'`,
+      );
+      assert.deepEqual(columns.rows, []);
+    });
+
+    it("says a photograph carrying no location carries none", async () => {
+      const { credentials } = await onboard();
+      const uploadId = await arrive(credentials.accessToken, "photo.jpg");
+
+      const response = await askFor(uploadId, credentials.accessToken);
+
+      // Absence is the ordinary case rather than a failure: most files carry no
+      // location. `found` distinguishes it from a position nothing could name,
+      // which is the case worth offering a manual search for.
+      assert.equal(response.statusCode, 200, response.body);
+      assert.equal(response.json().found, false);
+      assert.deepEqual(response.json().suggestions, []);
+    });
+
+    it("refuses somebody else's upload exactly as one that does not exist", async () => {
+      const mine = await onboard();
+      const theirs = await onboard();
+      const uploadId = await arrive(mine.credentials.accessToken, "photo-with-gps.jpg");
+
+      const asTheirs = await askFor(uploadId, theirs.credentials.accessToken);
+      const asMissing = await askFor(randomUUID(), theirs.credentials.accessToken);
+
+      assert.equal(asTheirs.statusCode, 404);
+      assert.equal(asMissing.statusCode, 404);
+      assert.deepEqual(asTheirs.json().code, asMissing.json().code);
+    });
+  });
 
   describe("the upload flow", () => {
     it("registers, uploads directly to storage, and finalizes", async () => {

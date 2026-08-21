@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   MEDIA_BOUNDARY,
+  type Coordinates,
   type DerivativeKind,
   type MediaKind,
   type RegisterUploadRequest,
@@ -14,6 +15,7 @@ import { withTransaction, type Transaction } from "../../lib/database/transactio
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
 import type { DerivativeClient } from "../../integrations/metadata/derivative-client.js";
+import type { EmbeddedLocationClient } from "../../integrations/metadata/embedded-location-client.js";
 import type { MetadataClient } from "../../integrations/metadata/metadata-client.js";
 import type { StorageClient } from "../../integrations/storage/storage-client.js";
 import { topicName } from "../../lib/messaging/topics.js";
@@ -65,6 +67,11 @@ export interface UploadServiceOptions {
    */
   readonly metadata?: MetadataClient;
   /**
+   * Reads where a file says it was taken. Absent in a process that has no
+   * business asking, which is most of them.
+   */
+  readonly embeddedLocation?: EmbeddedLocationClient;
+  /**
    * Produces the files that make media showable.
    *
    * Only the checker needs it: authorising and verifying an upload never
@@ -79,6 +86,7 @@ export interface UploadServiceOptions {
 /** Authorising, verifying, examining, and removing media. */
 export class UploadService {
   private readonly metadata: MetadataClient | undefined;
+  private readonly embeddedLocation: EmbeddedLocationClient | undefined;
   private readonly derivatives: DerivativeClient | undefined;
   private readonly logger: Logger | undefined;
   private readonly clock: () => Date;
@@ -101,6 +109,7 @@ export class UploadService {
     options: UploadServiceOptions = {},
   ) {
     this.metadata = options.metadata;
+    this.embeddedLocation = options.embeddedLocation;
     this.derivatives = options.derivatives;
     this.logger = options.logger;
     this.clock = options.clock ?? (() => new Date());
@@ -451,6 +460,39 @@ export class UploadService {
     }
 
     return upload;
+  }
+
+  /**
+   * Ask an uploaded file where it says it was taken.
+   *
+   * Nothing read here is stored, and nothing is returned but the position
+   * itself, to a caller that has proved it owns the file. The coordinates are
+   * already inside the file its owner uploaded; copying them into a database
+   * would create a second thing to leak, to keep in step with privacy rules,
+   * and to remember during erasure (`locations.md:373`).
+   *
+   * @param uploadId - Which upload.
+   * @param actorUserId - Who is asking. Only the owner may.
+   * @returns Where the file says it was, or undefined when it says nothing.
+   *   Absence is the ordinary case: most files carry no location, either
+   *   because the camera was told not to record one or because something
+   *   stripped it on the way.
+   * @throws {NotFoundError} If there is no such upload, it was deleted, or it
+   *   belongs to somebody else — all reported identically.
+   * @throws {Error} If storage could not be reached, or this process has no
+   *   means of reading a file at all.
+   */
+  async embeddedCoordinates(
+    uploadId: string,
+    actorUserId: string,
+  ): Promise<Coordinates | undefined> {
+    const record = await this.requireOwned(uploadId, actorUserId);
+
+    if (this.embeddedLocation === undefined) {
+      throw new Error("This process cannot read embedded media location");
+    }
+
+    return this.embeddedLocation.read(record.storageKey, record.kind);
   }
 
   /**

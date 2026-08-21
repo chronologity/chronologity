@@ -59,6 +59,7 @@ const fixture = (name: string) => fileURLToPath(new URL(`./__fixtures__/${name}`
 /** A decoder that fails the same way every time, for classifying the failure. */
 const failingMetadata = (error: Error): MetadataClient => ({
   probe: () => Promise.reject(error),
+  probeLocationTag: () => Promise.reject(error),
 });
 
 /** Derivative tools that fail the same way every time. */

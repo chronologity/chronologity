@@ -65,6 +65,7 @@ const config: AppConfig = {
     endpoint: "https://nominatim.openstreetmap.org/search",
     userAgent: "Chronologity/0.1 (test)",
     minimumIntervalMs: 0,
+    reverseEndpoint: "https://nominatim.openstreetmap.org/reverse",
   },
   email: {
     host: process.env.SMTP_HOST ?? "localhost",
