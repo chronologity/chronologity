@@ -840,7 +840,9 @@ These were open questions. Implementation settled them, and they are requirement
 
 **Two authentication methods ship: a magic link sent to an email address, and a password.** Both resolve to the same Identity.
 
-**An email address is required.** It is how an Identity is established and how a returning person is recognised as the same one, not merely one mechanism among several (`identity_emails`). Phone numbers are not supported, and no decision has been taken about whether they should be.
+**An email address is required.** It is how an Identity is established and how a returning person is recognised as the same one, not merely one mechanism among several (`identity_emails`).
+
+**Phone numbers will be supported.** They are not implemented, and what remains undecided is everything about how: whether a number authenticates or is only a contact detail, whether it can stand alone or must accompany an address, how a number is verified, and how numbers that change hands between people are handled. The intent is settled so that nothing is built which would have to be unpicked to admit them — an Identity already resolves through a separate table rather than through a column on the account, so a second kind of contact fits the shape that exists.
 
 **Registering does not prove an address; redeeming a link sent to it does.** Password sign-in is refused until the address is verified, because anyone can type an address that is not theirs. Magic-link sign-in proves the address by definition.
 
@@ -856,7 +858,10 @@ These were open questions. Implementation settled them, and they are requirement
 
 The following questions require deliberate resolution:
 
-- Are phone numbers supported?
+- Should a phone number authenticate an Identity, or only serve as a contact detail?
+- Can a phone number stand alone, or must an Identity always carry an email address?
+- How is a phone number verified?
+- How should a number reassigned to a different person be handled?
 - What account attributes are searchable?
 - Can a User opt out of User search or recommendations?
 - What privacy defaults are configured at account creation?
