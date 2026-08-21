@@ -3,6 +3,11 @@ import type { DatabaseConfig } from "../../config/database-config.js";
 import { AuthAuditEvent, Identity, IdentityEmail, IdentityPassword, MagicLinkToken, Session } from "../../features/authentication/identity.model.js";
 import { AuthorizationAuditEvent, RoleAssignment } from "../../features/authorization/authorization.model.js";
 import { Location } from "../../features/locations/location.model.js";
+import {
+  RealWorldEvent,
+  RealWorldEventAlias,
+  RealWorldEventLocation,
+} from "../../features/real-world-events/real-world-event.model.js";
 import { Upload } from "../../features/uploads/upload.model.js";
 import { Handle, Preferences, RestrictedData, User } from "../../features/users/user.model.js";
 import type { HealthCheckable } from "../health.js";
@@ -48,6 +53,9 @@ const entities = [
   AuthorizationAuditEvent,
   Upload,
   Location,
+  RealWorldEvent,
+  RealWorldEventAlias,
+  RealWorldEventLocation,
   OutboxMessage,
   ProjectionProcessedEvent,
   SchemaMigration,

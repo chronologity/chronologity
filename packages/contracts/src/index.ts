@@ -129,6 +129,13 @@ export {
   type SearchPlacesRequest,
 } from "./locations.js";
 export {
+  createRealWorldEventRequestSchema,
+  eventNameSchema,
+  realWorldEventSchema,
+  type CreateRealWorldEventRequest,
+  type RealWorldEvent,
+} from "./real-world-events.js";
+export {
   derivativeKindSchema,
   mediaKindSchema,
   registerUploadRequestSchema,

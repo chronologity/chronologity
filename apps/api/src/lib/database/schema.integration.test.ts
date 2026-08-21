@@ -104,6 +104,21 @@ describe("entities against the migrated schema", () => {
     assert.deepEqual(disagreements, [], "entities disagree with the database about nullability");
   });
 
+  it("has an entity for every table the migrations create", () => {
+    const claimed = new Set(
+      database.dataSource.entityMetadatas.map((entity) => entity.tableName),
+    );
+    const unclaimed = [...new Set(columns.map((column) => column.table_name))]
+      .filter((table) => !claimed.has(table))
+      .sort();
+
+    // The direction the other two cannot see: a table nothing maps is not
+    // compared against anything, so a whole feature's schema could drift
+    // unnoticed. If a table ever legitimately has no entity, this failing is
+    // the prompt to say so deliberately rather than to discover it later.
+    assert.deepEqual(unclaimed, [], "the database has tables no entity maps");
+  });
+
   it("maps every column of every table it claims", () => {
     const unmapped: string[] = [];
 

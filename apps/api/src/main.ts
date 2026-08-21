@@ -20,6 +20,8 @@ import { AuthorizationRepository } from "./features/authorization/authorization.
 import { AuthorizationService } from "./features/authorization/authorization.service.js";
 import { LocationRepository } from "./features/locations/location.repository.js";
 import { LocationService } from "./features/locations/location.service.js";
+import { RealWorldEventRepository } from "./features/real-world-events/real-world-event.repository.js";
+import { RealWorldEventService } from "./features/real-world-events/real-world-event.service.js";
 import { UploadRepository } from "./features/uploads/upload.repository.js";
 import { UploadService } from "./features/uploads/upload.service.js";
 import { UserRepository } from "./features/users/user.repository.js";
@@ -55,6 +57,9 @@ async function main(): Promise<void> {
   const places = createPlaceSearchClient(config.places);
 
   const accounts = new UserRepository(database.dataSource);
+  // Named because two services read through it: Locations, and real-world
+  // Events checking that a place it was given actually exists.
+  const locationRepository = new LocationRepository(database.dataSource);
 
   // Sessions are built before identities because proving who someone is ends in
   // granting them one: the dependency runs that way and only that way.
@@ -101,7 +106,12 @@ async function main(): Promise<void> {
         embeddedLocation: createEmbeddedLocationClient(storage),
       },
     ),
-    locations: new LocationService(database.dataSource, new LocationRepository(database.dataSource), places),
+    locations: new LocationService(database.dataSource, locationRepository, places),
+    realWorldEvents: new RealWorldEventService(
+      database.dataSource,
+      new RealWorldEventRepository(database.dataSource),
+      locationRepository,
+    ),
   });
 
   await startServer({

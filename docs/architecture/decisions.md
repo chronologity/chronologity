@@ -2747,3 +2747,43 @@ Two things the entities cannot express stay in the migrations and are commented 
 `reflect-metadata` is imported at each entry point and in the Vitest setup file, before any module that declares an entity.
 
 `TYPEORM_LOG=1` prints every statement with its parameters. It is off by default and must stay off in a deployed process, since those parameters include values that must not reach a log.
+
+---
+
+# ADR-100 — Record a Real-World Event's Time as a Bounded Occurrence, and Defer Event Visibility
+
+**Status:** Accepted
+
+## Decision
+
+A real-world Event carries one occurrence: a start, an end, and the precision the time is actually known at, reusing `occurrenceSchema` from `packages/contracts/src/time.ts` rather than defining a temporal vocabulary of its own. Precision is `instant`, `day`, `month`, or `year`.
+
+Any authenticated caller may read an Event by identifier. No endpoint lists, searches, or otherwise enumerates Events.
+
+## Alternatives Considered
+
+A start and an end each carrying their own precision, so "began sometime that morning, ended at 17:00" is directly expressible.
+
+A precision vocabulary of `exact`, `approximate`, `date`, and `unknown`, echoing the one `locations` uses for position, with `unknown` standing for an Event whose start or end nobody knows.
+
+## Rationale
+
+`real-world-events.md:154-188` asks Event time to express exact starts, approximate starts, dates without clock times, and multi-day spans. A bounded interval with a precision expresses all four without a new vocabulary: a concert is two instants hours apart, a convention is three days at `day` precision, and "sometime in 1969" is that year at `year` precision. The interval is what carries the approximation, so nothing has to invent a clock time to make storage tidier — which is the property `time.ts` was written to protect and the reason a Moment known only as "summer 1998" must not acquire a fabricated timestamp.
+
+Reusing that type also means Events and Moments will describe time the same way when 5H arrives. A parallel vocabulary would have had to be reconciled with it later, and reconciling two temporal models after both have data is not a refactor anyone should choose.
+
+Per-end precision was rejected as a larger claim than the evidence supports. *"What precision model should represent approximate Event times?"* is still an open product question, and the smaller answer is the one that can be widened additively later. The four-value vocabulary was rejected because it mixed granularity with confidence in one column and duplicated something the codebase already had.
+
+## Consequences
+
+An Event must have a bounded occurrence. Ongoing Events — a war still being fought, a project with no end — cannot yet be recorded honestly, and *"How should ongoing Events be represented?"* remains open. Adding an open end later is an additive migration; requiring one after data exists is not.
+
+`checkOccurrence` enforces one thing the schema cannot: an occurrence claiming `instant` precision must have equal ends, because a two-hour window called an instant claims a precision nobody has. A reversed interval is reported ahead of it, since it is the reason the other cannot be judged.
+
+**Event visibility is deliberately unbuilt.** `real-world-events.md:732-752` states that an Event's existence can itself be sensitive — a private ceremony, a support meeting — and that Event aggregation must not become a privacy bypass. Deciding who sees what requires Moments, viewers, and audiences that do not exist, and roughly a dozen open questions are phrased in those terms. This is the position ADR-098 took for Locations, for the same reason.
+
+What makes it safe meanwhile is that nothing enumerates Events. There is no list endpoint, no search, and no Moment pointing at one, so an Event is reachable only by an identifier that is not guessable and that nothing hands out. That property is load-bearing: **the first surface that enumerates Events must resolve visibility first**, not alongside.
+
+Duplicate Events are permitted, and `name` carries no unique constraint. Two people recording the same convention produce two Events, which is correct — every night of a tour shares a name and each is its own occurrence. Reconciliation is a later phase and needs the duplicates to exist in order to have anything to reconcile.
+
+`created_by_user_id` is provenance and never ownership. It is commented as such in the migration and in the entity, because a column of that name invites exactly the opposite reading, and `real-world-events.md:549-563` is explicit that recording a public occurrence first confers no authority over anyone else's history of it.
