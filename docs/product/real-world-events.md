@@ -1473,7 +1473,9 @@ These were open questions. Implementation settled them, and they are requirement
 
 **An Event may have any number of Locations, including none.** The model does not assume one geographic point. They are unordered: ordering would describe a route, and how routes are represented is not settled.
 
-**Event hierarchy does not ship initially.** Neither do Event Series, descriptions, automatic suggestions, or participant lists. Each is deliberately absent rather than overlooked, and hierarchy in particular is entangled with the Timeline graph in `timeline-first-curation-and-discovery.md`, which describes `parent_of` and `child_of` as relationships between Timelines. Whether containment belongs to Events, to Timelines, or to both is a question for whichever phase builds that graph.
+**What the first Event implementation built is identity, names and aliases, occurrence, Locations, and creator provenance — and nothing else.** Descriptions, types, hierarchy, series, recurrence, suggestions, participants, merging, splitting, and correction were left out because the questions governing them are unanswered, not because they were decided against. Their absence records the state of the questions below; it decides none of them.
+
+One piece of context for whoever answers the hierarchy question: `timeline-first-curation-and-discovery.md` describes `parent_of` and `child_of` as relationships between *Timelines*, while this document describes containment as a property of Events. Whether it belongs to Events, to Timelines, or to both should be settled once, across both documents, rather than separately in each.
 
 **Duplicate Events are permitted and expected.** Nothing prevents two people recording the same occurrence separately, because identity is the identifier rather than the name and reconciliation does not exist yet. Refusing the second would refuse real history to protect a guess.
 
@@ -1483,6 +1485,11 @@ These were open questions. Implementation settled them, and they are requirement
 
 The following questions require deliberate resolution:
 
+- Does Chronologity need an explicit Event-description field on day one?
+- Should Event hierarchy ship on day one?
+- Should Event Series become a first-class product concept now or remain future-compatible only?
+- Should automatic Event suggestions ship on day one?
+- Should Event participant lists exist at all in the initial product?
 - How should unnamed personal Events be represented?
 - Can Event names be changed by Users other than the creator?
 - What Event metadata may the original creator edit?
