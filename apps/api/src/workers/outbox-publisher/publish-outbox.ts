@@ -33,11 +33,26 @@ export interface PublishOutboxOptions {
   readonly producer: EventProducer;
   /** How many messages to take at once. */
   readonly batchSize?: number;
+  /**
+   * How many failures to tolerate before setting a message aside.
+   *
+   * A batch publishes as one unit, so a message the broker permanently refuses
+   * fails its whole batch and the batch is re-claimed oldest-first forever.
+   * Without a limit the outbox does not retry — it stops.
+   */
+  readonly maximumAttempts?: number;
   readonly logger?: Logger;
 }
 
 export interface PublishOutboxResult {
   readonly published: number;
+  /**
+   * How many messages this pass gave up on.
+   *
+   * Above zero means something will never be delivered until somebody looks at
+   * why. It is reported rather than logged alone so a caller can act on it.
+   */
+  readonly abandoned: number;
   /**
    * Whether the queue was drained.
    *
@@ -51,10 +66,22 @@ export interface PublishOutboxResult {
 const DEFAULT_BATCH_SIZE = 100;
 
 /**
+ * How many failures before a message is set aside.
+ *
+ * High enough that an ordinary broker outage never reaches it — a publisher
+ * retrying every few seconds takes a long while to fail ten times — and low
+ * enough that a message which can never be published stops blocking the queue
+ * the same day.
+ */
+const DEFAULT_MAXIMUM_ATTEMPTS = 10;
+
+/**
  * Publish one batch of outbox messages.
  *
- * @param options - Database, producer, batch size, and an optional logger.
- * @returns How many were published, and whether the queue is now empty.
+ * @param options - Database, producer, batch size, attempt limit, and an
+ *   optional logger.
+ * @returns How many were published, how many were given up on, and whether the
+ *   queue is now empty.
  * @throws {Error} If the database could not be reached. A broker failure is
  *   recorded against the messages and does not throw: the rows stay unpublished
  *   and the next pass tries again, which is what the outbox is for.
@@ -63,6 +90,7 @@ export async function publishOutboxBatch(
   options: PublishOutboxOptions,
 ): Promise<PublishOutboxResult> {
   const batchSize = options.batchSize ?? DEFAULT_BATCH_SIZE;
+  const maximumAttempts = options.maximumAttempts ?? DEFAULT_MAXIMUM_ATTEMPTS;
 
   // Captured inside the transaction so a publish failure can be recorded
   // against the right rows after the transaction has rolled back.
@@ -98,7 +126,7 @@ export async function publishOutboxBatch(
       return messages.length;
     });
 
-    return { published, reachedEnd: published < batchSize };
+    return { published, abandoned: 0, reachedEnd: published < batchSize };
   } catch (error) {
     if (claimed.length === 0) {
       throw error;
@@ -111,13 +139,29 @@ export async function publishOutboxBatch(
 
     // A separate transaction, because the one that claimed these has rolled
     // back and taken any attempt count written inside it with it.
-    await withTransaction(options.dataSource, async (tx) => {
+    const abandoned = await withTransaction(options.dataSource, async (tx) => {
+      let given = 0;
+
       for (const message of claimed) {
-        await markFailed(tx, message.id, describe(error));
+        if (await markFailed(tx, message.id, describe(error), maximumAttempts)) {
+          given += 1;
+
+          // Logged individually and at error level: each one is a message that
+          // will never be delivered, and the identifier is what an operator
+          // needs to find it.
+          options.logger?.error(
+            { messageId: message.id, eventType: message.eventType, attempts: maximumAttempts },
+            "Outbox message abandoned after repeated failures",
+          );
+        }
       }
+
+      return given;
     });
 
-    return { published: 0, reachedEnd: false };
+    // Not `reachedEnd`, even when everything failed: the next pass has work to
+    // do, either retrying these or moving past the ones just set aside.
+    return { published: 0, abandoned, reachedEnd: false };
   }
 }
 

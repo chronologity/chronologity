@@ -1,4 +1,4 @@
-import { IsNull, type DataSource } from "typeorm";
+import { IsNull, Not, type DataSource } from "typeorm";
 import type { EventMetadata } from "../../types/event-metadata.js";
 import { generateId } from "../ids/generate-id.js";
 import { OutboxMessage as OutboxRow } from "./outbox.model.js";
@@ -91,6 +91,7 @@ export async function enqueueOutboxMessage(
     publishedAt: null,
     attempts: 0,
     lastError: null,
+    abandonedAt: null,
   });
 
   return id;
@@ -119,6 +120,9 @@ export async function claimOutboxBatch(tx: Transaction, limit: number): Promise<
     .setLock("pessimistic_write")
     .setOnLocked("skip_locked")
     .where("message.publishedAt IS NULL")
+    // An abandoned message is no longer pending. Without this the queue stops
+    // at the first message the broker will never accept.
+    .andWhere("message.abandonedAt IS NULL")
     .orderBy("message.createdAt")
     .limit(limit)
     .getMany();
@@ -156,22 +160,61 @@ export async function markPublished(tx: Transaction, ids: readonly string[]): Pr
 /**
  * Record a failed publication attempt.
  *
- * The message stays unpublished and will be retried. The attempt count and
- * last error exist so a message failing forever is visible as such, rather
- * than looking like a queue that is merely slow.
+ * A message is retried until it has failed `maximumAttempts` times, and is
+ * then set aside. That limit is not tidiness: a batch publishes as one unit,
+ * so a message the broker permanently refuses fails its whole batch, and the
+ * batch is re-claimed oldest-first forever. Without a limit the outbox does
+ * not retry — it stops, and nothing behind that message is ever published.
  *
  * @param tx - The caller's transaction.
  * @param id - Which message failed.
- * @param error - Why, truncated. The message stays unpublished and will be
- *   retried; the count and reason exist so a message failing forever is visible
- *   as such rather than looking like a slow queue.
- * @returns Nothing.
+ * @param error - Why, truncated.
+ * @param maximumAttempts - How many failures to tolerate before giving up.
+ * @param at - When it was given up on, if this attempt is the one that does.
+ * @returns Whether this attempt is the one that gave up on the message. Until
+ *   it does, the message stays unpublished and is retried; once it does, the
+ *   message is set aside and everything queued behind it can move.
  */
-export async function markFailed(tx: Transaction, id: string, error: string): Promise<void> {
-  await tx.update(OutboxRow, id, {
-    attempts: () => "attempts + 1",
-    lastError: error.slice(0, 1000),
-  });
+export async function markFailed(
+  tx: Transaction,
+  id: string,
+  error: string,
+  maximumAttempts: number,
+  at: Date = new Date(),
+): Promise<boolean> {
+  // The count and the decision in one statement, so two publishers failing the
+  // same message cannot both read the old count and both decide to keep going.
+  // `abandoned_at` is set by the statement that takes the attempt past the
+  // limit, and by no other.
+  const failed = await tx
+    .createQueryBuilder()
+    .update(OutboxRow)
+    .set({
+      attempts: () => "attempts + 1",
+      lastError: error.slice(0, 1000),
+      abandonedAt: () => `CASE WHEN attempts + 1 >= ${Number(maximumAttempts)}
+                               THEN :abandonedAt ELSE abandoned_at END`,
+    })
+    .where("id = :id", { id })
+    .setParameter("abandonedAt", at)
+    .returning(["abandonedAt"])
+    .execute();
+
+  const row = (failed.raw as { abandoned_at: Date | null }[])[0];
+
+  return row?.abandoned_at != null;
+}
+
+/**
+ * How many messages have been given up on.
+ *
+ * @param dataSource - Read-only use; no transaction required.
+ * @returns The count. Anything above zero is a message that will never be
+ *   delivered until somebody looks at why, which is why this is worth
+ *   reporting rather than leaving to be discovered.
+ */
+export async function countAbandoned(dataSource: DataSource): Promise<number> {
+  return dataSource.getRepository(OutboxRow).countBy({ abandonedAt: Not(IsNull()) });
 }
 
 /**

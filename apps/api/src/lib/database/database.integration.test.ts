@@ -241,7 +241,9 @@ describe("PostgreSQL foundation against a real database", () => {
         }),
       );
 
-      await withTransaction(database.dataSource, (tx) => markFailed(tx, id, "broker unavailable"));
+      const abandoned = await withTransaction(database.dataSource, (tx) =>
+        markFailed(tx, id, "broker unavailable", 10),
+      );
 
       const rows: { attempts: number; last_error: string }[] = await database.dataSource.query(
         `SELECT attempts, last_error FROM outbox_messages WHERE id = $1`,
@@ -250,6 +252,8 @@ describe("PostgreSQL foundation against a real database", () => {
 
       assert.equal(rows[0]?.attempts, 1);
       assert.equal(rows[0]?.last_error, "broker unavailable");
+      // One failure out of ten is not giving up: it stays claimable.
+      assert.equal(abandoned, false);
       assert.equal(await countPending(database.dataSource), 1);
     });
 

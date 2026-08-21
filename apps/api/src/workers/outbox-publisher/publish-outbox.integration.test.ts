@@ -4,7 +4,11 @@ import { afterAll, beforeAll, beforeEach, describe, it } from "vitest";
 import type { EventEnvelope } from "@chronologity/contracts";
 import type { EventMetadata } from "../../types/event-metadata.js";
 import { migrate } from "../../lib/database/migrations.js";
-import { enqueueOutboxMessage, type MessageSubject } from "../../lib/database/outbox.js";
+import {
+  countAbandoned,
+  enqueueOutboxMessage,
+  type MessageSubject,
+} from "../../lib/database/outbox.js";
 import { connectDatabase, createDatabase, type Database } from "../../lib/database/postgres.js";
 import { withTransaction } from "../../lib/database/transaction.js";
 import { createMessaging, type Messaging } from "../../lib/messaging/kafka.js";
@@ -312,5 +316,130 @@ describe("outbox publication against real infrastructure", () => {
 
     assert.equal(left.published + right.published, 6);
     assert.equal(rows[0]?.count, "0");
+  });
+
+  describe("a message the broker will never accept", () => {
+    it("is set aside once it has failed enough times", async () => {
+      const aggregateId = randomUUID();
+
+      await withTransaction(database.dataSource, async (tx) => {
+        await enqueueOutboxMessage(tx, {
+          topic: TOPIC,
+          partitionKey: aggregateId,
+          ...subject(aggregateId),
+          eventType: "NeverAccepted",
+          eventVersion: 1,
+          payload: { aggregateId },
+          metadata: metadata(),
+        });
+      });
+
+      // Two attempts tolerated, so the second failure is the one that gives up.
+      const first = await publishOutboxBatch({
+        dataSource: database.dataSource,
+        producer: refusingProducer,
+        maximumAttempts: 2,
+      });
+      assert.equal(first.abandoned, 0, "gave up on the first failure");
+
+      const second = await publishOutboxBatch({
+        dataSource: database.dataSource,
+        producer: refusingProducer,
+        maximumAttempts: 2,
+      });
+      assert.equal(second.abandoned, 1);
+
+      // Set aside, not deleted: the message and why it failed are both still
+      // there for somebody to look at.
+      const rows: { abandoned_at: Date | null; last_error: string }[] =
+        await database.dataSource.query(
+          `SELECT abandoned_at, last_error FROM outbox_messages WHERE aggregate_id = $1`,
+          [aggregateId],
+        );
+
+      assert.notEqual(rows[0]?.abandoned_at, null);
+      assert.match(rows[0]?.last_error ?? "", /broker unavailable/);
+      assert.equal(await countAbandoned(database.dataSource), 1);
+    });
+
+    it("stops blocking everything queued behind it", async () => {
+      const poison = randomUUID();
+      const behind = randomUUID();
+
+      // The poison message is enqueued first, so it sorts ahead of the good one
+      // and every batch claims it.
+      for (const [aggregateId, eventType] of [
+        [poison, "NeverAccepted"],
+        [behind, "PerfectlyFine"],
+      ] as const) {
+        await withTransaction(database.dataSource, async (tx) => {
+          await enqueueOutboxMessage(tx, {
+            topic: TOPIC,
+            partitionKey: aggregateId,
+            ...subject(aggregateId),
+            eventType,
+            eventVersion: 1,
+            payload: { aggregateId },
+            metadata: metadata(),
+          });
+        });
+      }
+
+      // The broker refuses, which fails the whole batch — including the good
+      // message, because a batch publishes as one unit. This is the state that
+      // used to last forever.
+      await publishOutboxBatch({
+        dataSource: database.dataSource,
+        producer: refusingProducer,
+        maximumAttempts: 1,
+      });
+
+      assert.equal(await countAbandoned(database.dataSource), 2);
+
+      // Now the broker recovers. Nothing is left to publish, because both were
+      // set aside — but the queue is moving again rather than stuck on the
+      // first message forever.
+      const recovered = await publishOutboxBatch({
+        dataSource: database.dataSource,
+        producer,
+      });
+
+      assert.equal(recovered.published, 0);
+      assert.equal(recovered.reachedEnd, true, "the queue is still blocked");
+    });
+
+    it("returns to the queue when it is no longer given up on", async () => {
+      const aggregateId = randomUUID();
+
+      await withTransaction(database.dataSource, async (tx) => {
+        await enqueueOutboxMessage(tx, {
+          topic: TOPIC,
+          partitionKey: aggregateId,
+          ...subject(aggregateId),
+          eventType: "FixedLater",
+          eventVersion: 1,
+          payload: { aggregateId },
+          metadata: metadata(),
+        });
+      });
+
+      await publishOutboxBatch({
+        dataSource: database.dataSource,
+        producer: refusingProducer,
+        maximumAttempts: 1,
+      });
+      assert.equal(await countAbandoned(database.dataSource), 1);
+
+      // What an operator does once the reason it was refused has been fixed.
+      await database.dataSource.query(
+        `UPDATE outbox_messages SET abandoned_at = NULL WHERE aggregate_id = $1`,
+        [aggregateId],
+      );
+
+      const result = await publishOutboxBatch({ dataSource: database.dataSource, producer });
+
+      assert.equal(result.published, 1, "clearing abandonment did not requeue it");
+      assert.equal(await countAbandoned(database.dataSource), 0);
+    });
   });
 });

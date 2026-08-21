@@ -76,6 +76,20 @@ export class OutboxMessage {
 
   @Column("text", { name: "last_error", nullable: true })
   lastError!: string | null;
+
+  /**
+   * When this message was given up on.
+   *
+   * Null while it is pending or published. A batch publishes as one unit, so a
+   * message the broker permanently refuses fails its whole batch and the batch
+   * is re-claimed oldest-first forever — the outbox stops rather than merely
+   * retrying. Setting the message aside is what lets everything behind it
+   * through.
+   *
+   * Reversible on purpose: clearing this returns the message to the queue.
+   */
+  @Column("timestamptz", { name: "abandoned_at", nullable: true })
+  abandonedAt!: Date | null;
 }
 
 /**
