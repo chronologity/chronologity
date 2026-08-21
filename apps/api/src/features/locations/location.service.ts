@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { CreateLocationRequest, Location, PlaceSuggestions } from "@chronologity/contracts";
+import type {
+  Coordinates,
+  CreateLocationRequest,
+  Location,
+  PlaceSuggestions,
+} from "@chronologity/contracts";
 import type pg from "pg";
 import { withTransaction } from "../../lib/database/transaction.js";
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
@@ -63,7 +68,10 @@ export class LocationService {
    *
    * @param recordedByUserId - Who is recording it.
    * @param request - The name, position, how precisely it is known, the wider
-   *   areas it sits inside, and an optional map-service reference.
+   *   areas it sits inside, an optional map-service reference, and how the
+   *   place came to be known. A request that says nothing about its source is
+   *   describing somebody typing a name in, which is the strongest claim
+   *   there is — so a weaker one has to be stated.
    * @returns The place. When the same map-service reference has already been
    *   recorded the existing place is returned rather than a second one created,
    *   and the name it was first given stands — two people choosing the same
@@ -101,6 +109,7 @@ export class LocationService {
         precision: request.precision,
         context: fillContext(request.context),
         sourceReference,
+        source: request.source ?? "explicit-selection",
         createdAt: this.clock(),
       }),
     );
@@ -122,6 +131,21 @@ export class LocationService {
     }
 
     return winner;
+  }
+
+  /**
+   * Ask what places are at a position.
+   *
+   * Used for a position that came from somewhere other than a search — a
+   * photograph's own metadata, or a device. Creates nothing: what comes back
+   * are candidates, and a Location exists only once somebody chooses one.
+   *
+   * @param coordinates - Where to ask about.
+   * @returns Candidates and the attribution the data must be shown with.
+   * @throws {Error} If the map service could not be reached.
+   */
+  async suggestFor(coordinates: Coordinates): Promise<PlaceSuggestions> {
+    return this.places.reverse(coordinates);
   }
 
   /**

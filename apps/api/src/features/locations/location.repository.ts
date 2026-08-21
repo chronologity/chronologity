@@ -1,4 +1,4 @@
-import type { Location, LocationPrecision } from "@chronologity/contracts";
+import type { Location, LocationPrecision, LocationSource } from "@chronologity/contracts";
 import type pg from "pg";
 import type { Transaction } from "../../lib/database/transaction.js";
 import type { NewLocation } from "./location.types.js";
@@ -27,12 +27,13 @@ interface LocationRow {
   country: string | null;
   country_code: string | null;
   source_reference: string | null;
+  source: string;
   created_at: Date;
 }
 
 const COLUMNS = `location_id, name, latitude, longitude, precision,
                  neighbourhood, city, region, country, country_code,
-                 source_reference, created_at`;
+                 source_reference, source, created_at`;
 
 /**
  * Shape a row into the boundary contract.
@@ -57,6 +58,7 @@ function toLocation(row: LocationRow): Location {
       countryCode: row.country_code,
     },
     sourceReference: row.source_reference,
+    source: row.source as LocationSource,
     createdAt: row.created_at.toISOString(),
   };
 }
@@ -87,8 +89,9 @@ export class LocationRepository {
     const { rows } = await tx.query<LocationRow>(
       `INSERT INTO locations
          (location_id, recorded_by_user_id, name, latitude, longitude, precision,
-          neighbourhood, city, region, country, country_code, source_reference, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          neighbourhood, city, region, country, country_code, source_reference, source,
+          created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        ON CONFLICT (source_reference) WHERE source_reference IS NOT NULL DO NOTHING
        RETURNING ${COLUMNS}`,
       [
@@ -104,6 +107,7 @@ export class LocationRepository {
         location.context.country,
         location.context.countryCode,
         location.sourceReference ?? null,
+        location.source,
         location.createdAt.toISOString(),
       ],
     );
