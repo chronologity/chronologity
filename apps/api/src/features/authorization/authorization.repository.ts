@@ -1,6 +1,7 @@
 import type { GrantableRole, RoleAssignment } from "@chronologity/contracts";
-import type pg from "pg";
+import type { DataSource } from "typeorm";
 import type { Transaction } from "../../lib/database/transaction.js";
+import { AuthorizationAuditEvent, RoleAssignment as RoleRow } from "./authorization.model.js";
 import { generateId } from "../../lib/ids/generate-id.js";
 import type { AuthorizationAuditEntry, AuthorizationAuditRecord } from "./authorization.types.js";
 
@@ -22,10 +23,10 @@ export class AuthorizationRepository {
   /**
    * Build the Authorization repository.
    *
-   * @param pool - Used for reads. Writes take a transaction, so a role change
-   *   and its audit record cannot commit separately.
+   * @param dataSource - Used for reads. Writes take a transaction, so a role
+   *   change and its audit record cannot commit separately.
    */
-  constructor(private readonly pool: pg.Pool) {}
+  constructor(private readonly dataSource: DataSource) {}
 
   /**
    * Read the elevated roles a User holds.
@@ -40,12 +41,13 @@ export class AuthorizationRepository {
    *   authorization decision needs.
    */
   async rolesFor(userId: string): Promise<readonly GrantableRole[]> {
-    const { rows } = await this.pool.query<{ role: GrantableRole }>(
-      `SELECT role FROM authorization_user_roles WHERE user_id = $1 ORDER BY role`,
-      [userId],
-    );
+    const rows = await this.dataSource.getRepository(RoleRow).find({
+      where: { userId },
+      select: { role: true },
+      order: { role: "ASC" },
+    });
 
-    return rows.map((row) => row.role);
+    return rows.map((row) => row.role as GrantableRole);
   }
 
   /**
@@ -56,22 +58,16 @@ export class AuthorizationRepository {
    *   grant came from the CLI and no User was acting.
    */
   async assignmentsFor(userId: string): Promise<RoleAssignment[]> {
-    const { rows } = await this.pool.query<{
-      role: GrantableRole;
-      assigned_at: Date;
-      assigned_by: string | null;
-    }>(
-      `SELECT role, assigned_at, assigned_by
-         FROM authorization_user_roles
-        WHERE user_id = $1
-        ORDER BY assigned_at`,
-      [userId],
-    );
+    const rows = await this.dataSource.getRepository(RoleRow).find({
+      where: { userId },
+      select: { role: true, assignedAt: true, assignedBy: true },
+      order: { assignedAt: "ASC" },
+    });
 
     return rows.map((row) => ({
-      role: row.role,
-      assignedAt: row.assigned_at.toISOString(),
-      assignedBy: row.assigned_by,
+      role: row.role as GrantableRole,
+      assignedAt: row.assignedAt.toISOString(),
+      assignedBy: row.assignedBy,
     }));
   }
 
@@ -95,14 +91,26 @@ export class AuthorizationRepository {
       at: Date;
     },
   ): Promise<boolean> {
-    const { rowCount } = await tx.query(
-      `INSERT INTO authorization_user_roles (user_id, role, assigned_at, assigned_by)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (user_id, role) DO NOTHING`,
-      [input.userId, input.role, input.at.toISOString(), input.assignedBy ?? null],
-    );
+    // `orIgnore` is ON CONFLICT DO NOTHING. A conflicting insert identifies
+    // nothing, which is what distinguishes a grant from a role already held.
+    const inserted = await tx
+      .createQueryBuilder()
+      .insert()
+      .into(RoleRow)
+      .values({
+        userId: input.userId,
+        role: input.role,
+        assignedAt: input.at,
+        assignedBy: input.assignedBy ?? null,
+      })
+      .orIgnore()
+      // Explicit, because the identifiers a conflicting insert reports are the
+      // ones handed to it rather than the ones written. RETURNING is what
+      // actually distinguishes a grant from a role already held.
+      .returning(["userId"])
+      .execute();
 
-    return rowCount === 1;
+    return (inserted.raw as unknown[]).length === 1;
   }
 
   /**
@@ -118,12 +126,10 @@ export class AuthorizationRepository {
    *   precisely the failure this table exists to prevent.
    */
   async remove(tx: Transaction, userId: string, role: GrantableRole): Promise<boolean> {
-    const { rowCount } = await tx.query(
-      `DELETE FROM authorization_user_roles WHERE user_id = $1 AND role = $2`,
-      [userId, role],
-    );
+    // Deleting by the composite primary key, so this removes one row or none.
+    const { affected } = await tx.delete(RoleRow, { userId, role });
 
-    return rowCount === 1;
+    return affected === 1;
   }
 
   /**
@@ -136,22 +142,21 @@ export class AuthorizationRepository {
    * @returns Nothing.
    */
   async recordAudit(tx: Transaction, record: AuthorizationAuditRecord): Promise<void> {
-    await tx.query(
-      `INSERT INTO authorization_audit_events
-         (id, event_type, actor_user_id, subject_user_id, role, outcome, reason, trace_id, context)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-      [
-        generateId(),
-        record.eventType,
-        record.actorUserId ?? null,
-        record.subjectUserId,
-        record.role,
-        record.outcome,
-        record.reason ?? null,
-        record.traceId ?? null,
-        record.context === undefined ? null : JSON.stringify(record.context),
-      ],
-    );
+    await tx.insert(AuthorizationAuditEvent, {
+      id: generateId(),
+      occurredAt: new Date(),
+      eventType: record.eventType,
+      actorUserId: record.actorUserId ?? null,
+      subjectUserId: record.subjectUserId,
+      role: record.role,
+      outcome: record.outcome,
+      reason: record.reason ?? null,
+      traceId: record.traceId ?? null,
+      // The column is `jsonb`, so the driver serialises the value. Absence is a
+      // SQL null rather than a JSON one: nothing was recorded, as against
+      // something recorded as null.
+      context: record.context ?? null,
+    });
   }
 
   /**
@@ -164,29 +169,27 @@ export class AuthorizationRepository {
    * @returns What was done, to which role, by whom, and why.
    */
   async auditFor(subjectUserId: string, limit = 50): Promise<AuthorizationAuditEntry[]> {
-    const { rows } = await this.pool.query<{
-      event_type: string;
-      role: string;
-      outcome: string;
-      actor_user_id: string | null;
-      reason: string | null;
-      trace_id: string | null;
-    }>(
-      `SELECT event_type, role, outcome, actor_user_id, reason, trace_id
-         FROM authorization_audit_events
-        WHERE subject_user_id = $1
-        ORDER BY occurred_at DESC
-        LIMIT $2`,
-      [subjectUserId, limit],
-    );
+    const rows = await this.dataSource.getRepository(AuthorizationAuditEvent).find({
+      where: { subjectUserId },
+      select: {
+        eventType: true,
+        role: true,
+        outcome: true,
+        actorUserId: true,
+        reason: true,
+        traceId: true,
+      },
+      order: { occurredAt: "DESC" },
+      take: limit,
+    });
 
     return rows.map((row) => ({
-      eventType: row.event_type,
+      eventType: row.eventType,
       role: row.role,
       outcome: row.outcome,
-      actorUserId: row.actor_user_id,
+      actorUserId: row.actorUserId,
       reason: row.reason,
-      traceId: row.trace_id,
+      traceId: row.traceId,
     }));
   }
 }

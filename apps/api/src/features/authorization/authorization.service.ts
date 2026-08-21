@@ -1,5 +1,5 @@
 import type { Capabilities, GrantableRole, UserRoles } from "@chronologity/contracts";
-import type pg from "pg";
+import type { DataSource } from "typeorm";
 import { withTransaction } from "../../lib/database/transaction.js";
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
 import { UnauthorizedError } from "../../lib/errors/unauthorized-error.js";
@@ -27,17 +27,17 @@ export class AuthorizationService {
   /**
    * Build the Authorization service.
    *
-   * @param pool - Opens the transactions this service's writes commit in, and
+   * @param dataSource - Opens the transactions this service's writes commit in, and
    *   answers whether an account exists.
    * @param roles - Where role assignments and their audit records are stored.
    * @param clock - Injected so tests can move time without waiting.
    */
   constructor(
-    private readonly pool: pg.Pool,
+    private readonly dataSource: DataSource,
     private readonly roles: AuthorizationRepository,
     private readonly clock: () => Date = () => new Date(),
   ) {
-    this.accounts = new UserRepository(pool);
+    this.accounts = new UserRepository(dataSource);
   }
 
   /**
@@ -72,7 +72,7 @@ export class AuthorizationService {
     if (!mayGrantRole(assignedBy, userId)) {
       // Recorded even though it is refused: an attempt to self-escalate is
       // exactly the thing a security review wants to find afterwards.
-      await withTransaction(this.pool, (tx) =>
+      await withTransaction(this.dataSource, (tx) =>
         this.roles.recordAudit(tx, {
           eventType: "user_role_assigned",
           outcome: "failure",
@@ -89,7 +89,7 @@ export class AuthorizationService {
 
     const at = this.clock();
 
-    return withTransaction(this.pool, async (tx) => {
+    return withTransaction(this.dataSource, async (tx) => {
       const granted = await this.roles.assign(tx, { userId, role, assignedBy, at });
 
       if (granted) {
@@ -135,7 +135,7 @@ export class AuthorizationService {
       throw new NotFoundError("No such account");
     }
 
-    return withTransaction(this.pool, async (tx) => {
+    return withTransaction(this.dataSource, async (tx) => {
       const removed = await this.roles.remove(tx, userId, role);
 
       if (removed) {

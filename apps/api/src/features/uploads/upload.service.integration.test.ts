@@ -11,7 +11,7 @@ import { createMetadataClient } from "../../integrations/metadata/metadata-clien
 import { createStorageClient, type StorageClient } from "../../integrations/storage/storage-client.js";
 import { migrate } from "../../lib/database/migrations.js";
 import { withTransaction } from "../../lib/database/transaction.js";
-import { createDatabase, type Database } from "../../lib/database/postgres.js";
+import { connectDatabase, createDatabase, type Database } from "../../lib/database/postgres.js";
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
 import { createUser } from "../../testing/fixtures.js";
@@ -87,7 +87,8 @@ describe("uploads", () => {
       user: process.env.POSTGRES_USER ?? "chronologity",
       password: process.env.POSTGRES_PASSWORD ?? "chronologity",
     });
-    await migrate(database.pool);
+    await connectDatabase(database);
+    await migrate(database.dataSource);
 
     const admin = new S3Client({
       endpoint: storageConfig.endpoint,
@@ -111,7 +112,7 @@ describe("uploads", () => {
     admin.destroy();
 
     storage = createStorageClient(storageConfig);
-    repository = new UploadRepository(database.pool);
+    repository = new UploadRepository(database.dataSource);
     uploads = build({ metadata: createMetadataClient(), derivatives: createDerivativeClient() });
   });
 
@@ -127,7 +128,7 @@ describe("uploads", () => {
    * @returns The service.
    */
   function build(tools: { metadata?: MetadataClient; derivatives?: DerivativeClient } = {}) {
-    return new UploadService(database.pool, repository, storage, LIMITS, {
+    return new UploadService(database.dataSource, repository, storage, LIMITS, {
       ...tools,
       clock: () => now,
     });
@@ -143,12 +144,12 @@ describe("uploads", () => {
    * uploader's, so they are read from the row.
    */
   const progressOf = async (uploadId: string) => {
-    const { rows } = await database.pool.query<{
+    const rows: {
       attempts: number;
       checked_at: Date | null;
       failure_category: string | null;
       derivatives: string[] | null;
-    }>(
+    }[] = await database.dataSource.query(
       `SELECT attempts, checked_at, failure_category, derivatives
          FROM uploads WHERE upload_id = $1`,
       [uploadId],
@@ -162,7 +163,7 @@ describe("uploads", () => {
 
   /** How many arrivals have been enqueued for an upload. */
   const outboxRowsFor = async (uploadId: string): Promise<number> => {
-    const { rows } = await database.pool.query<{ count: string }>(
+    const rows: { count: string }[] = await database.dataSource.query(
       `SELECT count(*) FROM outbox_messages WHERE aggregate_id = $1`,
       [uploadId],
     );
@@ -179,9 +180,11 @@ describe("uploads", () => {
    */
   const waitForUploadLock = async (): Promise<void> => {
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      const { rows } = await database.pool.query(
+      const rows = await database.dataSource.query(
+        // Matched loosely because the generated statement quotes and
+        // schema-qualifies the table: `UPDATE "public"."uploads" SET ...`.
         `SELECT 1 FROM pg_stat_activity
-          WHERE wait_event_type = 'Lock' AND query ILIKE '%update uploads%'`,
+          WHERE wait_event_type = 'Lock' AND query ILIKE '%update%uploads%'`,
       );
 
       if (rows.length > 0) {
@@ -196,7 +199,7 @@ describe("uploads", () => {
 
   /** Authorise an upload and write the bytes, stopping short of finalizing. */
   const upload = async (file: string, declaredKind: "image" | "video") => {
-    const { userId: ownerUserId } = await createUser(database.pool);
+    const { userId: ownerUserId } = await createUser(database.dataSource);
     const contentType = declaredKind === "image" ? "image/jpeg" : "video/mp4";
     const bytes = await readFile(fixture(file));
 
@@ -271,7 +274,8 @@ describe("uploads", () => {
       // the conditional update never has to settle anything. Here the
       // collision is arranged — the finalize below reads a registered upload,
       // and by the time its update runs the state has moved underneath it.
-      const other = await database.pool.connect();
+      const other = database.dataSource.createQueryRunner();
+      await other.connect();
 
       try {
         await other.query("BEGIN");
@@ -291,7 +295,7 @@ describe("uploads", () => {
         // a finalize that lost is not an error.
         await settling;
       } finally {
-        other.release();
+        await other.release();
       }
 
       assert.equal(
@@ -417,7 +421,7 @@ describe("uploads", () => {
       // What a resumed check sees: the previous attempt produced everything
       // but did not get to record readiness. The union is seeded from the row,
       // so nothing is produced a second time.
-      await database.pool.query(
+      await database.dataSource.query(
         `UPDATE uploads SET derivatives = $2 WHERE upload_id = $1`,
         [uploadId, ["thumbnail"]],
       );
@@ -457,7 +461,7 @@ describe("uploads", () => {
       // must still be recorded rather than lost to a null.
       const { uploadId } = await upload("photo.jpg", "image");
 
-      const moved = await withTransaction(database.pool, (tx) =>
+      const moved = await withTransaction(database.dataSource, (tx) =>
         repository.markReceived(tx, {
           uploadId,
           byteSize: 1234,
@@ -482,7 +486,7 @@ describe("uploads", () => {
     });
 
     it("counts no attempts against an upload that does not exist", async () => {
-      const attempts = await withTransaction(database.pool, (tx) =>
+      const attempts = await withTransaction(database.dataSource, (tx) =>
         repository.countAttempt(tx, randomUUID(), new Date()),
       );
 

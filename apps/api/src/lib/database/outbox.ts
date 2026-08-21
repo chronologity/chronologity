@@ -1,6 +1,7 @@
-import type pg from "pg";
+import { IsNull, type DataSource } from "typeorm";
 import type { EventMetadata } from "../../types/event-metadata.js";
 import { generateId } from "../ids/generate-id.js";
+import { OutboxMessage as OutboxRow } from "./outbox.model.js";
 import type { Transaction } from "./transaction.js";
 
 /**
@@ -15,6 +16,11 @@ import type { Transaction } from "./transaction.js";
  *
  * Publication is deliberately asynchronous. A writer that waited for Kafka
  * would be back to coupling the two systems it just decoupled.
+ *
+ * The publisher claims a batch with `FOR UPDATE SKIP LOCKED`, which is the
+ * whole mechanism preventing two publishers from sending the same message. It
+ * is expressed here as a lock on the query rather than as hand-written SQL,
+ * and the driver refuses to take it outside a transaction.
  */
 
 /** The entity a message is about, as the Kafka envelope names it. */
@@ -53,12 +59,10 @@ export interface EnqueueOptions extends MessageSubject {
 /**
  * Write an integration event inside the caller's transaction.
  *
- * Takes a `Transaction`, not a pool, so it is impossible to enqueue outside
- * the transaction the state change belongs to.
+ * Takes a transaction, not a client, so it is impossible to enqueue outside the
+ * transaction the state change belongs to.
  *
  * @param tx - The transaction carrying the state change this event describes.
- *   Taking a transaction rather than a pool makes it impossible to enqueue
- *   outside it.
  * @param options - Topic, partition key, event type and version, payload,
  *   metadata, and which entity the message is about.
  * @returns The new message's identifier.
@@ -69,24 +73,25 @@ export async function enqueueOutboxMessage(
 ): Promise<string> {
   const id = generateId();
 
-  await tx.query(
-    `INSERT INTO outbox_messages
-       (id, topic, partition_key, event_type, event_version, payload, metadata,
-        aggregate_type, aggregate_id, aggregate_version)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-    [
-      id,
-      options.topic,
-      options.partitionKey,
-      options.eventType,
-      options.eventVersion,
-      JSON.stringify(options.payload),
-      JSON.stringify(options.metadata),
-      options.aggregateType,
-      options.aggregateId,
-      options.aggregateVersion,
-    ],
-  );
+  await tx.insert(OutboxRow, {
+    id,
+    topic: options.topic,
+    partitionKey: options.partitionKey,
+    eventType: options.eventType,
+    eventVersion: options.eventVersion,
+    // `jsonb` columns, which the driver serialises. The payload is whatever the
+    // publishing service constructed, deliberately not typed here: the envelope
+    // is this module's concern and the contents are the feature's.
+    payload: options.payload as object,
+    metadata: options.metadata,
+    aggregateType: options.aggregateType,
+    aggregateId: options.aggregateId,
+    aggregateVersion: options.aggregateVersion,
+    createdAt: new Date(),
+    publishedAt: null,
+    attempts: 0,
+    lastError: null,
+  });
 
   return id;
 }
@@ -106,39 +111,29 @@ export async function enqueueOutboxMessage(
  *   until the transaction ends.
  */
 export async function claimOutboxBatch(tx: Transaction, limit: number): Promise<OutboxMessage[]> {
-  const { rows } = await tx.query<{
-    id: string;
-    topic: string;
-    partition_key: string;
-    event_type: string;
-    event_version: number;
-    payload: unknown;
-    metadata: EventMetadata;
-    aggregate_type: string;
-    aggregate_id: string;
-    aggregate_version: number;
-  }>(
-    `SELECT id, topic, partition_key, event_type, event_version, payload, metadata,
-            aggregate_type, aggregate_id, aggregate_version
-       FROM outbox_messages
-      WHERE published_at IS NULL
-      ORDER BY created_at
-      LIMIT $1
-      FOR UPDATE SKIP LOCKED`,
-    [limit],
-  );
+  // `SKIP LOCKED` is what lets publishers run concurrently: a row another
+  // publisher already holds is passed over rather than waited for. Without it
+  // they would queue behind each other, or worse, both send the same message.
+  const rows = await tx
+    .createQueryBuilder(OutboxRow, "message")
+    .setLock("pessimistic_write")
+    .setOnLocked("skip_locked")
+    .where("message.publishedAt IS NULL")
+    .orderBy("message.createdAt")
+    .limit(limit)
+    .getMany();
 
   return rows.map((row) => ({
     id: row.id,
     topic: row.topic,
-    partitionKey: row.partition_key,
-    eventType: row.event_type,
-    eventVersion: row.event_version,
+    partitionKey: row.partitionKey,
+    eventType: row.eventType,
+    eventVersion: row.eventVersion,
     payload: row.payload,
-    metadata: row.metadata,
-    aggregateType: row.aggregate_type,
-    aggregateId: row.aggregate_id,
-    aggregateVersion: row.aggregate_version,
+    metadata: row.metadata as unknown as EventMetadata,
+    aggregateType: row.aggregateType,
+    aggregateId: row.aggregateId,
+    aggregateVersion: row.aggregateVersion,
   }));
 }
 
@@ -155,9 +150,7 @@ export async function markPublished(tx: Transaction, ids: readonly string[]): Pr
     return;
   }
 
-  await tx.query(`UPDATE outbox_messages SET published_at = now() WHERE id = ANY($1::uuid[])`, [
-    [...ids],
-  ]);
+  await tx.update(OutboxRow, [...ids], { publishedAt: () => "now()" });
 }
 
 /**
@@ -175,26 +168,19 @@ export async function markPublished(tx: Transaction, ids: readonly string[]): Pr
  * @returns Nothing.
  */
 export async function markFailed(tx: Transaction, id: string, error: string): Promise<void> {
-  await tx.query(
-    `UPDATE outbox_messages
-        SET attempts = attempts + 1,
-            last_error = $2
-      WHERE id = $1`,
-    [id, error.slice(0, 1000)],
-  );
+  await tx.update(OutboxRow, id, {
+    attempts: () => "attempts + 1",
+    lastError: error.slice(0, 1000),
+  });
 }
 
 /**
  * Count unpublished messages. Publication backlog is an operational signal.
  *
- * @param pool - Read-only use.
+ * @param dataSource - Read-only use.
  * @returns How many messages are waiting. Publication backlog is an operational
  *   signal.
  */
-export async function countPending(pool: pg.Pool): Promise<number> {
-  const { rows } = await pool.query<{ count: string }>(
-    `SELECT count(*)::text AS count FROM outbox_messages WHERE published_at IS NULL`,
-  );
-
-  return Number(rows[0]?.count ?? "0");
+export async function countPending(dataSource: DataSource): Promise<number> {
+  return dataSource.getRepository(OutboxRow).countBy({ publishedAt: IsNull() });
 }

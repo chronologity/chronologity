@@ -1,6 +1,11 @@
+// Before anything that declares an entity: TypeORM's decorators register
+// themselves through the metadata reflection API, which is a polyfill rather
+// than something the runtime provides.
+import "reflect-metadata";
+
 import { ConfigurationError } from "@chronologity/config";
 import { loadConfig } from "../config/app-config.js";
-import { createDatabase } from "../lib/database/postgres.js";
+import { connectDatabase, createDatabase } from "../lib/database/postgres.js";
 import { migrate } from "../lib/database/migrations.js";
 
 /**
@@ -14,9 +19,10 @@ import { migrate } from "../lib/database/migrations.js";
 try {
   const config = loadConfig();
   const database = createDatabase(config.database);
+  await connectDatabase(database);
 
   try {
-    const { applied, alreadyApplied } = await migrate(database.pool);
+    const { applied, alreadyApplied } = await migrate(database.dataSource);
 
     if (applied.length === 0) {
       process.stdout.write(`No pending migrations (${alreadyApplied} already applied)\n`);

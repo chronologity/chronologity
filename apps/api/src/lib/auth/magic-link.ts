@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto";
+import { LessThan } from "typeorm";
+import { MagicLinkToken } from "../../features/authentication/identity.model.js";
 import type { Transaction } from "../database/transaction.js";
 import { hashToken } from "./tokens.js";
 
@@ -49,11 +51,14 @@ export async function issueMagicLink(
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(input.now.getTime() + input.ttlSeconds * 1000);
 
-  await tx.query(
-    `INSERT INTO magic_link_tokens (token_hash, email, purpose, expires_at)
-     VALUES ($1, $2, $3, $4)`,
-    [hashToken(token), input.email, input.purpose, expiresAt.toISOString()],
-  );
+  await tx.insert(MagicLinkToken, {
+    tokenHash: hashToken(token),
+    email: input.email,
+    purpose: input.purpose,
+    expiresAt,
+    consumedAt: null,
+    createdAt: input.now,
+  });
 
   return { token, expiresAt };
 }
@@ -77,18 +82,22 @@ export async function consumeMagicLink(
   tx: Transaction,
   input: { token: string; purpose: MagicLinkPurpose; now: Date },
 ): Promise<ConsumedMagicLink | undefined> {
-  const { rows } = await tx.query<{ email: string; purpose: MagicLinkPurpose }>(
-    `UPDATE magic_link_tokens
-        SET consumed_at = $4
-      WHERE token_hash = $1
-        AND purpose = $2
-        AND consumed_at IS NULL
-        AND expires_at > $3
-      RETURNING email, purpose`,
-    [hashToken(input.token), input.purpose, input.now.toISOString(), input.now.toISOString()],
-  );
+  const consumed = await tx
+    .createQueryBuilder()
+    .update(MagicLinkToken)
+    .set({ consumedAt: input.now })
+    .where("token_hash = :tokenHash", { tokenHash: hashToken(input.token) })
+    .andWhere("purpose = :purpose", { purpose: input.purpose })
+    .andWhere("consumed_at IS NULL")
+    .andWhere("expires_at > :now", { now: input.now })
+    .returning(["email", "purpose"])
+    .execute();
 
-  return rows[0];
+  const row = (consumed.raw as { email: string; purpose: string }[])[0];
+
+  return row === undefined
+    ? undefined
+    : { email: row.email, purpose: row.purpose as MagicLinkPurpose };
 }
 
 /**
@@ -102,9 +111,7 @@ export async function consumeMagicLink(
  * @returns How many rows were removed.
  */
 export async function purgeExpiredMagicLinks(tx: Transaction, now: Date): Promise<number> {
-  const result = await tx.query(`DELETE FROM magic_link_tokens WHERE expires_at < $1`, [
-    now.toISOString(),
-  ]);
+  const { affected } = await tx.delete(MagicLinkToken, { expiresAt: LessThan(now) });
 
-  return result.rowCount ?? 0;
+  return affected ?? 0;
 }

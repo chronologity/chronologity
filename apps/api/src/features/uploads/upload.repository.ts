@@ -1,7 +1,8 @@
 import type { DerivativeKind, MediaKind, Upload, UploadState } from "@chronologity/contracts";
 import type { UploadRecord, UploadStatus } from "./upload.types.js";
-import type pg from "pg";
+import { In, Not, type DataSource } from "typeorm";
 import type { Transaction } from "../../lib/database/transaction.js";
+import { Upload as UploadRow } from "./upload.model.js";
 
 /**
  * Where uploads are stored.
@@ -16,26 +17,6 @@ import type { Transaction } from "../../lib/database/transaction.js";
  * the one whose `WHERE` clause still matched actually changed anything.
  */
 
-interface UploadRow {
-  upload_id: string;
-  kind: string;
-  state: string;
-  declared_content_type: string;
-  declared_byte_size: string;
-  byte_size: string | null;
-  content_type: string | null;
-  checksum: string | null;
-  failure_reason: string | null;
-  media_kind: string | null;
-  derivatives: string[];
-  width: number | null;
-  height: number | null;
-  duration_seconds: string | null;
-  registered_at: Date;
-  expires_at: Date;
-  received_at: Date | null;
-}
-
 /**
  * Shape a row into the boundary contract.
  *
@@ -46,44 +27,38 @@ interface UploadRow {
  */
 function toUpload(row: UploadRow): Upload {
   return {
-    uploadId: row.upload_id,
+    uploadId: row.uploadId,
     kind: row.kind as MediaKind,
     state: row.state as UploadState,
-    declaredContentType: row.declared_content_type,
-    // bigint arrives as a string, since it can exceed what a number holds
-    // exactly. File sizes never will, so converting here is safe.
-    declaredByteSize: Number(row.declared_byte_size),
-    byteSize: row.byte_size === null ? null : Number(row.byte_size),
-    contentType: row.content_type,
+    declaredContentType: row.declaredContentType,
+    // `bigint` and `numeric` columns arrive as strings, since either can hold
+    // more than a number represents exactly. File sizes and durations never
+    // will, so converting here is safe.
+    declaredByteSize: Number(row.declaredByteSize),
+    byteSize: row.byteSize === null ? null : Number(row.byteSize),
+    contentType: row.contentType,
     checksum: row.checksum,
-    failureReason: row.failure_reason,
-    mediaKind: row.media_kind === null ? null : (row.media_kind as MediaKind),
+    failureReason: row.failureReason,
+    mediaKind: row.mediaKind === null ? null : (row.mediaKind as MediaKind),
     derivatives: row.derivatives as DerivativeKind[],
     width: row.width,
     height: row.height,
-    // numeric arrives as a string, since it can hold more precision than a
-    // number. Durations never will, so converting here is safe.
-    durationSeconds: row.duration_seconds === null ? null : Number(row.duration_seconds),
-    registeredAt: row.registered_at.toISOString(),
-    expiresAt: row.expires_at.toISOString(),
-    receivedAt: row.received_at?.toISOString() ?? null,
+    durationSeconds: row.durationSeconds === null ? null : Number(row.durationSeconds),
+    registeredAt: row.registeredAt.toISOString(),
+    expiresAt: row.expiresAt.toISOString(),
+    receivedAt: row.receivedAt?.toISOString() ?? null,
   };
 }
-
-const COLUMNS = `upload_id, kind, state, declared_content_type, declared_byte_size,
-                 byte_size, content_type, checksum, failure_reason,
-                 media_kind, derivatives, width, height, duration_seconds,
-                 registered_at, expires_at, received_at`;
 
 /** Reads and writes uploads. */
 export class UploadRepository {
   /**
    * Build the Upload repository.
    *
-   * @param pool - Used for reads. Writes take a transaction, so a state change
-   *   and the message announcing it cannot commit separately.
+   * @param dataSource - Used for reads. Writes take a transaction, so a state
+   *   change and the message announcing it cannot commit separately.
    */
-  constructor(private readonly pool: pg.Pool) {}
+  constructor(private readonly dataSource: DataSource) {}
 
   /**
    * Read the stored state a transition is decided against.
@@ -95,34 +70,31 @@ export class UploadRepository {
    *   path treats it as success rather than absence.
    */
   async findRecord(uploadId: string): Promise<UploadRecord | undefined> {
-    const { rows } = await this.pool.query<{
-      upload_id: string;
-      owner_user_id: string;
-      kind: string;
-      storage_key: string;
-      derivatives: string[];
-      state: string;
-      expires_at: Date;
-    }>(
-      `SELECT upload_id, owner_user_id, kind, storage_key, derivatives, state, expires_at
-         FROM uploads WHERE upload_id = $1`,
-      [uploadId],
-    );
+    const row = await this.dataSource.getRepository(UploadRow).findOne({
+      where: { uploadId },
+      select: {
+        uploadId: true,
+        ownerUserId: true,
+        kind: true,
+        storageKey: true,
+        derivatives: true,
+        state: true,
+        expiresAt: true,
+      },
+    });
 
-    const row = rows[0];
-
-    if (row === undefined) {
+    if (row === null) {
       return undefined;
     }
 
     return {
-      uploadId: row.upload_id,
-      ownerUserId: row.owner_user_id,
+      uploadId: row.uploadId,
+      ownerUserId: row.ownerUserId,
       kind: row.kind as MediaKind,
-      storageKey: row.storage_key,
+      storageKey: row.storageKey,
       derivatives: row.derivatives as DerivativeKind[],
       status: row.state as UploadStatus,
-      expiresAt: row.expires_at,
+      expiresAt: row.expiresAt,
     };
   }
 
@@ -146,22 +118,18 @@ export class UploadRepository {
       expiresAt: Date;
     },
   ): Promise<void> {
-    await tx.query(
-      `INSERT INTO uploads
-         (upload_id, owner_user_id, kind, state, declared_content_type, declared_byte_size,
-          storage_key, registered_at, expires_at)
-       VALUES ($1, $2, $3, 'registered', $4, $5, $6, $7, $8)`,
-      [
-        input.uploadId,
-        input.ownerUserId,
-        input.kind,
-        input.declaredContentType,
-        input.declaredByteSize,
-        input.storageKey,
-        input.registeredAt.toISOString(),
-        input.expiresAt.toISOString(),
-      ],
-    );
+    await tx.insert(UploadRow, {
+      uploadId: input.uploadId,
+      ownerUserId: input.ownerUserId,
+      kind: input.kind,
+      state: "registered",
+      declaredContentType: input.declaredContentType,
+      declaredByteSize: String(input.declaredByteSize),
+      storageKey: input.storageKey,
+      registeredAt: input.registeredAt,
+      expiresAt: input.expiresAt,
+      updatedAt: input.registeredAt,
+    });
   }
 
   /**
@@ -183,21 +151,22 @@ export class UploadRepository {
       receivedAt: Date;
     },
   ): Promise<boolean> {
-    const { rowCount } = await tx.query(
-      `UPDATE uploads
-          SET state = 'received', byte_size = $2, content_type = $3, checksum = $4,
-              received_at = $5, updated_at = now()
-        WHERE upload_id = $1 AND state = 'registered'`,
-      [
-        input.uploadId,
-        input.byteSize,
-        input.contentType ?? null,
-        input.checksum ?? null,
-        input.receivedAt.toISOString(),
-      ],
+    // The state it must move from is part of the condition rather than
+    // something read first, which is what makes a retried finalize safe.
+    const { affected } = await tx.update(
+      UploadRow,
+      { uploadId: input.uploadId, state: "registered" },
+      {
+        state: "received",
+        byteSize: String(input.byteSize),
+        contentType: input.contentType ?? null,
+        checksum: input.checksum ?? null,
+        receivedAt: input.receivedAt,
+        updatedAt: new Date(),
+      },
     );
 
-    return rowCount === 1;
+    return affected === 1;
   }
 
   /**
@@ -228,28 +197,28 @@ export class UploadRepository {
     // whose derivatives went missing between them. The measured kind is written
     // to `media_kind` rather than over `kind`, which keeps what the uploader
     // declared alongside what was actually found.
-    const { rowCount } = await tx.query(
-      `UPDATE uploads
-          SET state = 'ready', media_kind = $2, codec = $3, container = $4,
-              width = $5, height = $6, duration_seconds = $7, has_audio = $8,
-              derivatives = $9, derived_at = $10, checked_at = $10,
-              failure_reason = NULL, failure_category = NULL, updated_at = now()
-        WHERE upload_id = $1 AND state = 'received'`,
-      [
-        input.uploadId,
-        input.kind,
-        input.codec,
-        input.container,
-        input.width,
-        input.height,
-        input.durationSeconds ?? null,
-        input.hasAudio,
-        input.derivatives,
-        input.checkedAt.toISOString(),
-      ],
+    const { affected } = await tx.update(
+      UploadRow,
+      { uploadId: input.uploadId, state: "received" },
+      {
+        state: "ready",
+        mediaKind: input.kind,
+        codec: input.codec,
+        container: input.container,
+        width: input.width,
+        height: input.height,
+        durationSeconds: input.durationSeconds === undefined ? null : String(input.durationSeconds),
+        hasAudio: input.hasAudio,
+        derivatives: [...input.derivatives],
+        derivedAt: input.checkedAt,
+        checkedAt: input.checkedAt,
+        failureReason: null,
+        failureCategory: null,
+        updatedAt: new Date(),
+      },
     );
 
-    return rowCount === 1;
+    return affected === 1;
   }
 
   /**
@@ -270,14 +239,18 @@ export class UploadRepository {
     reason: string,
     category: "transient" | "permanent" = "permanent",
   ): Promise<boolean> {
-    const { rowCount } = await tx.query(
-      `UPDATE uploads
-          SET state = 'failed', failure_reason = $2, failure_category = $3, updated_at = now()
-        WHERE upload_id = $1 AND state NOT IN ('failed', 'deleted')`,
-      [uploadId, reason, category],
+    const { affected } = await tx.update(
+      UploadRow,
+      { uploadId, state: Not(In(["failed", "deleted"])) },
+      {
+        state: "failed",
+        failureReason: reason,
+        failureCategory: category,
+        updatedAt: new Date(),
+      },
     );
 
-    return rowCount === 1;
+    return affected === 1;
   }
 
   /**
@@ -293,13 +266,13 @@ export class UploadRepository {
    *   deliberately cannot tell apart.
    */
   async markDeleted(tx: Transaction, uploadId: string, ownerUserId: string): Promise<boolean> {
-    const { rowCount } = await tx.query(
-      `UPDATE uploads SET state = 'deleted', updated_at = now()
-        WHERE upload_id = $1 AND owner_user_id = $2 AND state <> 'deleted'`,
-      [uploadId, ownerUserId],
+    const { affected } = await tx.update(
+      UploadRow,
+      { uploadId, ownerUserId, state: Not("deleted") },
+      { state: "deleted", updatedAt: new Date() },
     );
 
-    return rowCount === 1;
+    return affected === 1;
   }
 
   /**
@@ -315,14 +288,15 @@ export class UploadRepository {
    * @returns How many attempts have now been made, including this one.
    */
   async countAttempt(tx: Transaction, uploadId: string, at: Date): Promise<number> {
-    const { rows } = await tx.query<{ attempts: number }>(
-      `UPDATE uploads SET attempts = attempts + 1, last_attempt_at = $2, updated_at = now()
-        WHERE upload_id = $1
-        RETURNING attempts`,
-      [uploadId, at.toISOString()],
-    );
+    const counted = await tx
+      .createQueryBuilder()
+      .update(UploadRow)
+      .set({ attempts: () => "attempts + 1", lastAttemptAt: at, updatedAt: new Date() })
+      .where("upload_id = :uploadId", { uploadId })
+      .returning(["attempts"])
+      .execute();
 
-    return rows[0]?.attempts ?? 0;
+    return (counted.raw as { attempts: number }[])[0]?.attempts ?? 0;
   }
 
   /**
@@ -332,14 +306,9 @@ export class UploadRepository {
    * @returns The Upload, or undefined if there is no such row.
    */
   async findById(uploadId: string): Promise<Upload | undefined> {
-    const { rows } = await this.pool.query<UploadRow>(
-      `SELECT ${COLUMNS} FROM uploads WHERE upload_id = $1`,
-      [uploadId],
-    );
+    const row = await this.dataSource.getRepository(UploadRow).findOneBy({ uploadId });
 
-    const row = rows[0];
-
-    return row === undefined ? undefined : toUpload(row);
+    return row === null ? undefined : toUpload(row);
   }
 
   /**
@@ -351,13 +320,11 @@ export class UploadRepository {
    *   them to be gone.
    */
   async findForOwner(ownerUserId: string, limit: number): Promise<Upload[]> {
-    const { rows } = await this.pool.query<UploadRow>(
-      `SELECT ${COLUMNS} FROM uploads
-        WHERE owner_user_id = $1 AND state <> 'deleted'
-        ORDER BY registered_at DESC
-        LIMIT $2`,
-      [ownerUserId, limit],
-    );
+    const rows = await this.dataSource.getRepository(UploadRow).find({
+      where: { ownerUserId, state: Not("deleted") },
+      order: { registeredAt: "DESC" },
+      take: limit,
+    });
 
     return rows.map(toUpload);
   }

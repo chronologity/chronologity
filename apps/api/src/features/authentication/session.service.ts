@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { SessionCredentials, SessionSummary } from "@chronologity/contracts";
-import type pg from "pg";
+import type { DataSource } from "typeorm";
 import { recordAuthAudit } from "../../lib/auth/audit.js";
 import { generateRefreshToken, hashToken, issueAccessToken } from "../../lib/auth/tokens.js";
 import type { AuthConfig } from "../../config/auth-config.js";
@@ -30,7 +30,7 @@ export class SessionService {
   /**
    * Build the Session service.
    *
-   * @param pool - Opens the transactions this service's writes commit in.
+   * @param dataSource - Opens the transactions this service's writes commit in.
    * @param sessions - Where Sessions are stored.
    * @param accounts - Resolves an Identity to its User, so an access token can
    *   carry it.
@@ -38,7 +38,7 @@ export class SessionService {
    * @param clock - Injected so tests can move time without waiting.
    */
   constructor(
-    private readonly pool: pg.Pool,
+    private readonly dataSource: DataSource,
     private readonly sessions: SessionRepository,
     private readonly accounts: UserRepository,
     private readonly config: AuthConfig,
@@ -81,7 +81,7 @@ export class SessionService {
       at,
     );
 
-    await withTransaction(this.pool, async (tx) => {
+    await withTransaction(this.dataSource, async (tx) => {
       await this.sessions.insert(tx, {
         sessionId,
         identityId: input.identityId,
@@ -144,7 +144,7 @@ export class SessionService {
     const presentedTokenHash = hashToken(refreshToken);
     const replacement = generateRefreshToken(this.config, at);
 
-    const rotated = await withTransaction(this.pool, async (tx) => {
+    const rotated = await withTransaction(this.dataSource, async (tx) => {
       const result = await this.sessions.rotate(tx, {
         sessionId,
         presentedTokenHash,
@@ -237,7 +237,7 @@ export class SessionService {
       throw new UnauthenticatedError("Session could not be revoked");
     }
 
-    await withTransaction(this.pool, async (tx) => {
+    await withTransaction(this.dataSource, async (tx) => {
       await this.sessions.revoke(tx, sessionId, reason, at);
       await recordAuthAudit(tx, {
         eventType: "session_revoked",
@@ -265,7 +265,7 @@ export class SessionService {
     const at = this.clock();
     const { identityId, reason, exceptSessionId, context } = input;
 
-    return withTransaction(this.pool, async (tx) => {
+    return withTransaction(this.dataSource, async (tx) => {
       const revoked = await this.sessions.revokeAll(tx, {
         identityId,
         reason,

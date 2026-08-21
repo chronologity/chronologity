@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { AppConfig } from "../../config/app-config.js";
 import { migrate } from "../../lib/database/migrations.js";
-import { createDatabase, type Database } from "../../lib/database/postgres.js";
+import { connectDatabase, createDatabase, type Database } from "../../lib/database/postgres.js";
 import { buildApp } from "../../server/app.js";
 import { createTestAuthentication, type TestAuthentication } from "../../testing/authentication.js";
 import { UserRepository } from "./user.repository.js";
@@ -90,13 +90,14 @@ describe("users", () => {
 
   beforeAll(async () => {
     database = createDatabase(config.database);
-    await migrate(database.pool);
+    await connectDatabase(database);
+    await migrate(database.dataSource);
 
-    authentication = createTestAuthentication(database.pool, config.auth, config.email);
+    authentication = createTestAuthentication(database.dataSource, config.auth, config.email);
 
     // No injected clock: nothing here manipulates time. The handle cooldown is
     // exercised by claiming during it, which needs no clock at all.
-    users = new UserService(database.pool, new UserRepository(database.pool), {
+    users = new UserService(database.dataSource, new UserRepository(database.dataSource), {
       minimumAgeYears: config.minimumAgeYears,
     });
 
@@ -327,7 +328,7 @@ describe("users", () => {
       assert.equal(refused.statusCode, 400);
 
       // The handle was never claimed, so it is still there for someone else.
-      const { rows } = await database.pool.query(
+      const rows = await database.dataSource.query(
         `SELECT 1 FROM user_handles WHERE normalized_handle = $1`,
         [handle.toLowerCase()],
       );
@@ -360,7 +361,7 @@ describe("users", () => {
       // somebody asks for their data to be deleted.
       const { user } = await onboard();
 
-      const { rows } = await database.pool.query<{ payload: unknown; metadata: unknown }>(
+      const rows: { payload: unknown; metadata: unknown }[] = await database.dataSource.query(
         `SELECT payload, metadata FROM outbox_messages WHERE aggregate_id = $1`,
         [user.userId],
       );
@@ -374,7 +375,7 @@ describe("users", () => {
     it("records the threshold the account was admitted under", async () => {
       const { user } = await onboard();
 
-      const { rows } = await database.pool.query<{ minimum_age_at_creation: number }>(
+      const rows: { minimum_age_at_creation: number }[] = await database.dataSource.query(
         `SELECT minimum_age_at_creation FROM user_restricted_data WHERE user_id = $1`,
         [user.userId],
       );

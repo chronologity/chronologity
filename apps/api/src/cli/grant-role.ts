@@ -1,3 +1,8 @@
+// Before anything that declares an entity: TypeORM's decorators register
+// themselves through the metadata reflection API, which is a polyfill rather
+// than something the runtime provides.
+import "reflect-metadata";
+
 import { parseArgs } from "node:util";
 import { ConfigurationError } from "@chronologity/config";
 import { grantableRoleSchema } from "@chronologity/contracts";
@@ -5,7 +10,7 @@ import { loadConfig } from "../config/app-config.js";
 import { AuthorizationRepository } from "../features/authorization/authorization.repository.js";
 import { AuthorizationService } from "../features/authorization/authorization.service.js";
 import { normalizeHandle } from "../features/users/user.handle-policy.js";
-import { createDatabase } from "../lib/database/postgres.js";
+import { connectDatabase, createDatabase } from "../lib/database/postgres.js";
 import { generateTraceId } from "../lib/ids/generate-trace-id.js";
 import { systemContext } from "../types/request-context.js";
 
@@ -57,9 +62,10 @@ try {
   const role = parsedRole.data;
   const config = loadConfig();
   const database = createDatabase(config.database);
+  await connectDatabase(database);
 
   try {
-    const { rows } = await database.pool.query<{ user_id: string }>(
+    const rows: { user_id: string }[] = await database.dataSource.query(
       `SELECT user_id FROM user_handles WHERE normalized_handle = $1 AND released_at IS NULL`,
       [normalizeHandle(handle)],
     );
@@ -72,8 +78,8 @@ try {
     }
 
     const authorization = new AuthorizationService(
-      database.pool,
-      new AuthorizationRepository(database.pool),
+      database.dataSource,
+      new AuthorizationRepository(database.dataSource),
     );
     // System context: no actor, because there is no acting User. That is the
     // whole point of this command, and the audit row says so.

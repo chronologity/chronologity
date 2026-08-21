@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { migrate } from "../../lib/database/migrations.js";
-import { createDatabase, type Database } from "../../lib/database/postgres.js";
+import { connectDatabase, createDatabase, type Database } from "../../lib/database/postgres.js";
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
 import { createIdentity } from "../../testing/fixtures.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
+import { withTransaction } from "../../lib/database/transaction.js";
 import { UserRepository } from "./user.repository.js";
 import { UserService } from "./user.service.js";
 
@@ -45,9 +46,10 @@ describe("accounts", () => {
       user: process.env.POSTGRES_USER ?? "chronologity",
       password: process.env.POSTGRES_PASSWORD ?? "chronologity",
     });
-    await migrate(database.pool);
+    await connectDatabase(database);
+    await migrate(database.dataSource);
 
-    users = new UserService(database.pool, new UserRepository(database.pool), {
+    users = new UserService(database.dataSource, new UserRepository(database.dataSource), {
       minimumAgeYears: 13,
       handleCooldownDays: COOLDOWN_DAYS,
       clock: () => now,
@@ -60,7 +62,7 @@ describe("accounts", () => {
 
   /** An account, with the identity it belongs to and the handle it holds. */
   const account = async (handle = uniqueHandle()) => {
-    const identityId = await createIdentity(database.pool);
+    const identityId = await createIdentity(database.dataSource);
     const userId = await users.create(identityId, {
       handle,
       displayName: "A Person",
@@ -88,7 +90,7 @@ describe("accounts", () => {
       const { handle } = await account();
 
       await assert.rejects(
-        users.create(await createIdentity(database.pool), {
+        users.create(await createIdentity(database.dataSource), {
           handle,
           displayName: "Someone Else",
           dateOfBirth: "1990-01-01",
@@ -139,7 +141,7 @@ describe("accounts", () => {
 
       // Checked before the handle and before anything is written: someone below
       // the minimum should leave nothing behind but the audit of the attempt.
-      const { rows } = await database.pool.query(
+      const rows = await database.dataSource.query(
         `SELECT 1 FROM user_handles WHERE normalized_handle = $1`,
         [handle.toLowerCase()],
       );
@@ -152,7 +154,7 @@ describe("accounts", () => {
       // Every other test configures one. Nothing in the process is obliged to,
       // and an unconfigured age gate that admits everyone would be worse than
       // no gate at all, because it would look like one.
-      const unconfigured = new UserService(database.pool, new UserRepository(database.pool));
+      const unconfigured = new UserService(database.dataSource, new UserRepository(database.dataSource));
 
       await assert.rejects(
         unconfigured.create(randomUUID(), {
@@ -164,7 +166,7 @@ describe("accounts", () => {
       );
 
       await assert.doesNotReject(
-        unconfigured.create(await createIdentity(database.pool), {
+        unconfigured.create(await createIdentity(database.dataSource), {
           handle: uniqueHandle(),
           displayName: "Old Enough",
           dateOfBirth: "1990-01-01",
@@ -193,7 +195,7 @@ describe("accounts", () => {
       // Each contender is a real Identity: they are eight different people
       // reaching for one name, not one person racing themselves.
       const contenders = await Promise.all(
-        Array.from({ length: 8 }, () => createIdentity(database.pool)),
+        Array.from({ length: 8 }, () => createIdentity(database.dataSource)),
       );
 
       const attempts = await Promise.allSettled(
@@ -213,7 +215,7 @@ describe("accounts", () => {
         assert.ok((lost as PromiseRejectedResult).reason instanceof ValidationError);
       }
 
-      const { rows } = await database.pool.query<{ count: string }>(
+      const rows: { count: string }[] = await database.dataSource.query(
         `SELECT count(*) FROM user_handles WHERE normalized_handle = $1`,
         [handle.toLowerCase()],
       );
@@ -230,15 +232,12 @@ describe("accounts", () => {
       // by the read instead. Here the interleaving is arranged rather than
       // hoped for.
       const handle = uniqueHandle();
-      const repository = new UserRepository(database.pool);
+      const repository = new UserRepository(database.dataSource);
 
       // Two real accounts. A handle belongs to a User, so a contended claim is
       // two people reaching for one name rather than two invented identifiers.
       const first = await account();
       const second = await account();
-
-      const winner = await database.pool.connect();
-      const loser = await database.pool.connect();
 
       const claim = (userId: string) => ({
         handle,
@@ -248,37 +247,52 @@ describe("accounts", () => {
         cooldownDays: COOLDOWN_DAYS,
       });
 
-      try {
-        await winner.query("BEGIN");
-        await loser.query("BEGIN");
+      // Both transactions run at once, so each step that must happen before
+      // another is a promise one side resolves and the other awaits. Without
+      // them the interleaving would be down to timing, and a test that only
+      // sometimes reaches the branch it is written for proves nothing.
+      const claimed = gate();
+      const mayCommit = gate();
+      const loserPid = gate<number>();
 
+      const winner = withTransaction(database.dataSource, async (tx) => {
         // Each gives up the handle it currently holds first, exactly as
         // `updateHandle` does: a User may hold only one current handle, so a
         // contended claim is always two people mid-change.
-        await repository.releaseHandle(winner, first.handle.toLowerCase(), new Date());
-        await repository.releaseHandle(loser, second.handle.toLowerCase(), new Date());
+        await repository.releaseHandle(tx, first.handle.toLowerCase(), new Date());
 
-        const { rows } = await loser.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
-        const loserPid = rows[0]?.pid;
-        assert.ok(loserPid !== undefined);
+        const result = await repository.claimHandle(tx, claim(first.userId));
 
-        assert.deepEqual(await repository.claimHandle(winner, claim(first.userId)), { ok: true });
+        claimed.open();
+        await mayCommit.opened;
 
-        // Started, not awaited: its read finds the handle free, and its insert
-        // then blocks on the index entry the uncommitted claim holds.
-        const contested = repository.claimHandle(loser, claim(second.userId));
+        return result;
+      });
 
-        await waitForLock(loserPid);
-        await winner.query("COMMIT");
+      const loser = withTransaction(database.dataSource, async (tx) => {
+        await repository.releaseHandle(tx, second.handle.toLowerCase(), new Date());
 
-        assert.deepEqual(await contested, { ok: false, reason: "taken" });
-        await loser.query("COMMIT");
-      } finally {
-        winner.release();
-        loser.release();
-      }
+        const rows: { pid: number }[] = await tx.query("SELECT pg_backend_pid() AS pid");
+        const pid = rows[0]?.pid;
+        assert.ok(pid !== undefined);
+        loserPid.open(pid);
 
-      const { rows } = await database.pool.query<{ count: string }>(
+        // Its read finds the handle free, and its insert then blocks on the
+        // index entry the winner's uncommitted claim holds.
+        await claimed.opened;
+
+        return repository.claimHandle(tx, claim(second.userId));
+      });
+
+      await claimed.opened;
+      await waitForLock(await loserPid.opened);
+
+      mayCommit.open();
+
+      assert.deepEqual(await winner, { ok: true });
+      assert.deepEqual(await loser, { ok: false, reason: "taken" });
+
+      const rows: { count: string }[] = await database.dataSource.query(
         `SELECT count(*) FROM user_handles WHERE normalized_handle = $1`,
         [handle.toLowerCase()],
       );
@@ -416,26 +430,26 @@ describe("accounts", () => {
     it("treats a restyle as presentation rather than taking the handle again", async () => {
       const { userId, handle } = await account();
 
-      const before = await database.pool.query<{ assigned_at: Date }>(
+      const before = await database.dataSource.query(
         `SELECT assigned_at FROM user_handles WHERE normalized_handle = $1`,
         [handle.toLowerCase()],
       );
 
       await users.updateHandle(userId, handle.toUpperCase());
 
-      const after = await database.pool.query<{ assigned_at: Date; released_at: Date | null }>(
+      const after = await database.dataSource.query(
         `SELECT assigned_at, released_at FROM user_handles WHERE normalized_handle = $1`,
         [handle.toLowerCase()],
       );
 
       // The moment it was acquired stands: it was not acquired again. Moving it
       // would restart a cooldown measured from the wrong instant.
-      assert.deepEqual(after.rows[0]?.assigned_at, before.rows[0]?.assigned_at);
-      assert.equal(after.rows[0]?.released_at, null);
+      assert.deepEqual(after[0]?.assigned_at, before[0]?.assigned_at);
+      assert.equal(after[0]?.released_at, null);
 
       // And no second row: a restyle must not leave the old casing behind as a
       // released handle nobody can claim.
-      const { rows } = await database.pool.query<{ count: string }>(
+      const rows: { count: string }[] = await database.dataSource.query(
         `SELECT count(*) FROM user_handles WHERE user_id = $1`,
         [userId],
       );
@@ -466,7 +480,7 @@ describe("accounts", () => {
 
       await users.updateHandle(userId, replacement);
 
-      const { rows } = await database.pool.query<{ normalized_handle: string }>(
+      const rows: { normalized_handle: string }[] = await database.dataSource.query(
         `SELECT normalized_handle FROM user_handles
           WHERE user_id = $1 AND released_at IS NULL`,
         [userId],
@@ -585,7 +599,7 @@ describe("accounts", () => {
       // lives in its own table so that it can be removed without touching the
       // profile. An account in that state is not a profile with a missing
       // optional field, and answering with a plausible blank would hide it.
-      await database.pool.query(`DELETE FROM user_restricted_data WHERE user_id = $1`, [userId]);
+      await database.dataSource.query(`DELETE FROM user_restricted_data WHERE user_id = $1`, [userId]);
 
       await assert.rejects(users.getAccount(userId), /No restricted data recorded/);
     });
@@ -599,9 +613,23 @@ describe("accounts", () => {
    * @throws {Error} If it never blocks, which means the interleaving the test
    *   depends on did not happen and the result would prove nothing.
    */
+  /**
+   * A promise something else decides when to resolve.
+   *
+   * @returns The promise, and the means to resolve it.
+   */
+  function gate<Value = void>(): { opened: Promise<Value>; open: (value: Value) => void } {
+    let open!: (value: Value) => void;
+    const opened = new Promise<Value>((resolve) => {
+      open = resolve;
+    });
+
+    return { opened, open };
+  }
+
   async function waitForLock(pid: number): Promise<void> {
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      const { rows } = await database.pool.query(
+      const rows = await database.dataSource.query(
         `SELECT 1 FROM pg_stat_activity WHERE pid = $1 AND wait_event_type = 'Lock'`,
         [pid],
       );

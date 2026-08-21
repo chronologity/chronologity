@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { AppConfig } from "../../config/app-config.js";
 import { migrate } from "../../lib/database/migrations.js";
-import { createDatabase, type Database } from "../../lib/database/postgres.js";
+import { connectDatabase, createDatabase, type Database } from "../../lib/database/postgres.js";
 import { withTransaction } from "../../lib/database/transaction.js";
 import { buildApp } from "../../server/app.js";
 import { createTestAuthentication, type TestAuthentication } from "../../testing/authentication.js";
@@ -92,16 +92,17 @@ describe("authorization", () => {
 
   beforeAll(async () => {
     database = createDatabase(config.database);
-    await migrate(database.pool);
+    await connectDatabase(database);
+    await migrate(database.dataSource);
 
-    authentication = createTestAuthentication(database.pool, config.auth, config.email);
+    authentication = createTestAuthentication(database.dataSource, config.auth, config.email);
 
-    users = new UserService(database.pool, new UserRepository(database.pool), {
+    users = new UserService(database.dataSource, new UserRepository(database.dataSource), {
       minimumAgeYears: config.minimumAgeYears,
     });
 
-    roles = new AuthorizationRepository(database.pool);
-    authorization = new AuthorizationService(database.pool, roles);
+    roles = new AuthorizationRepository(database.dataSource);
+    authorization = new AuthorizationService(database.dataSource, roles);
 
     app = await buildApp({ config, dependencies: [], authentication, users, authorization });
   });
@@ -375,9 +376,9 @@ describe("authorization", () => {
       // Such a change has no trace to attribute it to, and must still leave
       // evidence: audit is where privileged operations are accounted for.
       const subject = await onboard();
-      const roles = new AuthorizationRepository(database.pool);
+      const roles = new AuthorizationRepository(database.dataSource);
 
-      await withTransaction(database.pool, (tx) =>
+      await withTransaction(database.dataSource, (tx) =>
         roles.recordAudit(tx, {
           eventType: "user_role_assigned",
           outcome: "success",
@@ -389,7 +390,7 @@ describe("authorization", () => {
         }),
       );
 
-      const { rows } = await database.pool.query<{ trace_id: string | null; context: unknown }>(
+      const rows: { trace_id: string | null; context: unknown }[] = await database.dataSource.query(
         `SELECT trace_id, context FROM authorization_audit_events WHERE subject_user_id = $1`,
         [subject.user.userId],
       );

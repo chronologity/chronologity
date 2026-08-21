@@ -5,7 +5,7 @@ import type { FastifyInstance } from "fastify";
 import type { AppConfig } from "../../config/app-config.js";
 import { createRecordedPlaceSearchClient } from "../../integrations/places/recorded-place-search-client.js";
 import { migrate } from "../../lib/database/migrations.js";
-import { createDatabase, type Database } from "../../lib/database/postgres.js";
+import { connectDatabase, createDatabase, type Database } from "../../lib/database/postgres.js";
 import { buildApp } from "../../server/app.js";
 import { createTestAuthentication, type TestAuthentication } from "../../testing/authentication.js";
 import { UserRepository } from "../users/user.repository.js";
@@ -93,20 +93,21 @@ describe("location endpoints", () => {
 
   beforeAll(async () => {
     database = createDatabase(config.database);
-    await migrate(database.pool);
+    await connectDatabase(database);
+    await migrate(database.dataSource);
 
-    authentication = createTestAuthentication(database.pool, config.auth, config.email);
+    authentication = createTestAuthentication(database.dataSource, config.auth, config.email);
 
     app = await buildApp({
       config,
       dependencies: [],
       authentication,
-      users: new UserService(database.pool, new UserRepository(database.pool), {
+      users: new UserService(database.dataSource, new UserRepository(database.dataSource), {
         minimumAgeYears: config.minimumAgeYears,
       }),
       locations: new LocationService(
-        database.pool,
-        new LocationRepository(database.pool),
+        database.dataSource,
+        new LocationRepository(database.dataSource),
         createRecordedPlaceSearchClient(),
       ),
     });
@@ -389,7 +390,7 @@ describe("location endpoints", () => {
 
   /** How many places exist, for asserting that a search created none. */
   async function placeCount(): Promise<number> {
-    const { rows } = await database.pool.query<{ count: string }>(`SELECT count(*) FROM locations`);
+    const rows: { count: string }[] = await database.dataSource.query(`SELECT count(*) FROM locations`);
 
     return Number(rows[0]?.count ?? "0");
   }

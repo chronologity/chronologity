@@ -1,6 +1,7 @@
 import type { Location, LocationPrecision, LocationSource } from "@chronologity/contracts";
-import type pg from "pg";
+import type { DataSource } from "typeorm";
 import type { Transaction } from "../../lib/database/transaction.js";
+import { Location as LocationRow } from "./location.model.js";
 import type { NewLocation } from "./location.types.js";
 
 /**
@@ -11,29 +12,12 @@ import type { NewLocation } from "./location.types.js";
  * recorded — the map service will rename that venue eventually, and this keeps
  * what it was called when someone was there.
  *
- * Reads take the pool and writes take a transaction, so a write's transaction
- * is visible at the call site rather than hidden behind the method.
+ * Reads take the DataSource and writes take a transaction, so a write's
+ * transaction is visible at the call site rather than hidden behind the method.
+ *
+ * The entity is imported as `LocationRow` because `Location` is the contract
+ * this returns, and the two are deliberately different shapes.
  */
-
-interface LocationRow {
-  location_id: string;
-  name: string;
-  latitude: number | null;
-  longitude: number | null;
-  precision: string;
-  neighbourhood: string | null;
-  city: string | null;
-  region: string | null;
-  country: string | null;
-  country_code: string | null;
-  source_reference: string | null;
-  source: string;
-  created_at: Date;
-}
-
-const COLUMNS = `location_id, name, latitude, longitude, precision,
-                 neighbourhood, city, region, country, country_code,
-                 source_reference, source, created_at`;
 
 /**
  * Shape a row into the boundary contract.
@@ -43,7 +27,7 @@ const COLUMNS = `location_id, name, latitude, longitude, precision,
  */
 function toLocation(row: LocationRow): Location {
   return {
-    locationId: row.location_id,
+    locationId: row.locationId,
     name: row.name,
     coordinates:
       row.latitude === null || row.longitude === null
@@ -55,11 +39,11 @@ function toLocation(row: LocationRow): Location {
       city: row.city,
       region: row.region,
       country: row.country,
-      countryCode: row.country_code,
+      countryCode: row.countryCode,
     },
-    sourceReference: row.source_reference,
+    sourceReference: row.sourceReference,
     source: row.source as LocationSource,
-    createdAt: row.created_at.toISOString(),
+    createdAt: row.createdAt.toISOString(),
   };
 }
 
@@ -68,11 +52,11 @@ export class LocationRepository {
   /**
    * Build the Location repository.
    *
-   * @param pool - Used for reads. Writes take a transaction of their own, so a
-   *   caller cannot accidentally write outside the transaction its change
+   * @param dataSource - Used for reads. Writes take a transaction of their own,
+   *   so a caller cannot accidentally write outside the transaction its change
    *   belongs to.
    */
-  constructor(private readonly pool: pg.Pool) {}
+  constructor(private readonly dataSource: DataSource) {}
 
   /**
    * Record a place, unless the same map-service result already reached one.
@@ -86,35 +70,44 @@ export class LocationRepository {
    *   The unique index decides, not the application.
    */
   async insert(tx: Transaction, location: NewLocation): Promise<Location | undefined> {
-    const { rows } = await tx.query<LocationRow>(
-      `INSERT INTO locations
-         (location_id, recorded_by_user_id, name, latitude, longitude, precision,
-          neighbourhood, city, region, country, country_code, source_reference, source,
-          created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-       ON CONFLICT (source_reference) WHERE source_reference IS NOT NULL DO NOTHING
-       RETURNING ${COLUMNS}`,
-      [
-        location.locationId,
-        location.recordedByUserId,
-        location.name,
-        location.coordinates?.latitude ?? null,
-        location.coordinates?.longitude ?? null,
-        location.precision,
-        location.context.neighbourhood,
-        location.context.city,
-        location.context.region,
-        location.context.country,
-        location.context.countryCode,
-        location.sourceReference ?? null,
-        location.source,
-        location.createdAt.toISOString(),
-      ],
-    );
+    // `orIgnore` is ON CONFLICT DO NOTHING. A conflicting insert identifies
+    // nothing, which is what distinguishes recording the place from losing to
+    // somebody who recorded it first.
+    const inserted = await tx
+      .createQueryBuilder()
+      .insert()
+      .into(LocationRow)
+      .values({
+        locationId: location.locationId,
+        recordedByUserId: location.recordedByUserId,
+        name: location.name,
+        latitude: location.coordinates?.latitude ?? null,
+        longitude: location.coordinates?.longitude ?? null,
+        precision: location.precision,
+        neighbourhood: location.context.neighbourhood,
+        city: location.context.city,
+        region: location.context.region,
+        country: location.context.country,
+        countryCode: location.context.countryCode,
+        sourceReference: location.sourceReference ?? null,
+        source: location.source,
+        createdAt: location.createdAt,
+        updatedAt: location.createdAt,
+      })
+      .orIgnore()
+      // Explicit, because the identifiers a conflicting insert reports are the
+      // ones handed to it rather than the ones written. RETURNING is what
+      // actually distinguishes a row that landed from one that did not.
+      .returning(["locationId"])
+      .execute();
 
-    const row = rows[0];
+    if ((inserted.raw as unknown[]).length !== 1) {
+      return undefined;
+    }
 
-    return row === undefined ? undefined : toLocation(row);
+    const row = await tx.findOneBy(LocationRow, { locationId: location.locationId });
+
+    return row === null ? undefined : toLocation(row);
   }
 
   /**
@@ -124,14 +117,9 @@ export class LocationRepository {
    * @returns The place, or undefined if there is no such record.
    */
   async findById(locationId: string): Promise<Location | undefined> {
-    const { rows } = await this.pool.query<LocationRow>(
-      `SELECT ${COLUMNS} FROM locations WHERE location_id = $1`,
-      [locationId],
-    );
+    const row = await this.dataSource.getRepository(LocationRow).findOneBy({ locationId });
 
-    const row = rows[0];
-
-    return row === undefined ? undefined : toLocation(row);
+    return row === null ? undefined : toLocation(row);
   }
 
   /**
@@ -142,13 +130,8 @@ export class LocationRepository {
    *   the same search result reach one place rather than two.
    */
   async findBySource(sourceReference: string): Promise<Location | undefined> {
-    const { rows } = await this.pool.query<LocationRow>(
-      `SELECT ${COLUMNS} FROM locations WHERE source_reference = $1`,
-      [sourceReference],
-    );
+    const row = await this.dataSource.getRepository(LocationRow).findOneBy({ sourceReference });
 
-    const row = rows[0];
-
-    return row === undefined ? undefined : toLocation(row);
+    return row === null ? undefined : toLocation(row);
   }
 }

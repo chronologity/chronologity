@@ -17,7 +17,7 @@ import {
   type StorageClient,
 } from "../../integrations/storage/storage-client.js";
 import { migrate } from "../../lib/database/migrations.js";
-import { createDatabase, type Database } from "../../lib/database/postgres.js";
+import { connectDatabase, createDatabase, type Database } from "../../lib/database/postgres.js";
 import { createUser } from "../../testing/fixtures.js";
 import { systemContext } from "../../types/request-context.js";
 
@@ -64,7 +64,8 @@ describe("producing derivatives", () => {
       user: process.env.POSTGRES_USER ?? "chronologity",
       password: process.env.POSTGRES_PASSWORD ?? "chronologity",
     });
-    await migrate(database.pool);
+    await connectDatabase(database);
+    await migrate(database.dataSource);
 
     s3 = new S3Client({
       endpoint: storageConfig.endpoint,
@@ -88,9 +89,9 @@ describe("producing derivatives", () => {
 
     storage = createStorageClient(storageConfig);
     metadata = createMetadataClient();
-    repository = new UploadRepository(database.pool);
+    repository = new UploadRepository(database.dataSource);
     uploads = new UploadService(
-      database.pool,
+      database.dataSource,
       repository,
       storage,
       {
@@ -124,7 +125,7 @@ describe("producing derivatives", () => {
 
   /** Put a real file all the way through: authorised, uploaded, arrived, checked. */
   const runThrough = async (file: string, declaredKind: "image" | "video") => {
-    const { userId: ownerUserId } = await createUser(database.pool);
+    const { userId: ownerUserId } = await createUser(database.dataSource);
     const contentType = declaredKind === "image" ? "image/jpeg" : "video/mp4";
     const bytes = await readFile(fixture(file));
 
@@ -221,24 +222,24 @@ describe("producing derivatives", () => {
     // redelivered note must find the work already done and leave it alone.
     const { uploadId } = await runThrough("photo.jpg", "image");
 
-    const first = await database.pool.query<{ derived_at: Date; derivatives: string[] }>(
+    const first = await database.dataSource.query(
       `SELECT derived_at, derivatives FROM uploads WHERE upload_id = $1`,
       [uploadId],
     );
 
     assert.equal(await uploads.check(uploadId), true);
 
-    const second = await database.pool.query<{ derived_at: Date; derivatives: string[] }>(
+    const second = await database.dataSource.query(
       `SELECT derived_at, derivatives FROM uploads WHERE upload_id = $1`,
       [uploadId],
     );
 
     assert.deepEqual(
-      second.rows[0]?.derived_at,
-      first.rows[0]?.derived_at,
+      second[0]?.derived_at,
+      first[0]?.derived_at,
       "derivatives were produced twice",
     );
-    assert.deepEqual(second.rows[0]?.derivatives, first.rows[0]?.derivatives);
+    assert.deepEqual(second[0]?.derivatives, first[0]?.derivatives);
   });
 
   it("produces nothing for a file that fails checking", async () => {

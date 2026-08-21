@@ -11,7 +11,7 @@ import {
   markPublished,
   type MessageSubject,
 } from "./outbox.js";
-import { createDatabase, type Database } from "./postgres.js";
+import { connectDatabase, createDatabase, type Database } from "./postgres.js";
 import { withTransaction } from "./transaction.js";
 
 /** Requires `pnpm infra:up`. Run with `pnpm test:integration`. */
@@ -44,25 +44,26 @@ describe("PostgreSQL foundation against a real database", () => {
 
   beforeAll(async () => {
     database = createDatabase(config);
+    await connectDatabase(database);
     await database.checkHealth();
-    await migrate(database.pool);
+    await migrate(database.dataSource);
   });
 
   afterAll(async () => {
-    await database.pool.query("DELETE FROM outbox_messages");
+    await database.dataSource.query("DELETE FROM outbox_messages");
     await database.close();
   });
 
   describe("migrations", () => {
     it("is idempotent: a second run applies nothing", async () => {
-      const result = await migrate(database.pool);
+      const result = await migrate(database.dataSource);
 
       assert.equal(result.applied.length, 0);
       assert.ok(result.alreadyApplied > 0);
     });
 
     it("created the foundational tables", async () => {
-      const { rows } = await database.pool.query<{ table_name: string }>(
+      const rows: { table_name: string }[] = await database.dataSource.query(
         `SELECT table_name FROM information_schema.tables
           WHERE table_schema = 'public' ORDER BY table_name`,
       );
@@ -84,11 +85,11 @@ describe("PostgreSQL foundation against a real database", () => {
     });
   });
 
-  describe("withTransaction", () => {
+  describe("transactions", () => {
     it("commits work that succeeds", async () => {
       const id = randomUUID();
 
-      await withTransaction(database.pool, async (tx) => {
+      await withTransaction(database.dataSource, async (tx) => {
         await enqueueOutboxMessage(tx, {
           topic: "chronologity.test.v1",
           partitionKey: id,
@@ -100,7 +101,7 @@ describe("PostgreSQL foundation against a real database", () => {
         });
       });
 
-      const { rows } = await database.pool.query(
+      const rows = await database.dataSource.query(
         `SELECT id FROM outbox_messages WHERE partition_key = $1`,
         [id],
       );
@@ -111,7 +112,7 @@ describe("PostgreSQL foundation against a real database", () => {
       const id = randomUUID();
 
       await assert.rejects(() =>
-        withTransaction(database.pool, async (tx) => {
+        withTransaction(database.dataSource, async (tx) => {
           await enqueueOutboxMessage(tx, {
             topic: "chronologity.test.v1",
             partitionKey: id,
@@ -126,7 +127,7 @@ describe("PostgreSQL foundation against a real database", () => {
         }),
       );
 
-      const { rows } = await database.pool.query(
+      const rows = await database.dataSource.query(
         `SELECT id FROM outbox_messages WHERE partition_key = $1`,
         [id],
       );
@@ -137,19 +138,21 @@ describe("PostgreSQL foundation against a real database", () => {
     });
 
     it("returns the connection to the pool even when work throws", async () => {
-      const before = database.pool.idleCount + database.pool.totalCount;
-
+      // Twice the pool size. A leaked connection does not fail where it leaks;
+      // it exhausts the pool later, somewhere unrelated. So the loop is the
+      // assertion: if a failed transaction kept its connection, the eleventh
+      // iteration would wait for one that is never coming back and this would
+      // fail by timing out rather than by an assertion.
       for (let i = 0; i < 20; i += 1) {
         await assert.rejects(() =>
-          withTransaction(database.pool, async () => {
+          withTransaction(database.dataSource, async () => {
             throw new Error("failure");
           }),
         );
       }
 
-      // A leaked connection does not fail here; it exhausts the pool later.
-      await database.pool.query("SELECT 1");
-      assert.ok(database.pool.totalCount <= Math.max(before, 10));
+      // And the pool is still usable afterwards.
+      assert.deepEqual(await database.dataSource.query("SELECT 1 AS ok"), [{ ok: 1 }]);
     });
   });
 
@@ -157,13 +160,13 @@ describe("PostgreSQL foundation against a real database", () => {
     // The outbox is FIFO across every pending message, not per partition, so
     // each test starts from an empty table rather than inheriting leftovers.
     beforeEach(async () => {
-      await database.pool.query("DELETE FROM outbox_messages");
+      await database.dataSource.query("DELETE FROM outbox_messages");
     });
 
     it("claims, publishes, and marks messages", async () => {
       const key = randomUUID();
 
-      await withTransaction(database.pool, async (tx) => {
+      await withTransaction(database.dataSource, async (tx) => {
         for (let i = 0; i < 3; i += 1) {
           await enqueueOutboxMessage(tx, {
             topic: "chronologity.test.v1",
@@ -177,10 +180,10 @@ describe("PostgreSQL foundation against a real database", () => {
         }
       });
 
-      const pendingBefore = await countPending(database.pool);
+      const pendingBefore = await countPending(database.dataSource);
       assert.ok(pendingBefore >= 3);
 
-      const claimed = await withTransaction(database.pool, async (tx) => {
+      const claimed = await withTransaction(database.dataSource, async (tx) => {
         const batch = await claimOutboxBatch(tx, 3);
         await markPublished(
           tx,
@@ -192,7 +195,7 @@ describe("PostgreSQL foundation against a real database", () => {
       assert.equal(claimed.length, 3);
       assert.equal(claimed[0]?.metadata.eventVersion, 1);
 
-      const { rows } = await database.pool.query<{ count: string }>(
+      const rows: { count: string }[] = await database.dataSource.query(
         `SELECT count(*)::text AS count FROM outbox_messages
           WHERE partition_key = $1 AND published_at IS NULL`,
         [key],
@@ -204,7 +207,7 @@ describe("PostgreSQL foundation against a real database", () => {
       const key = randomUUID();
 
       for (const index of [0, 1, 2, 3]) {
-        await withTransaction(database.pool, async (tx) => {
+        await withTransaction(database.dataSource, async (tx) => {
           await enqueueOutboxMessage(tx, {
             topic: "chronologity.test.v1",
             partitionKey: key,
@@ -217,7 +220,7 @@ describe("PostgreSQL foundation against a real database", () => {
         });
       }
 
-      const claimed = await withTransaction(database.pool, (tx) => claimOutboxBatch(tx, 10));
+      const claimed = await withTransaction(database.dataSource, (tx) => claimOutboxBatch(tx, 10));
 
       assert.deepEqual(
         claimed.map((message) => (message.payload as { index: number }).index),
@@ -226,7 +229,7 @@ describe("PostgreSQL foundation against a real database", () => {
     });
 
     it("leaves a failed message pending and records why", async () => {
-      const id = await withTransaction(database.pool, (tx) =>
+      const id = await withTransaction(database.dataSource, (tx) =>
         enqueueOutboxMessage(tx, {
           topic: "chronologity.test.v1",
           partitionKey: randomUUID(),
@@ -238,20 +241,20 @@ describe("PostgreSQL foundation against a real database", () => {
         }),
       );
 
-      await withTransaction(database.pool, (tx) => markFailed(tx, id, "broker unavailable"));
+      await withTransaction(database.dataSource, (tx) => markFailed(tx, id, "broker unavailable"));
 
-      const { rows } = await database.pool.query<{ attempts: number; last_error: string }>(
+      const rows: { attempts: number; last_error: string }[] = await database.dataSource.query(
         `SELECT attempts, last_error FROM outbox_messages WHERE id = $1`,
         [id],
       );
 
       assert.equal(rows[0]?.attempts, 1);
       assert.equal(rows[0]?.last_error, "broker unavailable");
-      assert.equal(await countPending(database.pool), 1);
+      assert.equal(await countPending(database.dataSource), 1);
     });
 
     it("does not hand the same message to two concurrent publishers", async () => {
-      await withTransaction(database.pool, async (tx) => {
+      await withTransaction(database.dataSource, async (tx) => {
         for (let i = 0; i < 6; i += 1) {
           await enqueueOutboxMessage(tx, {
             topic: "chronologity.test.v1",
@@ -268,7 +271,7 @@ describe("PostgreSQL foundation against a real database", () => {
       // SKIP LOCKED is what makes concurrent publishers safe; without it both
       // would block on the same rows or, worse, publish them twice.
       const [first, second] = await Promise.all([
-        withTransaction(database.pool, async (tx) => {
+        withTransaction(database.dataSource, async (tx) => {
           const batch = await claimOutboxBatch(tx, 3);
           await new Promise((resolve) => setTimeout(resolve, 50));
           await markPublished(
@@ -277,7 +280,7 @@ describe("PostgreSQL foundation against a real database", () => {
           );
           return batch.map((m) => m.id);
         }),
-        withTransaction(database.pool, async (tx) => {
+        withTransaction(database.dataSource, async (tx) => {
           const batch = await claimOutboxBatch(tx, 3);
           await markPublished(
             tx,
@@ -289,7 +292,7 @@ describe("PostgreSQL foundation against a real database", () => {
 
       const overlap = first.filter((id) => second.includes(id));
       assert.deepEqual(overlap, [], "two publishers claimed the same message");
-      assert.equal(await countPending(database.pool), 0);
+      assert.equal(await countPending(database.dataSource), 0);
     });
   });
 });

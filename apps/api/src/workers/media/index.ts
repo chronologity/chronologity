@@ -1,9 +1,14 @@
+// Before anything that declares an entity: TypeORM's decorators register
+// themselves through the metadata reflection API, which is a polyfill rather
+// than something the runtime provides.
+import "reflect-metadata";
+
 import { ConfigurationError } from "@chronologity/config";
 import { MEDIA_BOUNDARY } from "@chronologity/contracts";
 import { loadConfig } from "../../config/app-config.js";
 import { UploadRepository } from "../../features/uploads/upload.repository.js";
 import { UploadService } from "../../features/uploads/upload.service.js";
-import { createDatabase } from "../../lib/database/postgres.js";
+import { connectDatabase, createDatabase } from "../../lib/database/postgres.js";
 import { createEventConsumer } from "../../lib/messaging/consumer.js";
 import { createMessaging } from "../../lib/messaging/kafka.js";
 import { topicName } from "../../lib/messaging/topics.js";
@@ -39,13 +44,14 @@ const GROUP_ID = "media-checker";
 async function main(): Promise<void> {
   const config = loadConfig();
   const database = createDatabase(config.database);
+  await connectDatabase(database);
   const messaging = createMessaging(config.messaging);
   const storage = createStorageClient(config.storage);
   const metadata = createMetadataClient();
 
   const uploads = new UploadService(
-    database.pool,
-    new UploadRepository(database.pool),
+    database.dataSource,
+    new UploadRepository(database.dataSource),
     storage,
     config.uploadLimits,
     { metadata, derivatives: createDerivativeClient() },

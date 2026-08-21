@@ -1,6 +1,7 @@
 import type { PublicUser, UpdatePreferencesRequest } from "@chronologity/contracts";
-import type pg from "pg";
+import { IsNull, type DataSource } from "typeorm";
 import type { Transaction } from "../../lib/database/transaction.js";
+import { Handle, Preferences, RestrictedData, User } from "./user.model.js";
 import { mayClaimReleasedHandle, type HandleClaim } from "./user.handle-policy.js";
 import type { UserAccountView, UserState } from "./user.types.js";
 
@@ -13,19 +14,9 @@ import type { UserAccountView, UserState } from "./user.types.js";
  * that no query written against `users` can return it by accident and so that
  * erasing it is one targeted delete.
  *
- * Reads take the pool and writes take a transaction, so a write's transaction
- * is visible at the call site.
+ * Reads take the DataSource and writes take a transaction, so a write's
+ * transaction is visible at the call site.
  */
-
-/** A row as stored, before it becomes either of the public shapes. */
-interface UserRow {
-  user_id: string;
-  handle: string;
-  display_name: string;
-  biography: string | null;
-  status: string;
-  created_at: Date;
-}
 
 /**
  * Shape a stored row as the public view.
@@ -34,14 +25,26 @@ interface UserRow {
  * @returns The public view. Deliberately narrow: it carries nothing about
  *   authentication and nothing a person has not chosen to present.
  */
-function toPublicUser(row: UserRow): PublicUser {
+function toPublicUser(row: User): PublicUser {
   return {
-    userId: row.user_id,
+    userId: row.userId,
     handle: row.handle,
-    displayName: row.display_name,
+    displayName: row.displayName,
     biography: row.biography,
-    createdAt: row.created_at.toISOString(),
+    createdAt: row.createdAt.toISOString(),
   };
+}
+
+/**
+ * Read a stored status as one of the two the application recognises.
+ *
+ * @param status - As stored.
+ * @returns The status, treating anything unrecognised as active — the column's
+ *   check constraint permits only these two, and a value outside them would be
+ *   a database that no longer matches its migrations.
+ */
+function toStatus(status: string): "active" | "deactivated" {
+  return status === "deactivated" ? "deactivated" : "active";
 }
 
 /** Reads and writes accounts. */
@@ -49,10 +52,10 @@ export class UserRepository {
   /**
    * Build the User repository.
    *
-   * @param pool - Used for reads. Writes take a transaction, so a handle claim
-   *   and the account that depends on it cannot commit separately.
+   * @param dataSource - Used for reads. Writes take a transaction, so a handle
+   *   claim and the account that depends on it cannot commit separately.
    */
-  constructor(private readonly pool: pg.Pool) {}
+  constructor(private readonly dataSource: DataSource) {}
 
   /**
    * Read the stored state a decision is made against.
@@ -62,24 +65,18 @@ export class UserRepository {
    *   undefined if there is no such account.
    */
   async findState(userId: string): Promise<UserState | undefined> {
-    const { rows } = await this.pool.query<UserRow>(
-      `SELECT user_id, handle, display_name, biography, status, created_at
-         FROM users WHERE user_id = $1`,
-      [userId],
-    );
+    const row = await this.dataSource.getRepository(User).findOneBy({ userId });
 
-    const row = rows[0];
-
-    if (row === undefined) {
+    if (row === null) {
       return undefined;
     }
 
     return {
-      userId: row.user_id,
+      userId: row.userId,
       handle: row.handle,
-      displayName: row.display_name,
+      displayName: row.displayName,
       biography: row.biography,
-      status: row.status === "deactivated" ? "deactivated" : "active",
+      status: toStatus(row.status),
     };
   }
 
@@ -91,12 +88,11 @@ export class UserRepository {
    *   completed. Absence is an ordinary state, not an error.
    */
   async findIdForIdentity(identityId: string): Promise<string | undefined> {
-    const { rows } = await this.pool.query<{ user_id: string }>(
-      `SELECT user_id FROM users WHERE identity_id = $1`,
-      [identityId],
-    );
+    const row = await this.dataSource
+      .getRepository(User)
+      .findOne({ where: { identityId }, select: { userId: true } });
 
-    return rows[0]?.user_id;
+    return row?.userId;
   }
 
   /**
@@ -111,9 +107,7 @@ export class UserRepository {
    * @returns True if there is such an account, in any state.
    */
   async exists(userId: string): Promise<boolean> {
-    const { rows } = await this.pool.query(`SELECT 1 FROM users WHERE user_id = $1`, [userId]);
-
-    return rows.length > 0;
+    return this.dataSource.getRepository(User).existsBy({ userId });
   }
 
   /**
@@ -125,15 +119,11 @@ export class UserRepository {
    *   as present-but-hidden, since the difference is not the reader's business.
    */
   async findPublic(userId: string): Promise<PublicUser | undefined> {
-    const { rows } = await this.pool.query<UserRow>(
-      `SELECT user_id, handle, display_name, biography, status, created_at
-         FROM users WHERE user_id = $1 AND status = 'active'`,
-      [userId],
-    );
+    const row = await this.dataSource
+      .getRepository(User)
+      .findOneBy({ userId, status: "active" });
 
-    const row = rows[0];
-
-    return row === undefined ? undefined : toPublicUser(row);
+    return row === null ? undefined : toPublicUser(row);
   }
 
   /**
@@ -147,38 +137,27 @@ export class UserRepository {
    *   restricted data deliberately does not live there.
    */
   async findAccount(userId: string): Promise<UserAccountView | undefined> {
-    const { rows } = await this.pool.query<
-      UserRow & {
-        autoplay_videos: boolean;
-        autoplay_sound: boolean;
-        locale: string | null;
-        time_zone: string | null;
-        reduced_motion: boolean;
-      }
-    >(
-      `SELECT u.user_id, u.handle, u.display_name, u.biography, u.status, u.created_at,
-              p.autoplay_videos, p.autoplay_sound, p.locale, p.time_zone, p.reduced_motion
-         FROM users u
-         JOIN user_preferences p ON p.user_id = u.user_id
-        WHERE u.user_id = $1`,
-      [userId],
-    );
+    const row = await this.dataSource
+      .getRepository(User)
+      .findOne({ where: { userId }, relations: { preferences: true } });
 
-    const row = rows[0];
-
-    if (row === undefined) {
+    // Preferences are written with the account and never removed, so their
+    // absence means the account is not fully created. Reported as absent rather
+    // than filled in with defaults, which would present an account that does
+    // not exist as one that does.
+    if (row === null || row.preferences === undefined) {
       return undefined;
     }
 
     return {
       ...toPublicUser(row),
-      status: row.status === "deactivated" ? "deactivated" : "active",
+      status: toStatus(row.status),
       preferences: {
-        autoplayVideos: row.autoplay_videos,
-        autoplaySound: row.autoplay_sound,
-        locale: row.locale,
-        timeZone: row.time_zone,
-        reducedMotion: row.reduced_motion,
+        autoplayVideos: row.preferences.autoplayVideos,
+        autoplaySound: row.preferences.autoplaySound,
+        locale: row.preferences.locale,
+        timeZone: row.preferences.timeZone,
+        reducedMotion: row.preferences.reducedMotion,
       },
     };
   }
@@ -202,26 +181,33 @@ export class UserRepository {
       createdAt: Date;
     },
   ): Promise<void> {
-    await tx.query(
-      `INSERT INTO users (user_id, identity_id, handle, display_name, biography, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (user_id) DO NOTHING`,
-      [
-        input.userId,
-        input.identityId,
-        input.handle,
-        input.displayName,
-        input.biography ?? null,
-        input.createdAt.toISOString(),
-      ],
-    );
+    await tx
+      .createQueryBuilder()
+      .insert()
+      .into(User)
+      .values({
+        userId: input.userId,
+        identityId: input.identityId,
+        handle: input.handle,
+        displayName: input.displayName,
+        biography: input.biography ?? null,
+        status: "active",
+        createdAt: input.createdAt,
+        updatedAt: input.createdAt,
+      })
+      .orIgnore()
+      .execute();
 
     // Preferences begin at their defaults rather than absent, so reading them
-    // never has to decide what a missing row means.
-    await tx.query(
-      `INSERT INTO user_preferences (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`,
-      [input.userId],
-    );
+    // never has to decide what a missing row means. The columns the database
+    // defaults are left out here so there is one definition of each default.
+    await tx
+      .createQueryBuilder()
+      .insert()
+      .into(Preferences)
+      .values({ userId: input.userId, updatedAt: input.createdAt })
+      .orIgnore()
+      .execute();
   }
 
   /**
@@ -229,8 +215,9 @@ export class UserRepository {
    *
    * @param tx - The caller's transaction.
    * @param userId - Whose profile.
-   * @param input - The fields that changed. Undefined leaves a column alone;
-   *   `COALESCE` is what makes that work in one statement.
+   * @param input - The fields that changed. A field left undefined is left
+   *   alone; one given as null is cleared. The difference is carried by whether
+   *   the key is present, so it survives all the way to the statement.
    * @returns Nothing.
    */
   async updateProfile(
@@ -238,13 +225,14 @@ export class UserRepository {
     userId: string,
     input: { displayName?: string | undefined; biography?: string | null | undefined },
   ): Promise<void> {
-    await tx.query(
-      `UPDATE users
-          SET display_name = COALESCE($2, display_name),
-              biography = CASE WHEN $3::boolean THEN $4 ELSE biography END,
-              updated_at = now()
-        WHERE user_id = $1`,
-      [userId, input.displayName ?? null, input.biography !== undefined, input.biography ?? null],
+    await tx.update(
+      User,
+      { userId },
+      {
+        ...(input.displayName === undefined ? {} : { displayName: input.displayName }),
+        ...(input.biography === undefined ? {} : { biography: input.biography }),
+        updatedAt: new Date(),
+      },
     );
   }
 
@@ -257,10 +245,7 @@ export class UserRepository {
    * @returns Nothing.
    */
   async updateHandle(tx: Transaction, userId: string, handle: string): Promise<void> {
-    await tx.query(`UPDATE users SET handle = $2, updated_at = now() WHERE user_id = $1`, [
-      userId,
-      handle,
-    ]);
+    await tx.update(User, { userId }, { handle, updatedAt: new Date() });
   }
 
   /**
@@ -281,13 +266,15 @@ export class UserRepository {
     status: "active" | "deactivated",
     from: "active" | "deactivated",
   ): Promise<boolean> {
-    const { rowCount } = await tx.query(
-      `UPDATE users SET status = $2, updated_at = now()
-        WHERE user_id = $1 AND status = $3`,
-      [userId, status, from],
+    // The current status is part of the WHERE clause rather than something read
+    // first, which is what makes this one atomic statement.
+    const { affected } = await tx.update(
+      User,
+      { userId, status: from },
+      { status, updatedAt: new Date() },
     );
 
-    return rowCount === 1;
+    return affected === 1;
   }
 
   /**
@@ -296,6 +283,8 @@ export class UserRepository {
    * @param tx - The caller's transaction.
    * @param userId - Whose preferences.
    * @param input - Only the preferences being changed; the rest are untouched.
+   *   As with a profile change, undefined leaves a preference alone and null
+   *   clears one.
    * @returns Nothing.
    */
   async updatePreferences(
@@ -303,25 +292,17 @@ export class UserRepository {
     userId: string,
     input: UpdatePreferencesRequest,
   ): Promise<void> {
-    await tx.query(
-      `UPDATE user_preferences
-          SET autoplay_videos = COALESCE($2, autoplay_videos),
-              autoplay_sound = COALESCE($3, autoplay_sound),
-              locale = CASE WHEN $4::boolean THEN $5 ELSE locale END,
-              time_zone = CASE WHEN $6::boolean THEN $7 ELSE time_zone END,
-              reduced_motion = COALESCE($8, reduced_motion),
-              updated_at = now()
-        WHERE user_id = $1`,
-      [
-        userId,
-        input.autoplayVideos ?? null,
-        input.autoplaySound ?? null,
-        input.locale !== undefined,
-        input.locale ?? null,
-        input.timeZone !== undefined,
-        input.timeZone ?? null,
-        input.reducedMotion ?? null,
-      ],
+    await tx.update(
+      Preferences,
+      { userId },
+      {
+        ...(input.autoplayVideos === undefined ? {} : { autoplayVideos: input.autoplayVideos }),
+        ...(input.autoplaySound === undefined ? {} : { autoplaySound: input.autoplaySound }),
+        ...(input.locale === undefined ? {} : { locale: input.locale }),
+        ...(input.timeZone === undefined ? {} : { timeZone: input.timeZone }),
+        ...(input.reducedMotion === undefined ? {} : { reducedMotion: input.reducedMotion }),
+        updatedAt: new Date(),
+      },
     );
   }
 
@@ -356,16 +337,14 @@ export class UserRepository {
       cooldownDays: number;
     },
   ): Promise<HandleClaim> {
-    const existing = await tx.query<{ user_id: string; released_at: Date | null }>(
-      `SELECT user_id, released_at FROM user_handles WHERE normalized_handle = $1`,
-      [input.normalizedHandle],
-    );
+    const row = await tx.findOne(Handle, {
+      where: { normalizedHandle: input.normalizedHandle },
+      select: { userId: true, releasedAt: true },
+    });
 
-    const row = existing.rows[0];
-
-    if (row !== undefined) {
-      if (row.released_at === null) {
-        if (row.user_id !== input.userId) {
+    if (row !== null) {
+      if (row.releasedAt === null) {
+        if (row.userId !== input.userId) {
           return { ok: false, reason: "taken" };
         }
 
@@ -373,9 +352,10 @@ export class UserRepository {
         // holder, so this is a restyle — `Richard` for `richard` — which
         // changes how the handle is written and nothing else. The moment it
         // was acquired stands, because it was not acquired again.
-        await tx.query(
-          `UPDATE user_handles SET handle = $2 WHERE normalized_handle = $1`,
-          [input.normalizedHandle, input.handle],
+        await tx.update(
+          Handle,
+          { normalizedHandle: input.normalizedHandle },
+          { handle: input.handle },
         );
 
         return { ok: true };
@@ -383,8 +363,8 @@ export class UserRepository {
 
       if (
         !mayClaimReleasedHandle(
-          row.released_at,
-          row.user_id,
+          row.releasedAt,
+          row.userId,
           input.userId,
           input.cooldownDays,
           input.now,
@@ -395,27 +375,40 @@ export class UserRepository {
 
       // Either this User is taking their own former handle back, or the
       // cooldown has passed and it is genuinely free again.
-      await tx.query(
-        `UPDATE user_handles
-            SET user_id = $2, handle = $3, assigned_at = $4, released_at = NULL
-          WHERE normalized_handle = $1`,
-        [input.normalizedHandle, input.userId, input.handle, input.now.toISOString()],
+      await tx.update(
+        Handle,
+        { normalizedHandle: input.normalizedHandle },
+        {
+          userId: input.userId,
+          handle: input.handle,
+          assignedAt: input.now,
+          releasedAt: null,
+        },
       );
 
       return { ok: true };
     }
 
-    const inserted = await tx.query(
-      `INSERT INTO user_handles (normalized_handle, handle, user_id, assigned_at)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (normalized_handle) DO NOTHING`,
-      [input.normalizedHandle, input.handle, input.userId, input.now.toISOString()],
-    );
+    // `orIgnore` is ON CONFLICT DO NOTHING. RETURNING nothing means someone
+    // committed between the read above and this write, and they won — the
+    // identifiers a conflicting insert reports are the ones handed to it, so
+    // only what came back from the database can answer this.
+    const inserted = await tx
+      .createQueryBuilder()
+      .insert()
+      .into(Handle)
+      .values({
+        normalizedHandle: input.normalizedHandle,
+        handle: input.handle,
+        userId: input.userId,
+        assignedAt: input.now,
+        releasedAt: null,
+      })
+      .orIgnore()
+      .returning(["normalizedHandle"])
+      .execute();
 
-    // The insert conflicted, so someone committed between the read above and
-    // this write. They won. Written as "not exactly one" rather than "zero" so
-    // there is no fallback for a count that this statement cannot produce.
-    if (inserted.rowCount !== 1) {
+    if ((inserted.raw as unknown[]).length !== 1) {
       return { ok: false, reason: "taken" };
     }
 
@@ -431,10 +424,7 @@ export class UserRepository {
    * @returns Nothing.
    */
   async releaseHandle(tx: Transaction, normalizedHandle: string, at: Date): Promise<void> {
-    await tx.query(`UPDATE user_handles SET released_at = $2 WHERE normalized_handle = $1`, [
-      normalizedHandle,
-      at.toISOString(),
-    ]);
+    await tx.update(Handle, { normalizedHandle }, { releasedAt: at });
   }
 
   /**
@@ -446,13 +436,11 @@ export class UserRepository {
    *   at the person who used to have it.
    */
   async findIdByHandle(normalizedHandle: string): Promise<string | undefined> {
-    const { rows } = await this.pool.query<{ user_id: string }>(
-      `SELECT user_id FROM user_handles
-        WHERE normalized_handle = $1 AND released_at IS NULL`,
-      [normalizedHandle],
-    );
+    const row = await this.dataSource
+      .getRepository(Handle)
+      .findOne({ where: { normalizedHandle, releasedAt: IsNull() }, select: { userId: true } });
 
-    return rows[0]?.user_id;
+    return row?.userId;
   }
 
   /**
@@ -477,12 +465,16 @@ export class UserRepository {
     dateOfBirth: string,
     minimumAgeAtCreation: number,
   ): Promise<void> {
-    await tx.query(
-      `INSERT INTO user_restricted_data (user_id, date_of_birth, minimum_age_at_creation)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (user_id) DO NOTHING`,
-      [userId, dateOfBirth, minimumAgeAtCreation],
-    );
+    await tx
+      .createQueryBuilder()
+      .insert()
+      .into(RestrictedData)
+      // A `date` column, which the driver reads and writes as `YYYY-MM-DD`
+      // rather than as an instant. Kept as a string throughout, so no timezone
+      // ever gets a chance to move the day.
+      .values({ userId, dateOfBirth, minimumAgeAtCreation, recordedAt: new Date() })
+      .orIgnore()
+      .execute();
   }
 
   /**
@@ -492,12 +484,10 @@ export class UserRepository {
    * @returns It as `YYYY-MM-DD`, or undefined if none is recorded.
    */
   async findDateOfBirth(userId: string): Promise<string | undefined> {
-    const { rows } = await this.pool.query<{ date_of_birth: string }>(
-      `SELECT to_char(date_of_birth, 'YYYY-MM-DD') AS date_of_birth
-         FROM user_restricted_data WHERE user_id = $1`,
-      [userId],
-    );
+    const row = await this.dataSource
+      .getRepository(RestrictedData)
+      .findOne({ where: { userId }, select: { dateOfBirth: true } });
 
-    return rows[0]?.date_of_birth;
+    return row?.dateOfBirth;
   }
 }

@@ -1,6 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import type pg from "pg";
+import type { DataSource, QueryRunner } from "typeorm";
 import type { Logger } from "../logger/logger.js";
 
 /**
@@ -64,11 +64,11 @@ export interface MigrationResult {
 /**
  * Create the table that records which migrations have run.
  *
- * @param client - A connection already holding the advisory lock.
+ * @param runner - A connection already holding the advisory lock.
  * @returns Nothing.
  */
-async function ensureMigrationsTable(client: pg.PoolClient): Promise<void> {
-  await client.query(`
+async function ensureMigrationsTable(runner: QueryRunner): Promise<void> {
+  await runner.query(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version     text PRIMARY KEY,
       applied_at  timestamptz NOT NULL DEFAULT now()
@@ -116,22 +116,26 @@ async function readMigrations(): Promise<{ version: string; sql: string }[]> {
  * a migration that has shipped is a schema change of its own and needs a new
  * file, not an edit.
  *
- * @param pool - The database to migrate.
+ * @param dataSource - The database to migrate.
  * @param logger - Optional; each applied migration is announced through it.
  * @returns Which migrations were applied, and how many had already been.
  * @throws {Error} If a migration fails, after rolling that migration back. The
  *   ones before it stay applied, since each commits with its own record.
  */
-export async function migrate(pool: pg.Pool, logger?: Logger): Promise<MigrationResult> {
-  const client = await pool.connect();
+export async function migrate(dataSource: DataSource, logger?: Logger): Promise<MigrationResult> {
+  // A dedicated connection, because an advisory lock belongs to the session
+  // that took it: taken and released on different connections it would protect
+  // nothing.
+  const runner = dataSource.createQueryRunner();
+  await runner.connect();
 
   try {
     // Held for the whole run and released with the connection. A second
     // migrator waits here rather than interleaving.
-    await client.query("SELECT pg_advisory_lock($1)", [ADVISORY_LOCK_KEY.toString()]);
-    await ensureMigrationsTable(client);
+    await runner.query("SELECT pg_advisory_lock($1)", [ADVISORY_LOCK_KEY.toString()]);
+    await ensureMigrationsTable(runner);
 
-    const { rows } = await client.query<{ version: string }>(
+    const rows: { version: string }[] = await runner.query(
       "SELECT version FROM schema_migrations",
     );
     const applied = new Set(rows.map((row) => row.version));
@@ -143,14 +147,14 @@ export async function migrate(pool: pg.Pool, logger?: Logger): Promise<Migration
       logger?.info({ version: migration.version }, "Applying migration");
 
       try {
-        await client.query("BEGIN");
-        await client.query(migration.sql);
-        await client.query("INSERT INTO schema_migrations (version) VALUES ($1)", [
+        await runner.query("BEGIN");
+        await runner.query(migration.sql);
+        await runner.query("INSERT INTO schema_migrations (version) VALUES ($1)", [
           migration.version,
         ]);
-        await client.query("COMMIT");
+        await runner.query("COMMIT");
       } catch (error) {
-        await client.query("ROLLBACK");
+        await runner.query("ROLLBACK");
         throw new Error(`Migration ${migration.version} failed: ${String(error)}`, {
           cause: error,
         });
@@ -162,7 +166,7 @@ export async function migrate(pool: pg.Pool, logger?: Logger): Promise<Migration
       alreadyApplied: applied.size,
     };
   } finally {
-    await client.query("SELECT pg_advisory_unlock($1)", [ADVISORY_LOCK_KEY.toString()]);
-    client.release();
+    await runner.query("SELECT pg_advisory_unlock($1)", [ADVISORY_LOCK_KEY.toString()]);
+    await runner.release();
   }
 }

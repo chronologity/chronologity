@@ -1,5 +1,5 @@
 import type { EventEnvelope } from "@chronologity/contracts";
-import type pg from "pg";
+import type { DataSource } from "typeorm";
 import {
   claimOutboxBatch,
   markFailed,
@@ -29,7 +29,7 @@ import type { Logger } from "../../lib/logger/logger.js";
  */
 
 export interface PublishOutboxOptions {
-  readonly pool: pg.Pool;
+  readonly dataSource: DataSource;
   readonly producer: EventProducer;
   /** How many messages to take at once. */
   readonly batchSize?: number;
@@ -69,7 +69,7 @@ export async function publishOutboxBatch(
   let claimed: readonly OutboxMessage[] = [];
 
   try {
-    const published = await withTransaction(options.pool, async (tx) => {
+    const published: number = await withTransaction(options.dataSource, async (tx) => {
       const messages = await claimOutboxBatch(tx, batchSize);
 
       if (messages.length === 0) {
@@ -111,7 +111,7 @@ export async function publishOutboxBatch(
 
     // A separate transaction, because the one that claimed these has rolled
     // back and taken any attempt count written inside it with it.
-    await withTransaction(options.pool, async (tx) => {
+    await withTransaction(options.dataSource, async (tx) => {
       for (const message of claimed) {
         await markFailed(tx, message.id, describe(error));
       }

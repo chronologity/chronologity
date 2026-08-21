@@ -1,7 +1,3 @@
 packages:
   - "apps/*"
   - "packages/*"
-
-# No dependency is permitted to run install scripts. pnpm blocks them unless a
-# package is named under `allowBuilds`, and nothing here needs one — so adding
-# the key back is a deliberate act rather than a default anyone drifted into.

@@ -44,13 +44,13 @@ export const authPlugin = fp(async function authPlugin(
   app,
   options: { deps: AuthenticationWiring },
 ) {
-  const accounts = new UserRepository(options.deps.pool);
+  const accounts = new UserRepository(options.deps.dataSource);
 
   app.decorate("resolveUserId", (identityId: string) => accounts.findIdForIdentity(identityId));
 
   // Built once rather than per request: it holds only the pool, and the roles
   // lookup is on the path of every privileged request.
-  const roles = new AuthorizationRepository(options.deps.pool);
+  const roles = new AuthorizationRepository(options.deps.dataSource);
 
   app.decorate("readRoles", (userId: string) => roles.rolesFor(userId));
 

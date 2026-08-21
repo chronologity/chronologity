@@ -5,7 +5,7 @@ import type { FastifyInstance } from "fastify";
 import type { AppConfig } from "../../config/app-config.js";
 import { readAuthAudit } from "../../lib/auth/audit.js";
 import { migrate } from "../../lib/database/migrations.js";
-import { createDatabase, type Database } from "../../lib/database/postgres.js";
+import { connectDatabase, createDatabase, type Database } from "../../lib/database/postgres.js";
 import { buildApp } from "../../server/app.js";
 import {
   createTestAuthentication,
@@ -121,9 +121,10 @@ describe("authentication", () => {
 
   beforeAll(async () => {
     database = createDatabase(config.database);
-    await migrate(database.pool);
+    await connectDatabase(database);
+    await migrate(database.dataSource);
 
-    authentication = createTestAuthentication(database.pool, config.auth, config.email, () =>
+    authentication = createTestAuthentication(database.dataSource, config.auth, config.email, () =>
       clock(),
     );
 
@@ -185,7 +186,7 @@ describe("authentication", () => {
 
     assert.notEqual(first.credentials.sessionId, second.credentials.sessionId);
 
-    const audit = await readAuthAudit(database.pool, await identityIdFor(email));
+    const audit = await readAuthAudit(database.dataSource, await identityIdFor(email));
     assert.ok(audit.filter((entry) => entry.eventType === "session_created").length >= 2);
   });
 
@@ -194,7 +195,7 @@ describe("authentication", () => {
     await signIn(email);
     const identityId = await identityIdFor(email);
 
-    const { rows } = await database.pool.query<{ identity_id: string }>(
+    const rows: { identity_id: string }[] = await database.dataSource.query(
       `SELECT identity_id FROM identities WHERE identity_id = $1`,
       [identityId],
     );
@@ -346,7 +347,7 @@ describe("authentication", () => {
       const statuses = [first.statusCode, second.statusCode].sort();
       assert.deepEqual(statuses, [200, 401]);
 
-      const { rows } = await database.pool.query<{ refresh_generation: number }>(
+      const rows: { refresh_generation: number }[] = await database.dataSource.query(
         `SELECT refresh_generation FROM sessions WHERE session_id = $1`,
         [credentials.sessionId],
       );
@@ -400,7 +401,7 @@ describe("authentication", () => {
       // for anyone who named it.
       const { credentials } = await signIn(uniqueEmail());
 
-      await database.pool.query(
+      await database.dataSource.query(
         `UPDATE sessions SET refresh_token_hash = NULL WHERE session_id = $1`,
         [credentials.sessionId],
       );
@@ -487,13 +488,13 @@ describe("authentication", () => {
     const { credentials } = await signIn(email);
     const identityId = await identityIdFor(email);
 
-    const audit = await readAuthAudit(database.pool, identityId);
+    const audit = await readAuthAudit(database.dataSource, identityId);
     const types = audit.map((entry) => entry.eventType);
 
     assert.ok(types.includes("session_created"));
     assert.ok(types.includes("magic_link_consumed"));
 
-    const { rows } = await database.pool.query<{ context: unknown; reason: string | null }>(
+    const rows: { context: unknown; reason: string | null }[] = await database.dataSource.query(
       `SELECT context, reason FROM auth_audit_events WHERE identity_id = $1`,
       [identityId],
     );
@@ -514,7 +515,7 @@ describe("authentication", () => {
     await requestLink(email);
     const token = await readMagicLinkFor(email);
 
-    const { rows } = await database.pool.query<{ token_hash: string }>(
+    const rows: { token_hash: string }[] = await database.dataSource.query(
       `SELECT token_hash FROM magic_link_tokens`,
     );
 
@@ -836,32 +837,32 @@ describe("authentication", () => {
       await registerAndVerify(email);
       const identityId = await identityIdFor(email);
 
-      const stored = await database.pool.query<{ password_hash: string }>(
+      const stored = await database.dataSource.query(
         `SELECT password_hash FROM identity_passwords WHERE identity_id = $1`,
         [identityId],
       );
 
-      assert.match(stored.rows[0]?.password_hash ?? "", /^\$argon2id\$/);
-      assert.ok(!(stored.rows[0]?.password_hash ?? "").includes(strongPassword));
+      assert.match(stored[0]?.password_hash ?? "", /^\$argon2id\$/);
+      assert.ok(!(stored[0]?.password_hash ?? "").includes(strongPassword));
 
-      const audit = await database.pool.query(
+      const audit = await database.dataSource.query(
         `SELECT context, reason FROM auth_audit_events WHERE identity_id = $1`,
         [identityId],
       );
-      assert.ok(!JSON.stringify(audit.rows).includes(strongPassword));
-      assert.ok(!JSON.stringify(audit.rows).includes(stored.rows[0]?.password_hash ?? "never"));
+      assert.ok(!JSON.stringify(audit).includes(strongPassword));
+      assert.ok(!JSON.stringify(audit).includes(stored[0]?.password_hash ?? "never"));
 
       // The outbox is append-only and feeds Kafka, so nothing erasable may
       // reach it (ADR-095). Authentication publishes nothing at all, which is
       // the strongest form of that.
-      const published = await database.pool.query(
+      const published = await database.dataSource.query(
         `SELECT payload, metadata FROM outbox_messages WHERE aggregate_id = $1`,
         [identityId],
       );
-      assert.equal(published.rowCount, 0);
+      assert.equal(published.length, 0);
 
       // That a password was set is recorded; what it is, is not.
-      assert.ok(audit.rows.length > 0);
+      assert.ok(audit.length > 0);
     });
 
     it("stops a burst of password attempts", async () => {
@@ -912,7 +913,7 @@ describe("authentication", () => {
   }
 
   async function identityIdFor(email: string): Promise<string> {
-    const { rows } = await database.pool.query<{ identity_id: string }>(
+    const rows: { identity_id: string }[] = await database.dataSource.query(
       `SELECT identity_id FROM identity_emails WHERE normalized_email = $1`,
       [email.toLowerCase()],
     );

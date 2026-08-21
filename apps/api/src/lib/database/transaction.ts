@@ -1,47 +1,37 @@
-import type pg from "pg";
+import type { DataSource, EntityManager } from "typeorm";
 
-/** A connection inside a transaction. Repository functions take this, not the pool. */
-export type Transaction = pg.PoolClient;
+/**
+ * A transaction, as everything below a service sees it.
+ *
+ * TypeORM's `EntityManager` bound to one connection inside a transaction.
+ * Repositories take this rather than the DataSource, so a repository cannot
+ * write outside the transaction its caller opened.
+ */
+export type Transaction = EntityManager;
 
 /**
  * Run work inside a single transaction.
  *
- * Repositories accept a `Transaction` rather than reaching for the pool, which
- * is what makes the transactional outbox possible: a state change and its
- * outbox record are only atomic if they share this connection.
+ * Repositories accept a `Transaction` rather than reaching for the DataSource,
+ * which is what makes the transactional outbox possible: a state change and the
+ * outbox message announcing it are only atomic if they share this transaction
+ * (ADR-093).
  *
- * The client is released in every path. A leaked connection does not fail
- * loudly; it exhausts the pool later, somewhere unrelated.
+ * The connection is returned in every path, including the failing one. A leaked
+ * connection does not fail loudly; it exhausts the pool later, somewhere
+ * unrelated.
  *
- * @param pool - The pool to take a connection from.
- * @param work - Runs inside the transaction and receives the connection.
- *   Repository functions take this connection rather than the pool, which is what
- *   makes the transactional outbox possible.
+ * @param dataSource - The DataSource to open a transaction on.
+ * @param work - Runs inside the transaction and receives its manager.
  * @returns Whatever the work returns, once committed.
- * @throws Whatever the work throws, after rolling back. A rollback that itself
- *   fails is swallowed: the connection is unusable either way, and the original
- *   error is the one that explains what went wrong.
+ * @throws Whatever the work throws, after rolling back. A refusal raised inside
+ *   the work is therefore a rollback as well as an error, which is what lets a
+ *   service reject something halfway through without leaving the first half
+ *   behind.
  */
 export async function withTransaction<Result>(
-  pool: pg.Pool,
+  dataSource: DataSource,
   work: (tx: Transaction) => Promise<Result>,
 ): Promise<Result> {
-  const client = await pool.connect();
-
-  try {
-    await client.query("BEGIN");
-    const result = await work(client);
-    await client.query("COMMIT");
-    return result;
-  } catch (error) {
-    try {
-      await client.query("ROLLBACK");
-    } catch {
-      // The rollback itself failing means the connection is unusable. Report
-      // the original error, which is the one that explains what went wrong.
-    }
-    throw error;
-  } finally {
-    client.release();
-  }
+  return dataSource.transaction((manager) => work(manager));
 }

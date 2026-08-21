@@ -1,6 +1,7 @@
 import type { SessionSummary } from "@chronologity/contracts";
-import type pg from "pg";
+import { IsNull, type DataSource } from "typeorm";
 import type { Transaction } from "../../lib/database/transaction.js";
+import { Session } from "./identity.model.js";
 import type { NewSession, SessionRecord } from "./authentication.types.js";
 
 /**
@@ -18,17 +19,15 @@ import type { NewSession, SessionRecord } from "./authentication.types.js";
  * and a hope.
  */
 
-interface SessionRow {
-  session_id: string;
-  identity_id: string;
-  refresh_token_hash: string | null;
-  refresh_generation: number;
-  expires_at: Date;
-  revoked_at: Date | null;
-}
-
-const COLUMNS = `session_id, identity_id, refresh_token_hash,
-                 refresh_generation, expires_at, revoked_at`;
+/** The columns a stored Session is built from. Named once so the reads agree. */
+const selection = {
+  sessionId: true,
+  identityId: true,
+  refreshTokenHash: true,
+  refreshGeneration: true,
+  expiresAt: true,
+  revokedAt: true,
+} as const;
 
 /**
  * Shape a row into the stored Session a decision is made against.
@@ -36,14 +35,14 @@ const COLUMNS = `session_id, identity_id, refresh_token_hash,
  * @param row - As read from `sessions`.
  * @returns The Session as the policy sees it.
  */
-function toRecord(row: SessionRow): SessionRecord {
+function toRecord(row: Session): SessionRecord {
   return {
-    sessionId: row.session_id,
-    identityId: row.identity_id,
-    refreshTokenHash: row.refresh_token_hash,
-    refreshGeneration: row.refresh_generation,
-    expiresAt: row.expires_at,
-    revokedAt: row.revoked_at,
+    sessionId: row.sessionId,
+    identityId: row.identityId,
+    refreshTokenHash: row.refreshTokenHash,
+    refreshGeneration: row.refreshGeneration,
+    expiresAt: row.expiresAt,
+    revokedAt: row.revokedAt,
   };
 }
 
@@ -52,9 +51,9 @@ export class SessionRepository {
   /**
    * Build the Session repository.
    *
-   * @param pool - Used for reads. Writes take a transaction of their own.
+   * @param dataSource - Used for reads. Writes take a transaction of their own.
    */
-  constructor(private readonly pool: pg.Pool) {}
+  constructor(private readonly dataSource: DataSource) {}
 
   /**
    * Begin a Session.
@@ -64,20 +63,24 @@ export class SessionRepository {
    * @returns Nothing.
    */
   async insert(tx: Transaction, session: NewSession): Promise<void> {
-    await tx.query(
-      `INSERT INTO sessions
-         (session_id, identity_id, created_at, expires_at, client_kind, refresh_token_hash)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (session_id) DO NOTHING`,
-      [
-        session.sessionId,
-        session.identityId,
-        session.createdAt.toISOString(),
-        session.expiresAt.toISOString(),
-        session.clientKind ?? null,
-        session.refreshTokenHash,
-      ],
-    );
+    await tx
+      .createQueryBuilder()
+      .insert()
+      .into(Session)
+      .values({
+        sessionId: session.sessionId,
+        identityId: session.identityId,
+        createdAt: session.createdAt,
+        expiresAt: session.expiresAt,
+        clientKind: session.clientKind ?? null,
+        refreshTokenHash: session.refreshTokenHash,
+        refreshGeneration: 0,
+        revokedAt: null,
+        revocationReason: null,
+        lastRefreshedAt: null,
+      })
+      .orIgnore()
+      .execute();
   }
 
   /**
@@ -87,14 +90,11 @@ export class SessionRepository {
    * @returns Its stored state, or undefined if there is no such Session.
    */
   async findById(sessionId: string): Promise<SessionRecord | undefined> {
-    const { rows } = await this.pool.query<SessionRow>(
-      `SELECT ${COLUMNS} FROM sessions WHERE session_id = $1`,
-      [sessionId],
-    );
+    const row = await this.dataSource
+      .getRepository(Session)
+      .findOne({ where: { sessionId }, select: selection });
 
-    const row = rows[0];
-
-    return row === undefined ? undefined : toRecord(row);
+    return row === null ? undefined : toRecord(row);
   }
 
   /**
@@ -107,14 +107,17 @@ export class SessionRepository {
    *   a concurrent write before the same transaction acts on it.
    */
   async lockById(tx: Transaction, sessionId: string): Promise<SessionRecord | undefined> {
-    const { rows } = await tx.query<SessionRow>(
-      `SELECT ${COLUMNS} FROM sessions WHERE session_id = $1 FOR UPDATE`,
-      [sessionId],
-    );
+    // The lock is the entire point of this read, and it is taken through the
+    // caller's transaction so the row is held by it and released when it ends.
+    // TypeORM refuses a pessimistic lock outside a transaction rather than
+    // quietly taking one that is released immediately.
+    const row = await tx
+      .createQueryBuilder(Session, "session")
+      .setLock("pessimistic_write")
+      .where("session.sessionId = :sessionId", { sessionId })
+      .getOne();
 
-    const row = rows[0];
-
-    return row === undefined ? undefined : toRecord(row);
+    return row === null ? undefined : toRecord(row);
   }
 
   /**
@@ -139,20 +142,26 @@ export class SessionRepository {
       now: Date;
     },
   ): Promise<{ identityId: string; refreshGeneration: number } | undefined> {
-    const { rows } = await tx.query<{ identity_id: string; refresh_generation: number }>(
-      `UPDATE sessions
-          SET refresh_token_hash = $3,
-              refresh_generation = refresh_generation + 1,
-              last_refreshed_at = $4
-        WHERE session_id = $1
-          AND refresh_token_hash = $2
-          AND revoked_at IS NULL
-          AND expires_at > $4
-        RETURNING identity_id, refresh_generation`,
-      [input.sessionId, input.presentedTokenHash, input.newTokenHash, input.now.toISOString()],
-    );
+    // Every part of the rule is in the condition, so the statement either
+    // matches and rotates or matches nothing at all. RETURNING is what makes
+    // the new generation readable without a second read that a concurrent
+    // refresh could get between.
+    const rotated = await tx
+      .createQueryBuilder()
+      .update(Session)
+      .set({
+        refreshTokenHash: input.newTokenHash,
+        refreshGeneration: () => "refresh_generation + 1",
+        lastRefreshedAt: input.now,
+      })
+      .where("session_id = :sessionId", { sessionId: input.sessionId })
+      .andWhere("refresh_token_hash = :presented", { presented: input.presentedTokenHash })
+      .andWhere("revoked_at IS NULL")
+      .andWhere("expires_at > :now", { now: input.now })
+      .returning(["identityId", "refreshGeneration"])
+      .execute();
 
-    const row = rows[0];
+    const row = (rotated.raw as { identity_id: string; refresh_generation: number }[])[0];
 
     return row === undefined
       ? undefined
@@ -171,12 +180,12 @@ export class SessionRepository {
    *   a suspected theft.
    */
   async revoke(tx: Transaction, sessionId: string, reason: string, at: Date): Promise<void> {
-    await tx.query(
-      `UPDATE sessions
-          SET revoked_at = COALESCE(revoked_at, $2),
-              revocation_reason = COALESCE(revocation_reason, $3)
-        WHERE session_id = $1`,
-      [sessionId, at.toISOString(), reason],
+    // Already-revoked rows are excluded rather than written over with their own
+    // values, which is what makes the first reason the one that stands.
+    await tx.update(
+      Session,
+      { sessionId, revokedAt: IsNull() },
+      { revokedAt: at, revocationReason: reason },
     );
   }
 
@@ -195,17 +204,23 @@ export class SessionRepository {
     tx: Transaction,
     input: { identityId: string; reason: string; at: Date; exceptSessionId?: string },
   ): Promise<string[]> {
-    const { rows } = await tx.query<{ session_id: string }>(
-      `UPDATE sessions
-          SET revoked_at = $3, revocation_reason = $2
-        WHERE identity_id = $1
-          AND revoked_at IS NULL
-          AND ($4::uuid IS NULL OR session_id <> $4)
-        RETURNING session_id`,
-      [input.identityId, input.reason, input.at.toISOString(), input.exceptSessionId ?? null],
-    );
+    const query = tx
+      .createQueryBuilder()
+      .update(Session)
+      .set({ revokedAt: input.at, revocationReason: input.reason })
+      .where("identity_id = :identityId", { identityId: input.identityId })
+      .andWhere("revoked_at IS NULL");
 
-    return rows.map((row) => row.session_id);
+    // Added rather than expressed as a condition that matches everything, so
+    // "spare none" and "spare this one" are the same statement with one clause
+    // more.
+    if (input.exceptSessionId !== undefined) {
+      query.andWhere("session_id <> :except", { except: input.exceptSessionId });
+    }
+
+    const revoked = await query.returning(["sessionId"]).execute();
+
+    return (revoked.raw as { session_id: string }[]).map((row) => row.session_id);
   }
 
   /**
@@ -219,25 +234,18 @@ export class SessionRepository {
    *   is open now.
    */
   async listOpen(identityId: string, currentSessionId: string): Promise<SessionSummary[]> {
-    const { rows } = await this.pool.query<{
-      session_id: string;
-      created_at: Date;
-      expires_at: Date;
-      last_refreshed_at: Date | null;
-    }>(
-      `SELECT session_id, created_at, expires_at, last_refreshed_at
-         FROM sessions
-        WHERE identity_id = $1 AND revoked_at IS NULL
-        ORDER BY created_at DESC`,
-      [identityId],
-    );
+    const rows = await this.dataSource.getRepository(Session).find({
+      where: { identityId, revokedAt: IsNull() },
+      select: { sessionId: true, createdAt: true, expiresAt: true, lastRefreshedAt: true },
+      order: { createdAt: "DESC" },
+    });
 
     return rows.map((row) => ({
-      sessionId: row.session_id,
-      createdAt: row.created_at.toISOString(),
-      expiresAt: row.expires_at.toISOString(),
-      lastRefreshedAt: row.last_refreshed_at?.toISOString() ?? null,
-      current: row.session_id === currentSessionId,
+      sessionId: row.sessionId,
+      createdAt: row.createdAt.toISOString(),
+      expiresAt: row.expiresAt.toISOString(),
+      lastRefreshedAt: row.lastRefreshedAt?.toISOString() ?? null,
+      current: row.sessionId === currentSessionId,
     }));
   }
 }

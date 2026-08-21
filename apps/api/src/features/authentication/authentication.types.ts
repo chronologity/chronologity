@@ -1,4 +1,4 @@
-import type pg from "pg";
+import type { DataSource } from "typeorm";
 import type { AuthConfig } from "../../config/auth-config.js";
 import type { AuthRateLimits } from "./authentication.rate-limits.js";
 import type { IdentityService } from "./identity.service.js";
@@ -52,7 +52,7 @@ export type RefreshRejection =
  *
  * The routes need both services and the endpoint limits; the plugin that
  * authenticates requests needs Session validation, the signing configuration,
- * and the pool the User and role lookups read from. Passed explicitly rather
+ * and the DataSource the User and role lookups read through. Passed explicitly rather
  * than resolved from a container, so what authentication requires is visible
  * where it is assembled.
  */
@@ -60,7 +60,7 @@ export interface AuthenticationWiring {
   readonly identities: IdentityService;
   readonly sessions: SessionService;
   readonly config: AuthConfig;
-  readonly pool: pg.Pool;
+  readonly dataSource: DataSource;
   /** Overrides the default endpoint limits. */
   readonly rateLimits?: AuthRateLimits | undefined;
 }

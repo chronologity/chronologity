@@ -1,6 +1,11 @@
+// Before anything that declares an entity: TypeORM's decorators register
+// themselves through the metadata reflection API, which is a polyfill rather
+// than something the runtime provides.
+import "reflect-metadata";
+
 import { ConfigurationError } from "@chronologity/config";
 import { loadConfig } from "../../config/app-config.js";
-import { createDatabase } from "../../lib/database/postgres.js";
+import { connectDatabase, createDatabase } from "../../lib/database/postgres.js";
 import { createMessaging } from "../../lib/messaging/kafka.js";
 import { createEventProducer } from "../../lib/messaging/producer.js";
 import { publishOutboxBatch } from "./publish-outbox.js";
@@ -28,6 +33,7 @@ const BATCH_SIZE = 100;
 async function main(): Promise<void> {
   const config = loadConfig();
   const database = createDatabase(config.database);
+  await connectDatabase(database);
   const messaging = createMessaging(config.messaging);
   const producer = createEventProducer(messaging.kafka);
 
@@ -47,7 +53,7 @@ async function main(): Promise<void> {
 
   while (running) {
     const { reachedEnd } = await publishOutboxBatch({
-      pool: database.pool,
+      dataSource: database.dataSource,
       producer,
       batchSize: BATCH_SIZE,
     });

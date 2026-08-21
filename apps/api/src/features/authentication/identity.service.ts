@@ -1,5 +1,5 @@
 import type { SessionCredentials } from "@chronologity/contracts";
-import type pg from "pg";
+import type { DataSource } from "typeorm";
 import { recordAuthAudit } from "../../lib/auth/audit.js";
 import { consumeMagicLink, issueMagicLink } from "../../lib/auth/magic-link.js";
 import {
@@ -41,7 +41,7 @@ export class IdentityService {
   /**
    * Build the Identity service.
    *
-   * @param pool - Opens the transactions this service's writes commit in.
+   * @param dataSource - Opens the transactions this service's writes commit in.
    * @param identities - Where identities, addresses, and credentials are stored.
    * @param sessions - Grants Sessions once a proof has been accepted, and ends
    *   them when a password changes.
@@ -51,7 +51,7 @@ export class IdentityService {
    * @param clock - Injected so tests can move time without waiting.
    */
   constructor(
-    private readonly pool: pg.Pool,
+    private readonly dataSource: DataSource,
     private readonly identities: IdentityRepository,
     private readonly sessions: SessionService,
     private readonly email: EmailClient,
@@ -77,7 +77,7 @@ export class IdentityService {
   async requestLink(email: string, context: RequestContext): Promise<void> {
     const at = this.clock();
 
-    const link = await withTransaction(this.pool, async (tx) => {
+    const link = await withTransaction(this.dataSource, async (tx) => {
       const issued = await issueMagicLink(tx, {
         email,
         purpose: "login",
@@ -132,7 +132,7 @@ export class IdentityService {
   ): Promise<SessionCredentials> {
     const at = this.clock();
 
-    const identityId = await withTransaction(this.pool, async (tx) => {
+    const identityId = await withTransaction(this.dataSource, async (tx) => {
       const consumed = await consumeMagicLink(tx, { token, purpose: "login", now: at });
 
       if (consumed === undefined) {
@@ -204,7 +204,7 @@ export class IdentityService {
     const existing = await this.identities.findByEmail(email);
 
     if (existing !== undefined) {
-      await withTransaction(this.pool, (tx) =>
+      await withTransaction(this.dataSource, (tx) =>
         recordAuthAudit(tx, {
           eventType: "magic_link_requested",
           outcome: "success",
@@ -236,7 +236,7 @@ export class IdentityService {
     // exactly the load this endpoint attracts.
     const passwordHash = await hashPassword(this.config.passwordHashing, password);
 
-    const link = await withTransaction(this.pool, async (tx) => {
+    const link = await withTransaction(this.dataSource, async (tx) => {
       const identity = await this.identities.resolveForEmail(tx, {
         email,
         now: at,
@@ -294,7 +294,7 @@ export class IdentityService {
   async verifyEmail(token: string, context: RequestContext): Promise<void> {
     const at = this.clock();
 
-    const identityId = await withTransaction(this.pool, async (tx) => {
+    const identityId = await withTransaction(this.dataSource, async (tx) => {
       const consumed = await consumeMagicLink(tx, { token, purpose: "verify_email", now: at });
 
       if (consumed === undefined) {
@@ -388,7 +388,7 @@ export class IdentityService {
     if (needsRehash(this.config.passwordHashing, storedHash)) {
       const upgraded = await hashPassword(this.config.passwordHashing, password);
 
-      await withTransaction(this.pool, async (tx) => {
+      await withTransaction(this.dataSource, async (tx) => {
         await this.identities.writePasswordHash(tx, identityId, upgraded);
         await recordAuthAudit(tx, {
           eventType: "password_set",
@@ -424,7 +424,7 @@ export class IdentityService {
       return;
     }
 
-    const link = await withTransaction(this.pool, async (tx) => {
+    const link = await withTransaction(this.dataSource, async (tx) => {
       const issued = await issueMagicLink(tx, {
         email: normalizeEmail(email),
         purpose: "reset_password",
@@ -483,7 +483,7 @@ export class IdentityService {
   async resetPassword(token: string, password: string, context: RequestContext): Promise<void> {
     const at = this.clock();
 
-    const consumed = await withTransaction(this.pool, async (tx) => {
+    const consumed = await withTransaction(this.dataSource, async (tx) => {
       const link = await consumeMagicLink(tx, { token, purpose: "reset_password", now: at });
 
       if (link === undefined) {
@@ -519,7 +519,7 @@ export class IdentityService {
 
     const passwordHash = await hashPassword(this.config.passwordHashing, password);
 
-    await withTransaction(this.pool, async (tx) => {
+    await withTransaction(this.dataSource, async (tx) => {
       await this.identities.writePasswordHash(tx, identityId, passwordHash);
       await this.identities.markEmailVerified(tx, normalizedEmail, at);
 
@@ -566,7 +566,7 @@ export class IdentityService {
     const storedHash = await this.identities.findPasswordHash(identityId);
 
     if (storedHash === undefined || !(await verifyPassword(storedHash, currentPassword))) {
-      await withTransaction(this.pool, (tx) =>
+      await withTransaction(this.dataSource, (tx) =>
         recordAuthAudit(tx, {
           eventType: "password_sign_in_rejected",
           outcome: "failure",
@@ -590,7 +590,7 @@ export class IdentityService {
 
     const passwordHash = await hashPassword(this.config.passwordHashing, newPassword);
 
-    await withTransaction(this.pool, async (tx) => {
+    await withTransaction(this.dataSource, async (tx) => {
       await this.identities.writePasswordHash(tx, identityId, passwordHash);
       await recordAuthAudit(tx, {
         eventType: "password_changed",
@@ -624,7 +624,7 @@ export class IdentityService {
     identityId: string | undefined,
     reason: string,
   ): Promise<void> {
-    await withTransaction(this.pool, (tx) =>
+    await withTransaction(this.dataSource, (tx) =>
       recordAuthAudit(tx, {
         eventType: "password_sign_in_rejected",
         outcome: "failure",

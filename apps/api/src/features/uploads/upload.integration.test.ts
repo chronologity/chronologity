@@ -13,7 +13,7 @@ import {
   type StorageClient,
 } from "../../integrations/storage/storage-client.js";
 import { migrate } from "../../lib/database/migrations.js";
-import { createDatabase, type Database } from "../../lib/database/postgres.js";
+import { connectDatabase, createDatabase, type Database } from "../../lib/database/postgres.js";
 import { createEmbeddedLocationClient } from "../../integrations/metadata/embedded-location-client.js";
 import { createRecordedPlaceSearchClient } from "../../integrations/places/recorded-place-search-client.js";
 import { LocationRepository } from "../locations/location.repository.js";
@@ -117,7 +117,8 @@ describe("uploads", () => {
 
   beforeAll(async () => {
     database = createDatabase(config.database);
-    await migrate(database.pool);
+    await connectDatabase(database);
+    await migrate(database.dataSource);
 
     // Created if absent, tolerated if present: the bucket is shared across runs.
     const admin = new S3Client({
@@ -145,15 +146,15 @@ describe("uploads", () => {
 
     storage = createStorageClient(config.storage);
 
-    authentication = createTestAuthentication(database.pool, config.auth, config.email);
+    authentication = createTestAuthentication(database.dataSource, config.auth, config.email);
 
-    users = new UserService(database.pool, new UserRepository(database.pool), {
+    users = new UserService(database.dataSource, new UserRepository(database.dataSource), {
       minimumAgeYears: config.minimumAgeYears,
     });
 
     uploads = new UploadService(
-      database.pool,
-      new UploadRepository(database.pool),
+      database.dataSource,
+      new UploadRepository(database.dataSource),
       storage,
       config.uploadLimits,
       {
@@ -164,8 +165,8 @@ describe("uploads", () => {
     );
 
     locations = new LocationService(
-      database.pool,
-      new LocationRepository(database.pool),
+      database.dataSource,
+      new LocationRepository(database.dataSource),
       createRecordedPlaceSearchClient(),
     );
 
@@ -278,8 +279,8 @@ describe("uploads", () => {
         authentication,
         users,
         uploads: new UploadService(
-          database.pool,
-          new UploadRepository(database.pool),
+          database.dataSource,
+          new UploadRepository(database.dataSource),
           storage,
           { ...config.uploadLimits, maxImageBytes: 26_214_400 },
           {
@@ -363,25 +364,25 @@ describe("uploads", () => {
       const { credentials } = await onboard();
       const uploadId = await arrive(credentials.accessToken, "photo-with-gps.jpg");
 
-      const before = await database.pool.query<{ count: string }>(
+      const before = await database.dataSource.query(
         `SELECT count(*) FROM locations`,
       );
       await askFor(uploadId, credentials.accessToken);
-      const after = await database.pool.query<{ count: string }>(`SELECT count(*) FROM locations`);
+      const after = await database.dataSource.query(`SELECT count(*) FROM locations`);
 
       // Asking is not recording. Copying the coordinates into a database would
       // create a second thing to leak, to keep in step with privacy rules, and
       // to remember during erasure.
-      assert.equal(after.rows[0]?.count, before.rows[0]?.count);
+      assert.equal(after[0]?.count, before[0]?.count);
 
       // And nothing about position reached the upload's own row either. What is
       // recorded there is what opening the file established — dimensions, codec,
       // duration — never where it was taken.
-      const columns = await database.pool.query<{ column_name: string }>(
+      const columns = await database.dataSource.query(
         `SELECT column_name FROM information_schema.columns
           WHERE table_name = 'uploads' AND column_name ~ 'lat|lon|location|coord'`,
       );
-      assert.deepEqual(columns.rows, []);
+      assert.deepEqual(columns, []);
     });
 
     it("says a photograph carrying no location carries none", async () => {
@@ -536,7 +537,7 @@ describe("uploads", () => {
 
       // The refusal is only complete if the bytes are gone: an object nobody
       // can reference is an object nobody should be paying to store.
-      const { rows } = await database.pool.query<{ storage_key: string }>(
+      const rows: { storage_key: string }[] = await database.dataSource.query(
         `SELECT storage_key FROM uploads WHERE upload_id = $1`,
         [uploadId],
       );
@@ -598,7 +599,7 @@ describe("uploads", () => {
       assert.equal(finalized.statusCode, 400, "finalization accepted the wrong media type");
 
       // And the object does not survive its refusal.
-      const { rows } = await database.pool.query<{ storage_key: string }>(
+      const rows: { storage_key: string }[] = await database.dataSource.query(
         `SELECT storage_key FROM uploads WHERE upload_id = $1`,
         [uploadId],
       );
@@ -694,7 +695,7 @@ describe("uploads", () => {
         headers: authed(credentials.accessToken),
       });
 
-      const { rows } = await database.pool.query<{ storage_key: string }>(
+      const rows: { storage_key: string }[] = await database.dataSource.query(
         `SELECT storage_key FROM uploads WHERE upload_id = $1`,
         [uploadId],
       );
@@ -760,7 +761,7 @@ describe("uploads", () => {
       const { credentials } = await onboard();
       const { uploadId } = (await register(credentials.accessToken)).json();
 
-      const { rows } = await database.pool.query<{ storage_key: string }>(
+      const rows: { storage_key: string }[] = await database.dataSource.query(
         `SELECT storage_key FROM uploads WHERE upload_id = $1`,
         [uploadId],
       );

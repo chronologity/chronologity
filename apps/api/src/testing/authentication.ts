@@ -1,4 +1,4 @@
-import type pg from "pg";
+import type { DataSource } from "typeorm";
 import type { AuthConfig } from "../config/auth-config.js";
 import { IdentityRepository } from "../features/authentication/identity.repository.js";
 import { IdentityService } from "../features/authentication/identity.service.js";
@@ -36,7 +36,7 @@ export interface TestAuthentication extends AuthenticationWiring {
 /**
  * Build authentication against real infrastructure.
  *
- * @param pool - The database this suite runs against.
+ * @param dataSource - The database this suite runs against.
  * @param config - Authentication settings.
  * @param email - Where to reach the local mail server.
  * @param clock - Optional. Injected so a test can move time without waiting.
@@ -44,7 +44,7 @@ export interface TestAuthentication extends AuthenticationWiring {
  *   connection it opened.
  */
 export function createTestAuthentication(
-  pool: pg.Pool,
+  dataSource: DataSource,
   config: AuthConfig,
   email: EmailConfig,
   clock?: () => Date,
@@ -53,17 +53,17 @@ export function createTestAuthentication(
   const now = clock ?? (() => new Date());
 
   const sessions = new SessionService(
-    pool,
-    new SessionRepository(pool),
-    new UserRepository(pool),
+    dataSource,
+    new SessionRepository(dataSource),
+    new UserRepository(dataSource),
     config,
     now,
   );
 
   return {
     identities: new IdentityService(
-      pool,
-      new IdentityRepository(pool),
+      dataSource,
+      new IdentityRepository(dataSource),
       sessions,
       mail,
       config,
@@ -71,7 +71,7 @@ export function createTestAuthentication(
     ),
     sessions,
     config,
-    pool,
+    dataSource,
     rateLimits: UNLIMITED,
     close: () => mail.close(),
   };

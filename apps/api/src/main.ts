@@ -1,6 +1,11 @@
+// Before anything that declares an entity: TypeORM's decorators register
+// themselves through the metadata reflection API, which is a polyfill rather
+// than something the runtime provides.
+import "reflect-metadata";
+
 import { ConfigurationError } from "@chronologity/config";
 import { loadConfig } from "./config/app-config.js";
-import { createDatabase } from "./lib/database/postgres.js";
+import { connectDatabase, createDatabase } from "./lib/database/postgres.js";
 import { createMessaging } from "./lib/messaging/kafka.js";
 import { createEmailClient } from "./integrations/email/email-client.js";
 import { createEmbeddedLocationClient } from "./integrations/metadata/embedded-location-client.js";
@@ -38,6 +43,8 @@ async function main(): Promise<void> {
   loadBreachedPasswordIndex();
 
   const database = createDatabase(config.database);
+
+  await connectDatabase(database);
   const messaging = createMessaging(config.messaging);
   const dependencies = [database, messaging];
 
@@ -47,13 +54,13 @@ async function main(): Promise<void> {
   // file: authorising and verifying an upload does not require reading it.
   const places = createPlaceSearchClient(config.places);
 
-  const accounts = new UserRepository(database.pool);
+  const accounts = new UserRepository(database.dataSource);
 
   // Sessions are built before identities because proving who someone is ends in
   // granting them one: the dependency runs that way and only that way.
   const sessions = new SessionService(
-    database.pool,
-    new SessionRepository(database.pool),
+    database.dataSource,
+    new SessionRepository(database.dataSource),
     accounts,
     config.auth,
   );
@@ -63,26 +70,26 @@ async function main(): Promise<void> {
     dependencies,
     authentication: {
       identities: new IdentityService(
-        database.pool,
-        new IdentityRepository(database.pool),
+        database.dataSource,
+        new IdentityRepository(database.dataSource),
         sessions,
         email,
         config.auth,
       ),
       sessions,
       config: config.auth,
-      pool: database.pool,
+      dataSource: database.dataSource,
     },
-    users: new UserService(database.pool, accounts, {
+    users: new UserService(database.dataSource, accounts, {
       minimumAgeYears: config.minimumAgeYears,
     }),
     authorization: new AuthorizationService(
-      database.pool,
-      new AuthorizationRepository(database.pool),
+      database.dataSource,
+      new AuthorizationRepository(database.dataSource),
     ),
     uploads: new UploadService(
-      database.pool,
-      new UploadRepository(database.pool),
+      database.dataSource,
+      new UploadRepository(database.dataSource),
       storage,
       config.uploadLimits,
       {
@@ -94,7 +101,7 @@ async function main(): Promise<void> {
         embeddedLocation: createEmbeddedLocationClient(storage),
       },
     ),
-    locations: new LocationService(database.pool, new LocationRepository(database.pool), places),
+    locations: new LocationService(database.dataSource, new LocationRepository(database.dataSource), places),
   });
 
   await startServer({

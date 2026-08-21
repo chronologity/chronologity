@@ -5,7 +5,7 @@ import type { EventEnvelope } from "@chronologity/contracts";
 import type { EventMetadata } from "../../types/event-metadata.js";
 import { migrate } from "../../lib/database/migrations.js";
 import { enqueueOutboxMessage, type MessageSubject } from "../../lib/database/outbox.js";
-import { createDatabase, type Database } from "../../lib/database/postgres.js";
+import { connectDatabase, createDatabase, type Database } from "../../lib/database/postgres.js";
 import { withTransaction } from "../../lib/database/transaction.js";
 import { createMessaging, type Messaging } from "../../lib/messaging/kafka.js";
 import { createEventConsumer } from "../../lib/messaging/consumer.js";
@@ -80,12 +80,13 @@ describe("outbox publication against real infrastructure", () => {
 
   beforeAll(async () => {
     database = createDatabase(databaseConfig);
+    await connectDatabase(database);
     messaging = createMessaging({
       brokers: (process.env.KAFKA_BROKERS ?? "localhost:9092").split(","),
       clientId: "outbox-publisher-integration",
     });
 
-    await migrate(database.pool);
+    await migrate(database.dataSource);
 
     // Auto-creation is disabled on the broker, so topics are explicit.
     const admin = messaging.kafka.admin();
@@ -103,7 +104,7 @@ describe("outbox publication against real infrastructure", () => {
   afterAll(async () => {
     await producer.disconnect();
     await messaging.close();
-    await database.pool.query("DELETE FROM outbox_messages");
+    await database.dataSource.query("DELETE FROM outbox_messages");
     await database.close();
   });
 
@@ -111,7 +112,7 @@ describe("outbox publication against real infrastructure", () => {
   // per partition, so each test starts from an empty table rather than
   // inheriting whatever a previous one left behind.
   beforeEach(async () => {
-    await database.pool.query("DELETE FROM outbox_messages");
+    await database.dataSource.query("DELETE FROM outbox_messages");
   });
 
   it("carries a committed change to a Kafka consumer with its trace intact", async () => {
@@ -129,7 +130,7 @@ describe("outbox publication against real infrastructure", () => {
     });
     await consumer.start();
 
-    await withTransaction(database.pool, async (tx) => {
+    await withTransaction(database.dataSource, async (tx) => {
       await enqueueOutboxMessage(tx, {
         topic: TOPIC,
         partitionKey: aggregateId,
@@ -141,7 +142,7 @@ describe("outbox publication against real infrastructure", () => {
       });
     });
 
-    const result = await publishOutboxBatch({ pool: database.pool, producer });
+    const result = await publishOutboxBatch({ dataSource: database.dataSource, producer });
     await waitFor(() => received.length > 0);
     await consumer.stop();
 
@@ -159,7 +160,7 @@ describe("outbox publication against real infrastructure", () => {
     const aggregateId = randomUUID();
 
     await assert.rejects(() =>
-      withTransaction(database.pool, async (tx) => {
+      withTransaction(database.dataSource, async (tx) => {
         await enqueueOutboxMessage(tx, {
           topic: TOPIC,
           partitionKey: aggregateId,
@@ -174,14 +175,14 @@ describe("outbox publication against real infrastructure", () => {
       }),
     );
 
-    const result = await publishOutboxBatch({ pool: database.pool, producer });
+    const result = await publishOutboxBatch({ dataSource: database.dataSource, producer });
 
     assert.equal(result.published, 0);
     assert.equal(result.reachedEnd, true);
   });
 
   it("marks published messages so a second pass does not resend them", async () => {
-    await withTransaction(database.pool, async (tx) => {
+    await withTransaction(database.dataSource, async (tx) => {
       for (let index = 0; index < 3; index += 1) {
         await enqueueOutboxMessage(tx, {
           topic: TOPIC,
@@ -195,8 +196,8 @@ describe("outbox publication against real infrastructure", () => {
       }
     });
 
-    const first = await publishOutboxBatch({ pool: database.pool, producer });
-    const second = await publishOutboxBatch({ pool: database.pool, producer });
+    const first = await publishOutboxBatch({ dataSource: database.dataSource, producer });
+    const second = await publishOutboxBatch({ dataSource: database.dataSource, producer });
 
     assert.equal(first.published, 3);
     assert.equal(second.published, 0);
@@ -205,7 +206,7 @@ describe("outbox publication against real infrastructure", () => {
   it("reports more work behind a full batch", async () => {
     // A pass that filled its batch should go again immediately rather than
     // sleep, or the queue drains one batch per poll interval.
-    await withTransaction(database.pool, async (tx) => {
+    await withTransaction(database.dataSource, async (tx) => {
       for (let index = 0; index < 3; index += 1) {
         await enqueueOutboxMessage(tx, {
           topic: TOPIC,
@@ -219,8 +220,8 @@ describe("outbox publication against real infrastructure", () => {
       }
     });
 
-    const full = await publishOutboxBatch({ pool: database.pool, producer, batchSize: 2 });
-    const rest = await publishOutboxBatch({ pool: database.pool, producer, batchSize: 2 });
+    const full = await publishOutboxBatch({ dataSource: database.dataSource, producer, batchSize: 2 });
+    const rest = await publishOutboxBatch({ dataSource: database.dataSource, producer, batchSize: 2 });
 
     assert.equal(full.published, 2);
     assert.equal(full.reachedEnd, false);
@@ -228,14 +229,14 @@ describe("outbox publication against real infrastructure", () => {
   });
 
   it("reports an empty queue as drained", async () => {
-    const result = await publishOutboxBatch({ pool: database.pool, producer });
+    const result = await publishOutboxBatch({ dataSource: database.dataSource, producer });
 
     assert.equal(result.published, 0);
     assert.equal(result.reachedEnd, true);
   });
 
   it("leaves a message pending and records why when the broker refuses", async () => {
-    const id = await withTransaction(database.pool, (tx) =>
+    const id = await withTransaction(database.dataSource, (tx) =>
       enqueueOutboxMessage(tx, {
         topic: TOPIC,
         partitionKey: randomUUID(),
@@ -248,15 +249,15 @@ describe("outbox publication against real infrastructure", () => {
     );
 
     const result = await publishOutboxBatch({
-      pool: database.pool,
+      dataSource: database.dataSource,
       producer: refusingProducer,
     });
 
-    const { rows } = await database.pool.query<{
+    const rows: {
       published_at: Date | null;
       attempts: number;
       last_error: string | null;
-    }>("SELECT published_at, attempts, last_error FROM outbox_messages WHERE id = $1", [id]);
+    }[] = await database.dataSource.query("SELECT published_at, attempts, last_error FROM outbox_messages WHERE id = $1", [id]);
 
     assert.equal(result.published, 0);
     assert.equal(rows[0]?.published_at, null);
@@ -265,7 +266,7 @@ describe("outbox publication against real infrastructure", () => {
   });
 
   it("republishes a message the broker refused once it recovers", async () => {
-    await withTransaction(database.pool, (tx) =>
+    await withTransaction(database.dataSource, (tx) =>
       enqueueOutboxMessage(tx, {
         topic: TOPIC,
         partitionKey: randomUUID(),
@@ -277,8 +278,8 @@ describe("outbox publication against real infrastructure", () => {
       }),
     );
 
-    await publishOutboxBatch({ pool: database.pool, producer: refusingProducer });
-    const recovered = await publishOutboxBatch({ pool: database.pool, producer });
+    await publishOutboxBatch({ dataSource: database.dataSource, producer: refusingProducer });
+    const recovered = await publishOutboxBatch({ dataSource: database.dataSource, producer });
 
     assert.equal(recovered.published, 1);
   });
@@ -286,7 +287,7 @@ describe("outbox publication against real infrastructure", () => {
   it("gives two publishers disjoint work", async () => {
     // `FOR UPDATE SKIP LOCKED` is what allows more than one instance to run.
     // The previous publisher read a single shared checkpoint and could not.
-    await withTransaction(database.pool, async (tx) => {
+    await withTransaction(database.dataSource, async (tx) => {
       for (let index = 0; index < 6; index += 1) {
         await enqueueOutboxMessage(tx, {
           topic: TOPIC,
@@ -301,11 +302,11 @@ describe("outbox publication against real infrastructure", () => {
     });
 
     const [left, right] = await Promise.all([
-      publishOutboxBatch({ pool: database.pool, producer, batchSize: 3 }),
-      publishOutboxBatch({ pool: database.pool, producer, batchSize: 3 }),
+      publishOutboxBatch({ dataSource: database.dataSource, producer, batchSize: 3 }),
+      publishOutboxBatch({ dataSource: database.dataSource, producer, batchSize: 3 }),
     ]);
 
-    const { rows } = await database.pool.query<{ count: string }>(
+    const rows: { count: string }[] = await database.dataSource.query(
       "SELECT count(*)::text AS count FROM outbox_messages WHERE published_at IS NULL",
     );
 

@@ -5,7 +5,7 @@ import type {
   Location,
   PlaceSuggestions,
 } from "@chronologity/contracts";
-import type pg from "pg";
+import type { DataSource } from "typeorm";
 import { withTransaction } from "../../lib/database/transaction.js";
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
@@ -33,14 +33,14 @@ export class LocationService {
   /**
    * Build the Location service.
    *
-   * @param pool - Opens the transactions this service's writes commit in.
+   * @param dataSource - Opens the transactions this service's writes commit in.
    * @param locations - Where places are stored.
    * @param places - Looks places up in the map service. Answered from recorded
    *   responses in tests, so the suite never calls OpenStreetMap.
    * @param clock - Injected so tests can move time without waiting.
    */
   constructor(
-    private readonly pool: pg.Pool,
+    private readonly dataSource: DataSource,
     private readonly locations: LocationRepository,
     private readonly places: PlaceSearchClient,
     private readonly clock: () => Date = () => new Date(),
@@ -100,7 +100,7 @@ export class LocationService {
       }
     }
 
-    const recorded = await withTransaction(this.pool, (tx) =>
+    const recorded = await withTransaction(this.dataSource, (tx) =>
       this.locations.insert(tx, {
         locationId: randomUUID(),
         recordedByUserId,

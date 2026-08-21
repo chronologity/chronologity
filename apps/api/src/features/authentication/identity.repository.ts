@@ -1,5 +1,6 @@
-import type pg from "pg";
+import type { DataSource } from "typeorm";
 import type { Transaction } from "../../lib/database/transaction.js";
+import { Identity, IdentityEmail, IdentityPassword } from "./identity.model.js";
 import { generateId } from "../../lib/ids/generate-id.js";
 import { normalizeEmail } from "./authentication.policy.js";
 
@@ -13,7 +14,7 @@ import { normalizeEmail } from "./authentication.policy.js";
  * code — read, then create if absent — would let both win and split one person
  * across two accounts.
  *
- * Reads take the pool and writes take a transaction, except where a read is
+ * Reads take the DataSource and writes take a transaction, except where a read is
  * part of a decision the same transaction is about to write.
  */
 
@@ -28,9 +29,9 @@ export class IdentityRepository {
   /**
    * Build the Identity repository.
    *
-   * @param pool - Used for reads that stand alone.
+   * @param dataSource - Used for reads that stand alone.
    */
-  constructor(private readonly pool: pg.Pool) {}
+  constructor(private readonly dataSource: DataSource) {}
 
   /**
    * Find the Identity owning an address, claiming it if unclaimed.
@@ -57,47 +58,47 @@ export class IdentityRepository {
     // The Identity first, because the address references it. Speculative: this
     // call may turn out to have lost the claim below, in which case the row is
     // removed again before the transaction ends.
-    await tx.query(`INSERT INTO identities (identity_id, created_at) VALUES ($1, $2)`, [
-      identityId,
-      input.now.toISOString(),
-    ]);
+    await tx.insert(Identity, { identityId, createdAt: input.now });
 
-    const inserted = await tx.query<{ identity_id: string }>(
-      `INSERT INTO identity_emails (normalized_email, email, identity_id, verified_at)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (normalized_email) DO NOTHING
-       RETURNING identity_id`,
-      [
+    // `orIgnore` is ON CONFLICT DO NOTHING. What comes back from RETURNING is
+    // what says this call claimed the address: the identifiers a conflicting
+    // insert reports are the ones handed to it, not the ones written.
+    const claimed = await tx
+      .createQueryBuilder()
+      .insert()
+      .into(IdentityEmail)
+      .values({
         normalizedEmail,
-        input.email,
+        email: input.email,
         identityId,
-        (input.verified ?? true) ? input.now.toISOString() : null,
-      ],
-    );
+        verifiedAt: (input.verified ?? true) ? input.now : null,
+        createdAt: input.now,
+      })
+      .orIgnore()
+      .returning(["normalizedEmail"])
+      .execute();
 
-    if (inserted.rows[0] !== undefined) {
+    if ((claimed.raw as unknown[]).length === 1) {
       return { identityId, created: true };
     }
 
     // The claim conflicted, so this call did not create the Identity after all.
     // Nothing references the row yet — the address that would have is the one
     // that just failed — so it goes, in the same transaction that made it.
-    await tx.query(`DELETE FROM identities WHERE identity_id = $1`, [identityId]);
+    await tx.delete(Identity, { identityId });
 
     // The insert conflicted, so someone else owns this address — either an
     // earlier sign-in or a concurrent one that committed first.
-    const existing = await tx.query<{ identity_id: string }>(
-      `SELECT identity_id FROM identity_emails WHERE normalized_email = $1`,
-      [normalizedEmail],
-    );
+    const row = await tx.findOne(IdentityEmail, {
+      where: { normalizedEmail },
+      select: { identityId: true },
+    });
 
-    const row = existing.rows[0];
-
-    if (row === undefined) {
+    if (row === null) {
       throw new Error("Identity claim disappeared during resolution");
     }
 
-    return { identityId: row.identity_id, created: false };
+    return { identityId: row.identityId, created: false };
   }
 
   /**
@@ -107,12 +108,12 @@ export class IdentityRepository {
    * @returns The owning Identity, or undefined if the address is unclaimed.
    */
   async findByEmail(email: string): Promise<string | undefined> {
-    const { rows } = await this.pool.query<{ identity_id: string }>(
-      `SELECT identity_id FROM identity_emails WHERE normalized_email = $1`,
-      [normalizeEmail(email)],
-    );
+    const row = await this.dataSource.getRepository(IdentityEmail).findOne({
+      where: { normalizedEmail: normalizeEmail(email) },
+      select: { identityId: true },
+    });
 
-    return rows[0]?.identity_id;
+    return row?.identityId;
   }
 
   /**
@@ -130,15 +131,32 @@ export class IdentityRepository {
     normalizedEmail: string,
     at: Date,
   ): Promise<string | undefined> {
-    const { rows } = await tx.query<{ identity_id: string }>(
-      `UPDATE identity_emails
-          SET verified_at = COALESCE(verified_at, $2)
-        WHERE normalized_email = $1
-        RETURNING identity_id`,
-      [normalizedEmail, at.toISOString()],
-    );
+    // Only an unverified address is written, which is what keeps the original
+    // moment when this runs twice.
+    const verified = await tx
+      .createQueryBuilder()
+      .update(IdentityEmail)
+      .set({ verifiedAt: at })
+      .where("normalized_email = :normalizedEmail", { normalizedEmail })
+      .andWhere("verified_at IS NULL")
+      .returning(["identityId"])
+      .execute();
 
-    return rows[0]?.identity_id;
+    const written = (verified.raw as { identity_id: string }[])[0];
+
+    if (written !== undefined) {
+      return written.identity_id;
+    }
+
+    // Nothing was written, which means the address is already verified or is
+    // not claimed at all. Those are different answers, so they are read apart
+    // rather than both reported as failure.
+    const existing = await tx.findOne(IdentityEmail, {
+      where: { normalizedEmail },
+      select: { identityId: true },
+    });
+
+    return existing?.identityId;
   }
 
   /**
@@ -150,12 +168,11 @@ export class IdentityRepository {
    * @returns Whether it is claimed and verified.
    */
   async isEmailVerified(normalizedEmail: string): Promise<boolean> {
-    const { rows } = await this.pool.query<{ verified_at: Date | null }>(
-      `SELECT verified_at FROM identity_emails WHERE normalized_email = $1`,
-      [normalizedEmail],
-    );
+    const row = await this.dataSource
+      .getRepository(IdentityEmail)
+      .findOne({ where: { normalizedEmail }, select: { verifiedAt: true } });
 
-    return rows[0]?.verified_at != null;
+    return row?.verifiedAt != null;
   }
 
   /**
@@ -166,12 +183,11 @@ export class IdentityRepository {
    *   a valid state: magic link remains a way to sign in.
    */
   async findPasswordHash(identityId: string): Promise<string | undefined> {
-    const { rows } = await this.pool.query<{ password_hash: string }>(
-      `SELECT password_hash FROM identity_passwords WHERE identity_id = $1`,
-      [identityId],
-    );
+    const row = await this.dataSource
+      .getRepository(IdentityPassword)
+      .findOne({ where: { identityId }, select: { passwordHash: true } });
 
-    return rows[0]?.password_hash;
+    return row?.passwordHash;
   }
 
   /**
@@ -188,12 +204,14 @@ export class IdentityRepository {
     identityId: string,
     passwordHash: string,
   ): Promise<void> {
-    await tx.query(
-      `INSERT INTO identity_passwords (identity_id, password_hash)
-       VALUES ($1, $2)
-       ON CONFLICT (identity_id)
-       DO UPDATE SET password_hash = EXCLUDED.password_hash, updated_at = now()`,
-      [identityId, passwordHash],
-    );
+    const now = new Date();
+
+    await tx
+      .createQueryBuilder()
+      .insert()
+      .into(IdentityPassword)
+      .values({ identityId, passwordHash, createdAt: now, updatedAt: now })
+      .orUpdate(["password_hash", "updated_at"], ["identity_id"])
+      .execute();
   }
 }

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { createRecordedPlaceSearchClient } from "../../integrations/places/recorded-place-search-client.js";
 import { migrate } from "../../lib/database/migrations.js";
-import { createDatabase, type Database } from "../../lib/database/postgres.js";
+import { connectDatabase, createDatabase, type Database } from "../../lib/database/postgres.js";
 import { createUser } from "../../testing/fixtures.js";
 import { LocationRepository } from "./location.repository.js";
 import { LocationService } from "./location.service.js";
@@ -35,11 +35,12 @@ describe("recording places", () => {
       user: process.env.POSTGRES_USER ?? "chronologity",
       password: process.env.POSTGRES_PASSWORD ?? "chronologity",
     });
-    await migrate(database.pool);
+    await connectDatabase(database);
+    await migrate(database.dataSource);
 
     locations = new LocationService(
-      database.pool,
-      new LocationRepository(database.pool),
+      database.dataSource,
+      new LocationRepository(database.dataSource),
       createRecordedPlaceSearchClient(),
     );
   });
@@ -49,7 +50,7 @@ describe("recording places", () => {
   });
 
   /** Somebody who can record a place. A Location references its recorder. */
-  const recorder = async (): Promise<string> => (await createUser(database.pool)).userId;
+  const recorder = async (): Promise<string> => (await createUser(database.dataSource)).userId;
 
   describe("searching", () => {
     it("returns candidates without creating anything", async () => {
@@ -59,7 +60,7 @@ describe("recording places", () => {
       // reference, and the database persists between runs. The property being
       // tested is that searching adds nothing, not that nothing is there.
       const countPlaces = async (): Promise<string> => {
-        const { rows } = await database.pool.query<{ count: string }>(
+        const rows: { count: string }[] = await database.dataSource.query(
           `SELECT count(*) AS count FROM locations`,
         );
         return rows[0]?.count ?? "0";
@@ -182,7 +183,7 @@ describe("recording places", () => {
       // eight reads of one committed row. This one cannot: it says the
       // database holds a single place, which is the property the conditional
       // insert exists for.
-      const { rows } = await database.pool.query<{ count: string }>(
+      const rows: { count: string }[] = await database.dataSource.query(
         `SELECT count(*) FROM locations WHERE source_reference = $1`,
         [reference],
       );

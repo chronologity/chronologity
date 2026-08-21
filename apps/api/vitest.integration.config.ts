@@ -21,6 +21,7 @@ if (existsSync(envFile)) {
 
 export default defineConfig({
   test: {
+    setupFiles: ["./src/testing/setup.ts"],
     include: ["src/**/*.integration.test.ts"],
     // Real infrastructure is slow in ways unit tests are not: Argon2id
     // hashing, waiting on delivered mail, and projections catching up.

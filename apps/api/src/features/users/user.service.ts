@@ -6,7 +6,7 @@ import type {
   UpdatePreferencesRequest,
   UpdateProfileRequest,
 } from "@chronologity/contracts";
-import type pg from "pg";
+import type { DataSource } from "typeorm";
 import { withTransaction } from "../../lib/database/transaction.js";
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
@@ -62,12 +62,12 @@ export class UserService {
   /**
    * Build the User service.
    *
-   * @param pool - Opens the transactions this service's writes commit in.
+   * @param dataSource - Opens the transactions this service's writes commit in.
    * @param users - Where accounts, handles, and restricted data are stored.
    * @param options - Handle cooldown, minimum age, and an injectable clock.
    */
   constructor(
-    private readonly pool: pg.Pool,
+    private readonly dataSource: DataSource,
     private readonly users: UserRepository,
     options: UserServiceOptions = {},
   ) {
@@ -123,7 +123,7 @@ export class UserService {
     // belongs to. A refused claim throws rather than returning, so the
     // transaction rolls the account back with it and nothing survives a
     // registration that did not complete.
-    await withTransaction(this.pool, async (tx) => {
+    await withTransaction(this.dataSource, async (tx) => {
       await this.users.insert(tx, {
         userId,
         identityId,
@@ -172,7 +172,7 @@ export class UserService {
       throw new ValidationError("Nothing to update");
     }
 
-    await withTransaction(this.pool, (tx) => this.users.updateProfile(tx, userId, changes));
+    await withTransaction(this.dataSource, (tx) => this.users.updateProfile(tx, userId, changes));
   }
 
   /**
@@ -210,7 +210,7 @@ export class UserService {
 
     const previousNormalized = normalizeHandle(state.handle);
 
-    const claimed = await withTransaction(this.pool, async (tx) => {
+    const claimed = await withTransaction(this.dataSource, async (tx) => {
       // Released before the new one is claimed, not after. A User may hold only
       // one current handle, so claiming first would briefly leave them holding
       // two and violate that constraint. Both happen in one transaction, so a
@@ -254,7 +254,7 @@ export class UserService {
       throw new NotFoundError("No such account");
     }
 
-    await withTransaction(this.pool, (tx) => this.users.updatePreferences(tx, userId, request));
+    await withTransaction(this.dataSource, (tx) => this.users.updatePreferences(tx, userId, request));
   }
 
   /**
@@ -272,7 +272,7 @@ export class UserService {
       throw new NotFoundError("No such account");
     }
 
-    const moved = await withTransaction(this.pool, (tx) =>
+    const moved = await withTransaction(this.dataSource, (tx) =>
       this.users.transitionStatus(tx, userId, "deactivated", "active"),
     );
 
@@ -294,7 +294,7 @@ export class UserService {
       throw new NotFoundError("No such account");
     }
 
-    const moved = await withTransaction(this.pool, (tx) =>
+    const moved = await withTransaction(this.dataSource, (tx) =>
       this.users.transitionStatus(tx, userId, "active", "deactivated"),
     );
 

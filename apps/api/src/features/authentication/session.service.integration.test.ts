@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import type { AuthConfig } from "../../config/auth-config.js";
 import { migrate } from "../../lib/database/migrations.js";
-import { createDatabase, type Database } from "../../lib/database/postgres.js";
+import { connectDatabase, createDatabase, type Database } from "../../lib/database/postgres.js";
 import { UnauthenticatedError } from "../../lib/errors/unauthorized-error.js";
 import { systemContext } from "../../types/request-context.js";
 import { createIdentity } from "../../testing/fixtures.js";
@@ -47,12 +47,13 @@ describe("sessions", () => {
       user: process.env.POSTGRES_USER ?? "chronologity",
       password: process.env.POSTGRES_PASSWORD ?? "chronologity",
     });
-    await migrate(database.pool);
+    await connectDatabase(database);
+    await migrate(database.dataSource);
 
     sessions = new SessionService(
-      database.pool,
-      new SessionRepository(database.pool),
-      new UserRepository(database.pool),
+      database.dataSource,
+      new SessionRepository(database.dataSource),
+      new UserRepository(database.dataSource),
       config,
       () => now,
     );
@@ -66,7 +67,7 @@ describe("sessions", () => {
 
   /** A Session belonging to a fresh Identity. */
   const open = async () => {
-    const identityId = await createIdentity(database.pool);
+    const identityId = await createIdentity(database.dataSource);
     const credentials = await sessions.issue({
       identityId,
       clientKind: "test",
@@ -149,7 +150,7 @@ describe("sessions", () => {
       await sessions.revoke(credentials.sessionId, identityId, "refresh_token_reuse", context());
       await sessions.revoke(credentials.sessionId, identityId, "user_logout", context());
 
-      const { rows } = await database.pool.query<{ revocation_reason: string }>(
+      const rows: { revocation_reason: string }[] = await database.dataSource.query(
         `SELECT revocation_reason FROM sessions WHERE session_id = $1`,
         [credentials.sessionId],
       );
@@ -161,7 +162,7 @@ describe("sessions", () => {
 
   describe("ending every session", () => {
     it("spares the one asking when told to", async () => {
-      const identityId = await createIdentity(database.pool);
+      const identityId = await createIdentity(database.dataSource);
       const issue = () =>
         sessions.issue({ identityId, clientKind: "test", method: "password", context: context() });
 
@@ -191,7 +192,7 @@ describe("sessions", () => {
     });
 
     it("records which sessions ended, not merely how many", async () => {
-      const identityId = await createIdentity(database.pool);
+      const identityId = await createIdentity(database.dataSource);
       const first = await sessions.issue({
         identityId,
         clientKind: "test",
@@ -207,7 +208,7 @@ describe("sessions", () => {
 
       await sessions.revokeAll({ identityId, reason: "password_reset", context: context() });
 
-      const { rows } = await database.pool.query<{ session_id: string }>(
+      const rows: { session_id: string }[] = await database.dataSource.query(
         `SELECT session_id FROM auth_audit_events
           WHERE identity_id = $1 AND event_type = 'session_revoked'`,
         [identityId],
@@ -224,7 +225,7 @@ describe("sessions", () => {
 
   describe("listing", () => {
     it("shows what is open, newest first, with the caller's own marked", async () => {
-      const identityId = await createIdentity(database.pool);
+      const identityId = await createIdentity(database.dataSource);
       const older = await sessions.issue({
         identityId,
         clientKind: "test",
@@ -256,7 +257,7 @@ describe("sessions", () => {
     });
 
     it("omits a revoked session rather than showing it as ended", async () => {
-      const identityId = await createIdentity(database.pool);
+      const identityId = await createIdentity(database.dataSource);
       const kept = await sessions.issue({
         identityId,
         clientKind: "test",

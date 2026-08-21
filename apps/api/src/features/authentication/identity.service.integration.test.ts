@@ -5,7 +5,7 @@ import type { AuthConfig } from "../../config/auth-config.js";
 import type { EmailClient, EmailMessage } from "../../integrations/email/email-client.js";
 import { issueMagicLink, type MagicLinkPurpose } from "../../lib/auth/magic-link.js";
 import { migrate } from "../../lib/database/migrations.js";
-import { createDatabase, type Database } from "../../lib/database/postgres.js";
+import { connectDatabase, createDatabase, type Database } from "../../lib/database/postgres.js";
 import { withTransaction } from "../../lib/database/transaction.js";
 import { UnauthenticatedError } from "../../lib/errors/unauthorized-error.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
@@ -75,7 +75,8 @@ describe("identities", () => {
       user: process.env.POSTGRES_USER ?? "chronologity",
       password: process.env.POSTGRES_PASSWORD ?? "chronologity",
     });
-    await migrate(database.pool);
+    await connectDatabase(database);
+    await migrate(database.dataSource);
 
     identities = build(config);
   });
@@ -93,15 +94,15 @@ describe("identities", () => {
    */
   function build(settings: AuthConfig): IdentityService {
     const sessions = new SessionService(
-      database.pool,
-      new SessionRepository(database.pool),
-      new UserRepository(database.pool),
+      database.dataSource,
+      new SessionRepository(database.dataSource),
+      new UserRepository(database.dataSource),
       settings,
     );
 
     return new IdentityService(
-      database.pool,
-      new IdentityRepository(database.pool),
+      database.dataSource,
+      new IdentityRepository(database.dataSource),
       sessions,
       recordingEmail,
       settings,
@@ -112,7 +113,7 @@ describe("identities", () => {
 
   /** Issue a link of a given purpose for an address, and hand back its token. */
   const linkFor = async (email: string, purpose: MagicLinkPurpose): Promise<string> => {
-    const { token } = await withTransaction(database.pool, (tx) =>
+    const { token } = await withTransaction(database.dataSource, (tx) =>
       issueMagicLink(tx, {
         email: email.toLowerCase(),
         purpose,
@@ -130,7 +131,7 @@ describe("identities", () => {
     await identities.register(email, password, context());
     await identities.verifyEmail(await linkFor(email, "verify_email"), context());
 
-    const identityId = await new IdentityRepository(database.pool).findByEmail(email);
+    const identityId = await new IdentityRepository(database.dataSource).findByEmail(email);
     assert.ok(identityId !== undefined);
 
     return { email, identityId };
@@ -153,7 +154,7 @@ describe("identities", () => {
       // token in a durable record is a working credential.
       assert.equal(await auditCount("magic_link_rejected"), before + 1);
 
-      const { rows } = await database.pool.query<{ count: string }>(
+      const rows: { count: string }[] = await database.dataSource.query(
         `SELECT count(*) FROM auth_audit_events WHERE context::text LIKE '%token%'`,
       );
       assert.equal(rows[0]?.count, "0");
@@ -166,7 +167,7 @@ describe("identities", () => {
 
       // What an erasure between issuing and redeeming looks like. The link is
       // valid and spends itself, but there is nothing left to prove control of.
-      await database.pool.query(`DELETE FROM identity_emails WHERE normalized_email = $1`, [
+      await database.dataSource.query(`DELETE FROM identity_emails WHERE normalized_email = $1`, [
         email.toLowerCase(),
       ]);
 
@@ -228,7 +229,7 @@ describe("identities", () => {
       // so none is issued. The caller cannot tell, which is the point.
       assert.deepEqual(sent, []);
 
-      const { rows } = await database.pool.query<{ count: string }>(
+      const rows: { count: string }[] = await database.dataSource.query(
         `SELECT count(*) FROM magic_link_tokens WHERE purpose = 'reset_password'
            AND created_at > now() - interval '5 seconds'`,
       );
@@ -324,7 +325,7 @@ describe("identities", () => {
       const token = await linkFor(email, "login");
       const credentials = await identities.signInWithLink(token, undefined, context());
 
-      const identityId = await new IdentityRepository(database.pool).findByEmail(email);
+      const identityId = await new IdentityRepository(database.dataSource).findByEmail(email);
       assert.ok(identityId !== undefined);
 
       await assert.rejects(
@@ -344,7 +345,7 @@ describe("identities", () => {
 
   /** The PHC-format hash stored for an Identity. */
   async function storedHash(identityId: string): Promise<string> {
-    const { rows } = await database.pool.query<{ password_hash: string }>(
+    const rows: { password_hash: string }[] = await database.dataSource.query(
       `SELECT password_hash FROM identity_passwords WHERE identity_id = $1`,
       [identityId],
     );
@@ -357,7 +358,7 @@ describe("identities", () => {
 
   /** How many audit records of a kind exist, for asserting one was added. */
   async function auditCount(eventType: string): Promise<number> {
-    const { rows } = await database.pool.query<{ count: string }>(
+    const rows: { count: string }[] = await database.dataSource.query(
       `SELECT count(*) FROM auth_audit_events WHERE event_type = $1`,
       [eventType],
     );

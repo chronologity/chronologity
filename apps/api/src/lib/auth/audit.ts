@@ -1,4 +1,5 @@
-import type pg from "pg";
+import type { DataSource } from "typeorm";
+import { AuthAuditEvent } from "../../features/authentication/identity.model.js";
 import type { Transaction } from "../database/transaction.js";
 import { generateId } from "../ids/generate-id.js";
 
@@ -50,21 +51,20 @@ export interface AuthAuditRecord {
  * @returns Nothing.
  */
 export async function recordAuthAudit(tx: Transaction, record: AuthAuditRecord): Promise<void> {
-  await tx.query(
-    `INSERT INTO auth_audit_events
-       (id, event_type, identity_id, session_id, outcome, reason, trace_id, context)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [
-      generateId(),
-      record.eventType,
-      record.identityId ?? null,
-      record.sessionId ?? null,
-      record.outcome,
-      record.reason ?? null,
-      record.traceId ?? null,
-      record.context === undefined ? null : JSON.stringify(record.context),
-    ],
-  );
+  await tx.insert(AuthAuditEvent, {
+    id: generateId(),
+    occurredAt: new Date(),
+    eventType: record.eventType,
+    identityId: record.identityId ?? null,
+    sessionId: record.sessionId ?? null,
+    outcome: record.outcome,
+    reason: record.reason ?? null,
+    traceId: record.traceId ?? null,
+    // The column is `jsonb`, which the driver serialises. Absence is a SQL null
+    // rather than a JSON one: nothing was recorded, as against something
+    // recorded as null.
+    context: record.context ?? null,
+  });
 }
 
 /**
@@ -72,27 +72,25 @@ export async function recordAuthAudit(tx: Transaction, record: AuthAuditRecord):
  *
  * Used by security tooling and tests.
  *
- * @param pool - Read-only use; no transaction required.
+ * @param dataSource - Read-only use; no transaction required.
  * @param identityId - Whose records to read.
  * @param limit - How many, most recent first.
  * @returns The event type, outcome, and reason of each record.
  */
 export async function readAuthAudit(
-  pool: pg.Pool,
+  dataSource: DataSource,
   identityId: string,
   limit = 50,
 ): Promise<{ eventType: string; outcome: string; reason: string | null }[]> {
-  const { rows } = await pool.query<{ event_type: string; outcome: string; reason: string | null }>(
-    `SELECT event_type, outcome, reason
-       FROM auth_audit_events
-      WHERE identity_id = $1
-      ORDER BY occurred_at DESC
-      LIMIT $2`,
-    [identityId, limit],
-  );
+  const rows = await dataSource.getRepository(AuthAuditEvent).find({
+    where: { identityId },
+    select: { eventType: true, outcome: true, reason: true },
+    order: { occurredAt: "DESC" },
+    take: limit,
+  });
 
   return rows.map((row) => ({
-    eventType: row.event_type,
+    eventType: row.eventType,
     outcome: row.outcome,
     reason: row.reason,
   }));

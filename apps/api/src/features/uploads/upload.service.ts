@@ -9,7 +9,7 @@ import {
   type UploadAuthorization,
   type UploadReceivedPayload,
 } from "@chronologity/contracts";
-import type pg from "pg";
+import type { DataSource } from "typeorm";
 import { enqueueOutboxMessage } from "../../lib/database/outbox.js";
 import { withTransaction, type Transaction } from "../../lib/database/transaction.js";
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
@@ -94,7 +94,7 @@ export class UploadService {
   /**
    * Build the Upload service.
    *
-   * @param pool - Opens the transactions this service's writes commit in.
+   * @param dataSource - Opens the transactions this service's writes commit in.
    * @param uploads - Where uploads are stored.
    * @param storage - Object storage. Bytes never travel through the API.
    * @param limits - Size ceilings and how long a registration stays open.
@@ -102,7 +102,7 @@ export class UploadService {
    *   needs, plus an optional logger and clock.
    */
   constructor(
-    private readonly pool: pg.Pool,
+    private readonly dataSource: DataSource,
     private readonly uploads: UploadRepository,
     private readonly storage: StorageClient,
     private readonly limits: UploadLimits,
@@ -157,7 +157,7 @@ export class UploadService {
     const storageKey = originalKey(ownerUserId, uploadId);
     const expiresAt = new Date(at.getTime() + this.limits.registrationTtlSeconds * 1000);
 
-    await withTransaction(this.pool, (tx) =>
+    await withTransaction(this.dataSource, (tx) =>
       this.uploads.insert(tx, {
         uploadId,
         ownerUserId,
@@ -262,7 +262,7 @@ export class UploadService {
     // A false result means something settled it between the read and the
     // write — a concurrent finalize, or a deletion. Its answer stands, and a
     // retried finalize is not an error.
-    await withTransaction(this.pool, async (tx) => {
+    await withTransaction(this.dataSource, async (tx) => {
       const received = await this.uploads.markReceived(tx, {
         uploadId,
         byteSize: stored.byteSize,
@@ -322,7 +322,7 @@ export class UploadService {
     // Counted before the work, so a file that reliably kills the decoder still
     // leaves evidence it was tried. Counting afterwards would let such a file be
     // retried forever, each attempt vanishing with the process.
-    await withTransaction(this.pool, (tx) => this.uploads.countAttempt(tx, uploadId, at));
+    await withTransaction(this.dataSource, (tx) => this.uploads.countAttempt(tx, uploadId, at));
 
     let probe;
 
@@ -377,7 +377,7 @@ export class UploadService {
       return false;
     }
 
-    const moved = await withTransaction(this.pool, (tx) =>
+    const moved = await withTransaction(this.dataSource, (tx) =>
       this.uploads.markReady(tx, {
         uploadId,
         kind: verdict.kind,
@@ -425,7 +425,7 @@ export class UploadService {
       return;
     }
 
-    await withTransaction(this.pool, (tx) => this.uploads.markDeleted(tx, uploadId, actorUserId));
+    await withTransaction(this.dataSource, (tx) => this.uploads.markDeleted(tx, uploadId, actorUserId));
 
     // Listed rather than reconstructed. Deleting a fixed set of key shapes
     // would leave behind anything written by a version of the code that named
@@ -567,7 +567,7 @@ export class UploadService {
     reason: string,
     category: "transient" | "permanent" = "permanent",
   ): Promise<void> {
-    await withTransaction(this.pool, (tx) =>
+    await withTransaction(this.dataSource, (tx) =>
       this.uploads.markFailed(tx, uploadId, reason, category),
     );
   }

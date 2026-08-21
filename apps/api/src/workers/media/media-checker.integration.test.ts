@@ -14,7 +14,7 @@ import {
   type StorageClient,
 } from "../../integrations/storage/storage-client.js";
 import { migrate } from "../../lib/database/migrations.js";
-import { createDatabase, type Database } from "../../lib/database/postgres.js";
+import { connectDatabase, createDatabase, type Database } from "../../lib/database/postgres.js";
 import type { ConsumedEvent } from "../../lib/messaging/consumer.js";
 import { createUser } from "../../testing/fixtures.js";
 import { systemContext } from "../../types/request-context.js";
@@ -61,7 +61,8 @@ describe("checking media", () => {
       user: process.env.POSTGRES_USER ?? "chronologity",
       password: process.env.POSTGRES_PASSWORD ?? "chronologity",
     });
-    await migrate(database.pool);
+    await connectDatabase(database);
+    await migrate(database.dataSource);
 
     const admin = new S3Client({
       endpoint: storageConfig.endpoint,
@@ -85,9 +86,9 @@ describe("checking media", () => {
     admin.destroy();
 
     storage = createStorageClient(storageConfig);
-    repository = new UploadRepository(database.pool);
+    repository = new UploadRepository(database.dataSource);
     uploads = new UploadService(
-      database.pool,
+      database.dataSource,
       repository,
       storage,
       {
@@ -111,7 +112,7 @@ describe("checking media", () => {
    * Stops short of checking, which is what each test then exercises.
    */
   const arrive = async (file: string, declaredKind: "image" | "video") => {
-    const { userId: ownerUserId } = await createUser(database.pool);
+    const { userId: ownerUserId } = await createUser(database.dataSource);
     const contentType = declaredKind === "image" ? "image/jpeg" : "video/mp4";
     const bytes = await readFile(fixture(file));
 
@@ -200,7 +201,7 @@ describe("checking media", () => {
     const { uploadId } = await arrive("video-too-long.mp4", "video");
     await uploads.check(uploadId);
 
-    const { rows } = await database.pool.query<{ failure_category: string; attempts: number }>(
+    const rows: { failure_category: string; attempts: number }[] = await database.dataSource.query(
       `SELECT failure_category, attempts FROM uploads WHERE upload_id = $1`,
       [uploadId],
     );
@@ -217,27 +218,27 @@ describe("checking media", () => {
 
     assert.equal(await uploads.check(uploadId), true);
 
-    const after = await database.pool.query<{ checked_at: Date; attempts: number }>(
+    const after = await database.dataSource.query(
       `SELECT checked_at, attempts FROM uploads WHERE upload_id = $1`,
       [uploadId],
     );
 
     assert.equal(await uploads.check(uploadId), true);
 
-    const again = await database.pool.query<{ checked_at: Date; attempts: number }>(
+    const again = await database.dataSource.query(
       `SELECT checked_at, attempts FROM uploads WHERE upload_id = $1`,
       [uploadId],
     );
 
-    assert.deepEqual(again.rows[0]?.checked_at, after.rows[0]?.checked_at, "it was checked twice");
-    assert.equal(again.rows[0]?.attempts, after.rows[0]?.attempts, "a second attempt was counted");
+    assert.deepEqual(again[0]?.checked_at, after[0]?.checked_at, "it was checked twice");
+    assert.equal(again[0]?.attempts, after[0]?.attempts, "a second attempt was counted");
   });
 
   it("counts an attempt before doing the work, so a fatal file leaves a trace", async () => {
     const { uploadId } = await arrive("photo.jpg", "image");
     await uploads.check(uploadId);
 
-    const { rows } = await database.pool.query<{ attempts: number }>(
+    const rows: { attempts: number }[] = await database.dataSource.query(
       `SELECT attempts FROM uploads WHERE upload_id = $1`,
       [uploadId],
     );
@@ -252,7 +253,7 @@ describe("checking media", () => {
       // a translator directly.
       const { uploadId, ownerUserId } = await arrive("photo.jpg", "image");
 
-      const { rows } = await database.pool.query<{ payload: Record<string, unknown> }>(
+      const rows: { payload: Record<string, unknown> }[] = await database.dataSource.query(
         `SELECT payload FROM outbox_messages
           WHERE aggregate_id = $1 AND event_type = 'UploadReceived'`,
         [uploadId],
@@ -283,7 +284,7 @@ describe("checking media", () => {
       await uploads.check(uploadId);
       await uploads.delete(uploadId, (await repository.findRecord(uploadId))?.ownerUserId ?? "");
 
-      const { rows } = await database.pool.query<{ event_type: string }>(
+      const rows: { event_type: string }[] = await database.dataSource.query(
         `SELECT event_type FROM outbox_messages WHERE aggregate_id = $1`,
         [uploadId],
       );
@@ -310,11 +311,12 @@ describe("handling a note from the queue", () => {
       user: process.env.POSTGRES_USER ?? "chronologity",
       password: process.env.POSTGRES_PASSWORD ?? "chronologity",
     });
+    await connectDatabase(database);
 
     storage = createStorageClient(storageConfig);
-    repository = new UploadRepository(database.pool);
+    repository = new UploadRepository(database.dataSource);
     uploads = new UploadService(
-      database.pool,
+      database.dataSource,
       repository,
       storage,
       {
