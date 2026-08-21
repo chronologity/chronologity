@@ -565,24 +565,32 @@ Historical integrity means users should be able to trust what a Moment represent
 21. Historical integrity must coexist with correction, privacy, safety, and deletion requirements.
 22. The product should not imply temporal precision that the user does not actually know.
 
+## Established Moment Decisions
+
+These were open questions. They were decided deliberately, ahead of the implementation that depends on them, rather than being answered by accident during it.
+
+**A Moment requires an occurrence and at least one image or video.** A caption, a Location, and a real-world Event are optional. Media-less Moments are therefore not permitted in the initial product.
+
+This has a consequence `moments.md` anticipated: because the last media asset cannot be removed without leaving a Moment that could not have been created, **removing the final media asset is refused**. It does not silently delete the Moment. Deleting a media asset and deleting a Moment remain different operations, and an edit must not destroy history as a side effect. Someone who wants the Moment gone deletes the Moment.
+
+**A Moment's occurrence is an interval with the precision it is actually known at**, using the same `start`, `end`, and precision that `packages/contracts/src/time.ts` already defines and that real-world Events use (ADR-100). A Moment known only as "summer 1998" is that interval at `month` precision, and never acquires a fabricated exact timestamp. This is what lets a Moment represent an interval rather than a point.
+
+**Media within a Moment carries an explicit position**, set from the order supplied at creation and changeable afterwards. Position is presentation only: it orders media inside the depth view and never affects where the Moment sits in chronology, which is determined by occurrence time alone.
+
+**Every Moment is private in the initial product**, visible to its author and to nobody else. No audience or sharing model exists until the social graph does, and Location precision follows the Moment rather than being controlled separately — while the author is the only viewer, there is no second viewer to reduce precision for. That `locations.md` requires the two to diverge eventually is not in doubt; it cannot be built against viewers who do not exist.
+
+**Deletion is a tombstone, and erasure is separate work.** A deleted Moment is retained as a row, disappears from every read, and its stored media is left untouched. What a deletion service must erase, in what order, and what must be retained for abuse prevention or legal reasons are deliberately unresolved and listed below. Foreign keys remain `RESTRICT` (ADR-097), so nothing is removed as a silent consequence of removing something else.
+
 ## Open Product Questions
 
 The following behaviors should remain open until deliberately designed rather than answered accidentally during implementation:
 
-- What is the minimum information required to create a Moment?
-- Can a Moment exist without image or video media?
-- What determines the initial ordering of multiple media assets within a Moment?
-- Can users manually reorder media after Moment creation?
 - What should happen when some media assets succeed during upload or processing and others fail?
 - Can users commit a Moment while some associated media is still processing?
 - How should extremely large Moments be presented without making Moment depth difficult to navigate?
-- How should approximate or partially known occurrence dates work?
-- Can a Moment represent a time interval rather than a point in time?
 - How should historical corrections be presented to users?
 - How should participation, tagging, and consent work when other people appear in a Moment?
 - Can multiple users collaboratively contribute to the same Moment?
-- What visibility modes exist, and can visibility vary for location versus other Moment data?
-- What exact semantics distinguish removal, deletion, and permanent erasure?
 - Which relationships between Moments should be first-class product concepts?
 - How should Moments participate in automatically derived location and event groupings?
 
