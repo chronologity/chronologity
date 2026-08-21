@@ -830,27 +830,36 @@ Before launch, Chronologity must have explicit product behavior for at least:
 
 Not every advanced account-management feature must ship on day one, but the underlying semantics must not prevent them.
 
+## Established Account Decisions
+
+These were open questions. Implementation settled them, and they are requirements now rather than possibilities. Each names where it was decided so the decision can be revisited deliberately rather than rediscovered.
+
+**Creating an account requires a handle, a display name, and a date of birth.** A biography is optional. Nothing else is asked for (`packages/contracts/src/users.ts`).
+
+**The minimum age is thirteen, and it is configuration rather than a constant.** The threshold in force when an account was created is stored alongside the birthdate, because without it nobody can say afterwards which rule an account was admitted under (`user_restricted_data.minimum_age_at_creation`, `USER_MINIMUM_AGE_YEARS`).
+
+**Two authentication methods ship: a magic link sent to an email address, and a password.** Both resolve to the same Identity.
+
+**An email address is required.** It is how an Identity is established and how a returning person is recognised as the same one, not merely one mechanism among several (`identity_emails`). Phone numbers are not supported, and no decision has been taken about whether they should be.
+
+**Registering does not prove an address; redeeming a link sent to it does.** Password sign-in is refused until the address is verified, because anyone can type an address that is not theirs. Magic-link sign-in proves the address by definition.
+
+**A handle is required, globally unique, and may be changed.** Uniqueness is decided by the database on the normalised form, so two people claiming one name at the same moment cannot both succeed. A released handle is reserved for a cooldown period and may be reclaimed by its previous holder within it. A User holds one current handle at a time, enforced by a partial unique index rather than by application code.
+
+**Five preferences ship: autoplay video, autoplay sound, locale, time zone, and reduced motion.** Autoplay is on with sound by default and can be turned off, which `docs/product/vision.md` requires. Preferences are written when the account is created rather than on first change, so reading them never has to decide what a missing row means.
+
+**Someone may list the sessions they have open, end one, or end all of them.** The session being used is marked as such. Revocation takes effect on the next request rather than at the next expiry (ADR-094).
+
+**Account recovery is a password reset by emailed link, and magic-link sign-in.** Both prove control of the address before granting anything.
+
 ## Open Product Questions
 
 The following questions require deliberate resolution:
 
-- What information is required to create a Chronologity account?
-- What is the minimum age for account creation?
-- Which authentication methods are supported initially?
-- Is email required, optional, or merely one authentication mechanism?
 - Are phone numbers supported?
-- What verification is required before an account becomes fully active?
-- What profile information is required?
-- Are handles required?
-- Are handles globally unique?
-- Can handles change?
 - What account attributes are searchable?
 - Can a User opt out of User search or recommendations?
 - What privacy defaults are configured at account creation?
-- What User preferences ship on day one?
-- How should autoplay preferences be structured?
-- What session-management controls are exposed to Users?
-- What recovery mechanisms are available?
 - Are multiple accounts per person permitted?
 - Should account merging ever be supported?
 - What exactly happens to a User's Moments when their account is deleted?

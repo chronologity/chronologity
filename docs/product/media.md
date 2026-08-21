@@ -1025,15 +1025,22 @@ The initial release does not require:
 
 Chronologity should solve reliable capture, preservation, processing, and presentation before adding AI-heavy media interpretation.
 
+## Established Media Decisions
+
+These were open questions. Implementation settled them, and they are requirements now rather than possibilities.
+
+**Accepted formats are an allowlist, checked against what the decoder actually found rather than what the uploader declared.** Images may be `mjpeg`, `png`, `webp`, `hevc`, `av1`, `jpeg2000`, or `bmp`. Videos may be `h264`, `hevc`, `vp8`, `vp9`, `av1`, or `mpeg4`. It is an allowlist rather than "whatever decoded" because a decoder will open far more than this product intends to store, and every extra format is more decoder surface exposed to files strangers upload.
+
+**Per-file limits are twenty-five mebibytes for an image and five hundred mebibytes for a video**, both configuration rather than constants. They bound one file; a Moment's media count remains unlimited at the product level, and nothing here changes that.
+
+**A video may run to ninety seconds**, enforced against the duration the decoder measured and never against anything a client declared.
+
 ## Open Product Questions
 
 The following questions require deliberate resolution:
 
 - Must every Moment contain at least one image or video?
 - Can a text-only Moment ever exist, or is media fundamental to Moment identity?
-- Which image formats are accepted on day one?
-- Which video formats are accepted on day one?
-- What are the maximum per-file image and video sizes?
 - Should per-file size limits differ by platform?
 - Should Chronologity impose any account-level storage quota?
 - If so, how do we preserve the invariant that a Moment itself has no media-count limit?

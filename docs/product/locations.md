@@ -1279,6 +1279,20 @@ The initial release does not require:
 - advanced Location-based social recommendations; or
 - perfect duplicate-place reconciliation.
 
+## Established Location Decisions
+
+These were open questions. Implementation settled them, and they are requirements now rather than possibilities.
+
+**A Location's identity is a Chronologity identifier and nothing else.** Not its name, not its coordinates, and not any provider's reference (ADR-090). Two places at the same coordinates are not thereby the same place, and the same ground holds different places over time.
+
+**OpenStreetMap is the initial place provider** (ADR-090). What comes back from it are candidates, not Locations: a Location exists only once somebody chooses one, and it is created carrying an identifier of ours.
+
+**A provider reference is recorded as provenance, never as identity.** It is stored in `source_reference` and is what makes two people choosing the same search result reach one place. Because identity is separate, a rename by the provider cannot rewrite what a place was called when someone recorded it.
+
+**A Location may be created that no provider has heard of.** The provider reference is optional, so a name typed by hand is a first-class place rather than a degraded one.
+
+**How a place came to be known is recorded and returned.** `source` distinguishes a place someone searched for and chose, one a device reported, and one read out of a photograph's metadata. The distinction cannot be recovered once lost, and the three are not equally strong claims.
+
 ## Open Product Questions
 
 The following questions require deliberate resolution:
@@ -1286,14 +1300,12 @@ The following questions require deliberate resolution:
 - Is Location optional for every Moment?
 - What Location precision options should Users see explicitly?
 - Should the product use labels such as exact, approximate, city-level, and hidden?
-- Should Users be able to enter free-form Location text without selecting a canonical Location?
 - If so, how is free-form historical text later reconciled with stable Location identity?
 - Should day-one Moments support multiple explicit Locations?
 - If not, how should routes and moving experiences be represented without corrupting the domain model?
 - Should a primary Location be required when multiple Locations exist?
 - Can individual media items expose different supporting Location metadata within one Moment?
 - Should Users be able to inspect per-media metadata without turning it into separate Moment chronology?
-- What exact Location provenance should be visible to Users?
 - Should device-derived Location require explicit confirmation before becoming historical metadata?
 - Should media GPS metadata require explicit confirmation?
 - Should Chronologity strip GPS metadata from all delivered media by default?
@@ -1317,11 +1329,7 @@ The following questions require deliberate resolution:
 - Who may confirm a Location correction?
 - How should disputed Location claims be represented?
 - Should Chronologity preserve the original Location assertion after correction?
-- What minimum data defines stable Location identity?
-- Should Chronologity rely initially on an external place provider for canonical Locations?
-- If so, how do we avoid making provider identifiers our permanent domain identity?
 - How should provider changes or provider disagreements be handled?
-- Can Users create a Location that no external provider knows about?
 - How should private or personal places be named?
 - Should a private home become a reusable Location entity?
 - How should unnamed natural Locations be represented?
