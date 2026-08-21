@@ -2665,3 +2665,39 @@ Six integration suites were passing fabricated identifiers where a real parent i
 Roughly seventeen thousand orphaned rows — development debris, plus rows predating the `identities` table — were removed by the migration that adds the constraints. It could not otherwise apply to a database that had been developed against. There is no production data.
 
 A future deletion service must remove dependants in order. That is the intended consequence.
+
+---
+
+# ADR-098 — Attach Location Privacy to the Moment's Association, Not to the Place
+
+**Status:** Accepted
+
+## Decision
+
+Viewer-relative Location precision is a property of a Moment's association with a place, not of the Location record. It is therefore implemented with Moments rather than with Locations, and the Location model carries no visibility or audience of its own.
+
+## Alternatives Considered
+
+Putting visibility on the Location, so that a place is exposed at a precision determined by whoever recorded it.
+
+Implementing precision reduction ahead of Moments, on the assumption that the recorder receives exact coordinates and everybody else receives less.
+
+## Rationale
+
+A Location is shared reference data. Two people choosing the same search result reach one record, which is the property that keeps a place stable across everyone who was there. Its `recorded_by_user_id` is provenance rather than ownership: it says who first caused the record to exist, and confers nothing.
+
+That leaves a Location with no audience to reduce precision for. Giving one person exact coordinates because they happened to be first, and a second person less for choosing the same place afterwards, would be a rule nobody could explain and one the documents never asked for.
+
+The product model already says where privacy attaches. `locations.md` states that "can view Moment" and "can view exact Location" are different questions, and that different viewers may legitimately receive different precision for the same Moment. Both sentences are about a Moment. Precision is a property of one person's assertion that something happened at a place — which is what a Moment is — rather than of the place.
+
+Twelve of the open product questions in that document are phrased in terms of Moments, viewers, or audiences. Building before those exist would answer them by implementation, which principle 4 of `docs/README.md` prohibits.
+
+Nothing is exposed while this waits. No Location is shared with anyone: identifiers are not enumerable and no surface hands one to a stranger.
+
+## Consequences
+
+The Location model stays as 5F-1 and 5F-2 built it: identity, name, coordinates, precision as recorded, geographic context, provenance, and source. No visibility column, no audience, no viewer parameter on a read.
+
+Precision reduction, when built, belongs to whatever reads a Moment — the API for authoritative reads, the feed aggregator for Timeline composition. Both must reduce, and neither may leak finer precision through a derived value: a distance computed from coordinates that are themselves withheld discloses them.
+
+`GET /locations/:locationId` currently returns a place at full precision to any authenticated caller. That is acceptable for the searched public places it was built for, and is the reason a privately typed place — a home, named and positioned by hand — must not be treated as shared reference data once Moments can point at one. How Chronologity recognises such a place is open (`locations.md`), and is part of the same work.

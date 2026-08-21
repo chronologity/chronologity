@@ -345,6 +345,11 @@ hidden
 
 The exact precision model belongs in product/location specifications.
 
+Precision attaches to a Moment's association with a place rather than to the
+place itself (ADR-098). A Location is shared reference data with no audience of
+its own, so there is nothing on it to reduce precision for; what varies by
+viewer is one person's assertion that something happened somewhere.
+
 ---
 
 # Precision-Aware Authorization
