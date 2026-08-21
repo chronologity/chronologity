@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import type { ProbedMedia } from "../../features/uploads/upload.media-policy.js";
 import type { Logger } from "../../lib/logger/logger.js";
 import { empty, interpret, isTimeoutOrMissing } from "./interpret-probe.js";
+import { readLocationTag } from "./read-embedded-location.js";
 
 const run = promisify(execFile);
 
@@ -40,6 +41,22 @@ export interface MetadataClient {
    *   back as a probe with nothing recognised, which is an answer.
    */
   probe(url: string): Promise<ProbedMedia>;
+  /**
+   * Read the location tag a camera wrote into a video.
+   *
+   * Deliberately separate from `probe`, and deliberately not part of what a
+   * probe returns. Probing happens automatically when a file arrives, and its
+   * result is recorded; where somebody was is only read when they ask for it,
+   * and is recorded nowhere. Folding this into the probe would quietly turn a
+   * private fact into a stored one.
+   *
+   * @param url - A temporary link permitting reads of the object.
+   * @returns The tag as written, or undefined when the video carries none.
+   *   Making sense of it belongs to `readIso6709`.
+   * @throws {Error} If the decoder could not be run at all, or exceeded its
+   *   time limit. A file the decoder refuses yields undefined instead.
+   */
+  probeLocationTag(url: string): Promise<string | undefined>;
 }
 
 export interface MetadataConfig {
@@ -104,6 +121,39 @@ export function createMetadataClient(config: MetadataConfig = {}, logger?: Logge
       }
 
       return interpret(stdout);
+    },
+
+    async probeLocationTag(url) {
+      let stdout: string;
+
+      try {
+        const result = await run(
+          binary,
+          [
+            "-v",
+            "error",
+            "-print_format",
+            "json",
+            // Two spellings of the same tag. QuickTime writes the Apple one,
+            // and other muxers write the plain one; asking for only one of
+            // them loses the location depending on what recorded the video.
+            "-show_entries",
+            "format_tags=location,com.apple.quicktime.location.ISO6709",
+            url,
+          ],
+          { timeout, maxBuffer: 64 * 1024 },
+        );
+
+        stdout = result.stdout;
+      } catch (error) {
+        if (isTimeoutOrMissing(error)) {
+          throw error;
+        }
+
+        return undefined;
+      }
+
+      return readLocationTag(stdout);
     },
   };
 }

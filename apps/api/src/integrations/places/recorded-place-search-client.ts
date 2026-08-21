@@ -49,5 +49,24 @@ export function createRecordedPlaceSearchClient(): PlaceSearchClient {
         attribution: ATTRIBUTION,
       };
     },
+
+    async reverse(coordinates) {
+      // Matched loosely, because a coordinate that has travelled through a
+      // camera's degrees-and-minutes encoding and back does not come out bit
+      // for bit. Roughly a hundred metres, which is far tighter than the
+      // distance between the recorded place and anywhere else asked about.
+      const isBigBen =
+        Math.abs(coordinates.latitude - 51.5007) < 0.001 &&
+        Math.abs(coordinates.longitude - -0.1246) < 0.001;
+
+      const file = isBigBen ? "reverse-big-ben.json" : "reverse-nowhere.json";
+      const path = fileURLToPath(new URL(`./__fixtures__/${file}`, import.meta.url));
+      const raw = JSON.parse(readFileSync(path, "utf8")) as unknown;
+
+      return {
+        suggestions: interpretResults([raw]),
+        attribution: ATTRIBUTION,
+      };
+    },
   };
 }

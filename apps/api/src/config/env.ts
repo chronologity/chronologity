@@ -69,6 +69,12 @@ export const envSchema = z.object({
   // maintained by volunteers.
   PLACES_MINIMUM_INTERVAL_MS: z.coerce.number().int().min(0).max(10_000).default(1_100),
 
+  // Asking what is at a coordinate is a different endpoint from asking what
+  // matches a name. Configured separately rather than derived from the search
+  // URL by rewriting its last path segment, which would silently break against
+  // any deployment that arranges its paths differently.
+  PLACES_REVERSE_ENDPOINT: z.url().default("https://nominatim.openstreetmap.org/reverse"),
+
   S3_ENDPOINT: z.url(),
   S3_REGION: z.string().min(1).default("us-east-1"),
   S3_ACCESS_KEY_ID: z.string().min(1),

@@ -1,4 +1,4 @@
-import type { PlaceSuggestion } from "@chronologity/contracts";
+import type { Coordinates, PlaceSuggestion } from "@chronologity/contracts";
 import type { Logger } from "../../lib/logger/logger.js";
 
 /**
@@ -34,10 +34,30 @@ export interface PlaceSearchClient {
     suggestions: PlaceSuggestion[];
     attribution: string;
   }>;
+  /**
+   * Find what is at a coordinate.
+   *
+   * A coordinate is a measurement, not a place. This is what turns the numbers
+   * a camera recorded into something a person can recognise and choose —
+   * without which accepting a photograph's location would record a naked pair
+   * of numbers as though it were somewhere.
+   *
+   * @param coordinates - Where to look.
+   * @returns Candidates, and the attribution the data must be shown with. An
+   *   empty list is an ordinary answer: a coordinate in open ocean is a real
+   *   coordinate and not a place.
+   * @throws {Error} If the service could not be reached or refused the request.
+   */
+  reverse(coordinates: Coordinates): Promise<{
+    suggestions: PlaceSuggestion[];
+    attribution: string;
+  }>;
 }
 
 export interface PlaceSearchConfig {
   readonly endpoint: string;
+  /** Where to ask what is at a coordinate. A different endpoint from search. */
+  readonly reverseEndpoint: string;
   /**
    * How this application identifies itself.
    *
@@ -102,40 +122,71 @@ export function createPlaceSearchClient(
 
   let lastRequestAt = 0;
 
+  /**
+   * Ask the service, no faster than it permits.
+   *
+   * @param url - The prepared request.
+   * @returns The parsed body.
+   * @throws {Error} If the service refused the request.
+   */
+  const ask = async (url: URL): Promise<unknown> => {
+    // Waiting rather than refusing. A request that arrives too soon after the
+    // last one is not a mistake worth failing; the caller wants an answer, and
+    // the service asks only that we not rush it. Shared across both kinds of
+    // lookup, because the limit belongs to the service and not to a method.
+    const sinceLast = Date.now() - lastRequestAt;
+
+    if (sinceLast < interval) {
+      await new Promise((resolve) => setTimeout(resolve, interval - sinceLast));
+    }
+
+    lastRequestAt = Date.now();
+
+    const response = await fetch(url, {
+      headers: { "user-agent": config.userAgent },
+      signal: AbortSignal.timeout(timeout),
+    });
+
+    if (!response.ok) {
+      logger?.warn({ status: response.status }, "Place lookup was refused");
+
+      throw new Error(`Place lookup failed with status ${response.status}`);
+    }
+
+    return response.json();
+  };
+
   return {
     async search(query, limit = DEFAULT_LIMIT) {
-      // Waiting rather than refusing. A search that arrives too soon after the
-      // last one is not a mistake worth failing; the caller wants an answer,
-      // and the service asks only that we not rush it.
-      const sinceLast = Date.now() - lastRequestAt;
-
-      if (sinceLast < interval) {
-        await new Promise((resolve) => setTimeout(resolve, interval - sinceLast));
-      }
-
-      lastRequestAt = Date.now();
-
       const url = new URL(config.endpoint);
       url.searchParams.set("q", query);
       url.searchParams.set("format", "jsonv2");
       url.searchParams.set("addressdetails", "1");
       url.searchParams.set("limit", String(limit));
 
-      const response = await fetch(url, {
-        headers: { "user-agent": config.userAgent },
-        signal: AbortSignal.timeout(timeout),
-      });
+      return {
+        suggestions: interpretResults(await ask(url)),
+        attribution: ATTRIBUTION,
+      };
+    },
 
-      if (!response.ok) {
-        logger?.warn({ status: response.status }, "Place search was refused");
-
-        throw new Error(`Place search failed with status ${response.status}`);
-      }
-
-      const results = (await response.json()) as NominatimResult[];
+    async reverse(coordinates) {
+      const url = new URL(config.reverseEndpoint);
+      url.searchParams.set("lat", String(coordinates.latitude));
+      url.searchParams.set("lon", String(coordinates.longitude));
+      url.searchParams.set("format", "jsonv2");
+      url.searchParams.set("addressdetails", "1");
+      // How wide a thing to name. 18 is a building; smaller numbers give the
+      // street, the suburb, the city. Asked for at the finest level because a
+      // photograph's coordinate points at a spot, and what someone wants
+      // offered is the venue they were in — not the county it sits in.
+      url.searchParams.set("zoom", "18");
 
       return {
-        suggestions: interpretResults(results),
+        // Reverse lookup answers with one object where search answers with a
+        // list. Wrapping it means both go through exactly the same
+        // interpretation, so a candidate means the same thing either way.
+        suggestions: interpretResults([await ask(url)]),
         attribution: ATTRIBUTION,
       };
     },

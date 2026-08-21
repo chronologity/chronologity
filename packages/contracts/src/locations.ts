@@ -39,6 +39,32 @@ export const locationPrecisionSchema = z.enum([
 export type LocationPrecision = z.infer<typeof locationPrecisionSchema>;
 
 /**
+ * How a place came to be known.
+ *
+ * Recorded because not all sources carry the same authority
+ * (`locations.md:333`), and because once it is lost it cannot be recovered:
+ * "Madison Square Garden, typed in by the person who was there" and "Madison
+ * Square Garden, read out of a photograph's metadata" are different claims,
+ * and a system that stores only the name has thrown the difference away.
+ *
+ * `locations.md:310-321` lists more sources than these — imported metadata,
+ * Event association, another person's assertion, inference by a model. Those
+ * arrive with the capabilities that produce them. Naming a source before
+ * anything can produce it would only invite something to be labelled with it
+ * inaccurately.
+ */
+export const locationSourceSchema = z.enum([
+  /** Someone searched, or typed a name, and chose. The strongest claim there is. */
+  "explicit-selection",
+  /** The device reported where it was. Sensitive: capture is not consent to disclose. */
+  "device-location",
+  /** Read out of an uploaded photograph or video, and offered rather than assumed. */
+  "media-metadata",
+]);
+
+export type LocationSource = z.infer<typeof locationSourceSchema>;
+
+/**
  * A position on the earth.
  *
  * Optional on a Location, because a place can be meaningful without one and
@@ -131,6 +157,8 @@ export const locationSchema = z.object({
    * heard of is still a place.
    */
   sourceReference: z.string().nullable(),
+  /** How this place came to be known. */
+  source: locationSourceSchema,
   createdAt: timestampSchema,
 });
 
@@ -150,6 +178,14 @@ export const createLocationRequestSchema = z
     context: geographicContextSchema.partial().optional(),
     /** A suggestion's reference, when this came from a search result. */
     sourceReference: z.string().max(100).optional(),
+    /**
+     * How the place was established.
+     *
+     * Defaults to explicit selection, because that is what a request arriving
+     * with nothing else to say describes: somebody typed this in. A caller
+     * claiming a weaker source has to say so.
+     */
+    source: locationSourceSchema.optional(),
   })
   .refine(
     (value) => value.precision === "unknown" || value.coordinates !== undefined,
@@ -169,3 +205,30 @@ export const searchPlacesRequestSchema = z.object({
 });
 
 export type SearchPlacesRequest = z.infer<typeof searchPlacesRequestSchema>;
+
+/**
+ * What an uploaded file says about where it was taken.
+ *
+ * Suggestions rather than a coordinate. The raw position a camera recorded is
+ * not returned, and is stored nowhere: it is used to ask the map service what
+ * is there, and the places that come back are what the owner chooses from. A
+ * photograph knowing where it was taken does not make that a fact about
+ * somebody's history — it makes it something to offer them
+ * (`locations.md:373`).
+ *
+ * An empty list is the ordinary answer. Most files carry no location.
+ */
+export const embeddedPlaceSuggestionsSchema = z.object({
+  suggestions: z.array(placeSuggestionSchema),
+  attribution: z.string(),
+  /**
+   * Whether the file carried a location at all.
+   *
+   * Distinct from an empty list of suggestions: a file with no location and a
+   * file whose location the map service could not name are different, and only
+   * the second is worth offering to search by hand.
+   */
+  found: z.boolean(),
+});
+
+export type EmbeddedPlaceSuggestions = z.infer<typeof embeddedPlaceSuggestionsSchema>;

@@ -68,6 +68,22 @@ export interface StorageClient {
    */
   head(key: string): Promise<StoredObject | undefined>;
   /**
+   * Read the first part of an object.
+   *
+   * A range request rather than a download. What a photograph says about where
+   * it was taken sits in a header near the front of the file, so answering that
+   * question needs a few kilobytes rather than the several megabytes the
+   * photograph occupies — and pulling the whole thing into the API to read a
+   * header would undo the reason media never travels through it.
+   *
+   * @param key - The object to read.
+   * @param byteCount - How much of the front to read. A bound, not a hint: this
+   *   runs while somebody waits on an HTTP request.
+   * @returns The bytes, fewer than asked for if the object is smaller, or
+   *   undefined if there is nothing at the key.
+   */
+  readHead(key: string, byteCount: number): Promise<Uint8Array | undefined>;
+  /**
    * Store an object directly.
    *
    * Unlike `presignUpload`, which authorises someone else to write, this
@@ -161,6 +177,29 @@ export function createStorageClient(config: StorageConfig): StorageClient {
         // A missing object is an answer, not a failure: it is what "the client
         // said it uploaded but did not" looks like. Anything else is a real
         // storage problem and must not be swallowed into the same undefined.
+        if (isNotFound(error)) {
+          return undefined;
+        }
+
+        throw error;
+      }
+    },
+
+    async readHead(key, byteCount) {
+      try {
+        const response = await client.send(
+          new GetObjectCommand({
+            Bucket: config.bucket,
+            Key: key,
+            // Inclusive at both ends, which is why this is one short of the
+            // count. Storage returns fewer bytes without complaint when the
+            // object is smaller than the range asked for.
+            Range: `bytes=0-${byteCount - 1}`,
+          }),
+        );
+
+        return await response.Body?.transformToByteArray();
+      } catch (error) {
         if (isNotFound(error)) {
           return undefined;
         }
