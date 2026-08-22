@@ -14,6 +14,7 @@ import { AuthorizationAuditEvent, RoleAssignment } from "../../features/authoriz
 import { Location } from "../../features/locations/location.model.js";
 import {
   Moment,
+  MomentEdit,
   MomentLocation,
   MomentMedium,
   MomentRealWorldEvent,
@@ -72,6 +73,7 @@ const entities = [
   MomentMedium,
   MomentLocation,
   MomentRealWorldEvent,
+  MomentEdit,
   RealWorldEvent,
   RealWorldEventAlias,
   RealWorldEventLocation,

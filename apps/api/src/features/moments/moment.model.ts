@@ -102,6 +102,57 @@ export class Moment {
 }
 
 /**
+ * A change somebody made to a Moment.
+ *
+ * `moments.md:534` asks that corrections be represented explicitly. Editing is
+ * permitted — historical integrity does not mean absolute technical
+ * immutability — but a Moment that quietly moved through history, or quietly
+ * lost a photograph, would leave nothing to trust.
+ *
+ * Every kind of edit is kept, not only the ones that move a Moment in time.
+ */
+@Entity("moment_edits")
+@Index("moment_edits_moment_idx", ["momentId", "editedAt"])
+export class MomentEdit {
+  @PrimaryColumn("uuid", { name: "edit_id" })
+  editId!: string;
+
+  @Column("uuid", { name: "moment_id" })
+  momentId!: string;
+
+  /**
+   * Who made the change. Always the Moment's author today, recorded anyway
+   * because that stops being obvious the moment anybody else can.
+   */
+  @Column("uuid", { name: "edited_by_user_id" })
+  editedByUserId!: string;
+
+  /**
+   * What kind of change it was — recorded rather than inferred, because the
+   * product distinguishes moving a Moment in time from correcting its caption.
+   */
+  @Column("text")
+  kind!: string;
+
+  /**
+   * What the changed thing was before, shaped to the kind.
+   *
+   * Declared as `object` for the reason the audit tables' `context` is: the
+   * driver serialises whatever it is given, and an open index signature does
+   * not satisfy the query builder's deep-partial of the column type.
+   */
+  @Column("jsonb")
+  previous!: object;
+
+  @Column("timestamptz", { name: "edited_at" })
+  editedAt!: Date;
+
+  @ManyToOne(() => Moment)
+  @JoinColumn({ name: "moment_id" })
+  moment?: Moment;
+}
+
+/**
  * Where a Moment's experience happened.
  *
  * One per Moment, which the primary key enforces. `locations.md:433` asks that

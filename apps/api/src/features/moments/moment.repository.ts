@@ -1,4 +1,9 @@
-import type { Moment as MomentContract, TemporalPrecision } from "@chronologity/contracts";
+import { randomUUID } from "node:crypto";
+import type {
+  Moment as MomentContract,
+  Occurrence,
+  TemporalPrecision,
+} from "@chronologity/contracts";
 import type { DataSource } from "typeorm";
 import { IsNull } from "typeorm";
 import type { Transaction } from "../../lib/database/transaction.js";
@@ -8,11 +13,12 @@ import { toLocation } from "../locations/location.repository.js";
 import { toRealWorldEvent } from "../real-world-events/real-world-event.repository.js";
 import {
   Moment as MomentRow,
+  MomentEdit,
   MomentLocation,
   MomentMedium,
   MomentRealWorldEvent,
 } from "./moment.model.js";
-import type { MomentCursor, NewMoment } from "./moment.types.js";
+import type { MomentCursor, MomentEditKind, NewMoment } from "./moment.types.js";
 
 /**
  * Where Moments are stored.
@@ -257,6 +263,152 @@ export class MomentRepository {
     realWorldEventId: string,
   ): Promise<boolean> {
     const { affected } = await tx.delete(MomentRealWorldEvent, { momentId, realWorldEventId });
+
+    return affected === 1;
+  }
+
+  /**
+   * Read the media a Moment currently has, in order.
+   *
+   * @param momentId - Which Moment.
+   * @returns The identifiers, ordered by position. What the editing rules are
+   *   checked against, so it reads the association rather than the Moment's
+   *   whole shape.
+   */
+  async findMediaOrder(momentId: string): Promise<string[]> {
+    const rows = await this.dataSource.getRepository(MomentMedium).find({
+      where: { momentId },
+      select: { uploadId: true, position: true },
+      order: { position: "ASC" },
+    });
+
+    return rows.map((row) => row.uploadId);
+  }
+
+  /**
+   * Record what somebody changed about a Moment, and what it was before.
+   *
+   * @param tx - The caller's transaction. The change and this record share it:
+   *   an edit with no record of it, and a record of an edit that did not
+   *   happen, are both worse than the edit failing.
+   * @param edit - Which Moment, who changed it, what kind of change, and the
+   *   previous state of whatever changed.
+   * @returns Nothing.
+   */
+  async recordEdit(
+    tx: Transaction,
+    edit: {
+      momentId: string;
+      editedByUserId: string;
+      kind: MomentEditKind;
+      previous: object;
+      at: Date;
+    },
+  ): Promise<void> {
+    await tx.insert(MomentEdit, {
+      editId: randomUUID(),
+      momentId: edit.momentId,
+      editedByUserId: edit.editedByUserId,
+      kind: edit.kind,
+      previous: edit.previous,
+      editedAt: edit.at,
+    });
+  }
+
+  /**
+   * Change what a Moment says happened.
+   *
+   * @param tx - The caller's transaction.
+   * @param momentId - Which Moment.
+   * @param caption - The corrected words.
+   * @param at - When.
+   * @returns Nothing. Deliberately touches nothing temporal: `moments.md:313`
+   *   requires that editing descriptive text not move a Moment through
+   *   chronological navigation.
+   */
+  async updateCaption(
+    tx: Transaction,
+    momentId: string,
+    caption: string,
+    at: Date,
+  ): Promise<void> {
+    await tx.update(MomentRow, { momentId }, { caption, updatedAt: at });
+  }
+
+  /**
+   * Move a Moment to where it actually belongs in history.
+   *
+   * @param tx - The caller's transaction.
+   * @param momentId - Which Moment.
+   * @param occurrence - The corrected interval and precision.
+   * @param offsetMinutes - The corrected offset from UTC.
+   * @param at - When the correction was made.
+   * @returns Nothing. This changes the Moment's position in chronology, which
+   *   is why it is a correction rather than an edit (`moments.md:443`).
+   */
+  async updateOccurrence(
+    tx: Transaction,
+    momentId: string,
+    occurrence: Occurrence,
+    offsetMinutes: number,
+    at: Date,
+  ): Promise<void> {
+    await tx.update(
+      MomentRow,
+      { momentId },
+      {
+        occurrenceStart: new Date(occurrence.start),
+        occurrenceEnd: new Date(occurrence.end),
+        occurrencePrecision: occurrence.precision,
+        occurrenceOffsetMinutes: offsetMinutes,
+        updatedAt: at,
+      },
+    );
+  }
+
+  /**
+   * Replace the media a Moment shows, and the order it shows them in.
+   *
+   * @param tx - The caller's transaction.
+   * @param momentId - Which Moment.
+   * @param uploadIds - The media, in the order it should be shown.
+   * @param at - When.
+   * @returns Nothing. Written as a delete and an insert rather than as a
+   *   difference, because positions are dense and unique per Moment: shuffling
+   *   two rows in place would collide with the index before the second could
+   *   land.
+   */
+  async replaceMedia(
+    tx: Transaction,
+    momentId: string,
+    uploadIds: readonly string[],
+    at: Date,
+  ): Promise<void> {
+    await tx.delete(MomentMedium, { momentId });
+
+    await tx.insert(
+      MomentMedium,
+      uploadIds.map((uploadId, position) => ({ momentId, uploadId, position, createdAt: at })),
+    );
+
+    await tx.update(MomentRow, { momentId }, { updatedAt: at });
+  }
+
+  /**
+   * Take a Moment out of ordinary access.
+   *
+   * @param tx - The caller's transaction.
+   * @param momentId - Which Moment.
+   * @param at - When.
+   * @returns True if this call removed it. False means it was already gone,
+   *   decided by the statement rather than by a read before it.
+   */
+  async markDeleted(tx: Transaction, momentId: string, at: Date): Promise<boolean> {
+    const { affected } = await tx.update(
+      MomentRow,
+      { momentId, deletedAt: IsNull() },
+      { deletedAt: at, updatedAt: at },
+    );
 
     return affected === 1;
   }

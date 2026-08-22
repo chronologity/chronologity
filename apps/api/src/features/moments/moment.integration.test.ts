@@ -19,6 +19,7 @@ import {
   createRealWorldEvent,
 } from "../../testing/fixtures.js";
 import { MomentRepository } from "./moment.repository.js";
+import { withTransaction } from "../../lib/database/transaction.js";
 import { MomentService } from "./moment.service.js";
 
 /**
@@ -939,6 +940,493 @@ describe("moments", () => {
         method: "PUT",
         url: `/moments/${randomUUID()}/location`,
         payload: { locationId: randomUUID() },
+      });
+
+      assert.equal(response.statusCode, 401, response.body);
+    });
+  });
+
+  describe("correcting a moment", () => {
+    /** How many edits of a kind a Moment has recorded. */
+    const editsOf = async (momentId: string, kind?: string): Promise<number> => {
+      const rows: { count: string }[] = await database.dataSource.query(
+        kind === undefined
+          ? `SELECT count(*) FROM moment_edits WHERE moment_id = $1`
+          : `SELECT count(*) FROM moment_edits WHERE moment_id = $1 AND kind = $2`,
+        kind === undefined ? [momentId] : [momentId, kind],
+      );
+
+      return Number(rows[0]?.count ?? "0");
+    };
+
+    /** A Moment with the given number of media, ready to be edited. */
+    const editable = async (mediaCount = 1) => {
+      const credentials = await onboard();
+      const uploadIds: string[] = [];
+
+      for (let index = 0; index < mediaCount; index += 1) {
+        uploadIds.push(await createReadyUpload(database.dataSource, credentials.userId));
+      }
+
+      const moment = (
+        await record(credentials.accessToken, {
+          caption: "As first recorded",
+          occurrence: summer,
+          occurrenceOffsetMinutes: 0,
+          uploadIds,
+        })
+      ).json();
+
+      return { ...credentials, moment, uploadIds };
+    };
+
+    it("changes a caption without moving the moment in history", async () => {
+      const { accessToken, moment } = await editable();
+
+      const response = await app.inject({
+        method: "PATCH",
+        url: `/moments/${moment.momentId}`,
+        headers: authed(accessToken),
+        payload: { caption: "As it should have read" },
+      });
+
+      assert.equal(response.statusCode, 200, response.body);
+      assert.equal(response.json().caption, "As it should have read");
+      // Editing descriptive text must not move a Moment through chronological
+      // navigation.
+      assert.deepEqual(response.json().occurrence, moment.occurrence);
+      assert.equal(await editsOf(moment.momentId, "caption_changed"), 1);
+    });
+
+    it("records what the caption used to be", async () => {
+      const { accessToken, moment } = await editable();
+
+      await app.inject({
+        method: "PATCH",
+        url: `/moments/${moment.momentId}`,
+        headers: authed(accessToken),
+        payload: { caption: "Corrected" },
+      });
+
+      const rows: { previous: { caption: string } }[] = await database.dataSource.query(
+        `SELECT previous FROM moment_edits WHERE moment_id = $1 AND kind = 'caption_changed'`,
+        [moment.momentId],
+      );
+
+      assert.equal(rows[0]?.previous.caption, "As first recorded");
+    });
+
+    it("moves a moment when its occurrence is corrected", async () => {
+      const { accessToken, moment } = await editable();
+      const corrected = {
+        start: "2014-06-12T19:30:00.000Z",
+        end: "2014-06-12T19:30:00.000Z",
+        precision: "instant",
+      };
+
+      const response = await app.inject({
+        method: "PUT",
+        url: `/moments/${moment.momentId}/occurrence`,
+        headers: authed(accessToken),
+        payload: { occurrence: corrected, occurrenceOffsetMinutes: -240 },
+      });
+
+      assert.equal(response.statusCode, 200, response.body);
+      assert.deepEqual(response.json().occurrence, corrected);
+      assert.equal(response.json().occurrenceOffsetMinutes, -240);
+      assert.equal(await editsOf(moment.momentId, "occurrence_corrected"), 1);
+    });
+
+    it("records where the moment used to sit in history", async () => {
+      const { accessToken, moment } = await editable();
+
+      await app.inject({
+        method: "PUT",
+        url: `/moments/${moment.momentId}/occurrence`,
+        headers: authed(accessToken),
+        payload: {
+          occurrence: {
+            start: "2014-06-12T19:30:00.000Z",
+            end: "2014-06-12T19:30:00.000Z",
+            precision: "instant",
+          },
+          occurrenceOffsetMinutes: 0,
+        },
+      });
+
+      const rows: { previous: { occurrence: typeof summer } }[] = await database.dataSource.query(
+        `SELECT previous FROM moment_edits WHERE moment_id = $1 AND kind = 'occurrence_corrected'`,
+        [moment.momentId],
+      );
+
+      // Without this a correction leaves no trace of what it is a correction
+      // to, and "represent corrections explicitly" means nothing.
+      assert.deepEqual(rows[0]?.previous.occurrence, summer);
+    });
+
+    it("refuses a correction that is incoherent", async () => {
+      const { accessToken, moment } = await editable();
+
+      const response = await app.inject({
+        method: "PUT",
+        url: `/moments/${moment.momentId}/occurrence`,
+        headers: authed(accessToken),
+        payload: {
+          occurrence: {
+            start: "2014-06-12T20:00:00.000Z",
+            end: "2014-06-12T19:00:00.000Z",
+            precision: "day",
+          },
+          occurrenceOffsetMinutes: 0,
+        },
+      });
+
+      assert.equal(response.statusCode, 400, response.body);
+      // Nothing was recorded — though only because the refusal happens before
+      // any write. The test below proves the stronger property.
+      assert.equal(await editsOf(moment.momentId), 0);
+    });
+
+    it("keeps no record of an edit whose transaction failed", async () => {
+      const { userId, moment } = await editable();
+      const repository = new MomentRepository(database.dataSource);
+
+      // The refusals above never reach a write, so they cannot show that a
+      // change and its record commit together. This forces a failure after the
+      // record is written and asserts it did not survive.
+      await assert.rejects(
+        withTransaction(database.dataSource, async (tx) => {
+          await repository.updateCaption(tx, moment.momentId, "Half-written", new Date());
+          await repository.recordEdit(tx, {
+            momentId: moment.momentId,
+            editedByUserId: userId,
+            kind: "caption_changed",
+            previous: { caption: moment.caption },
+            at: new Date(),
+          });
+
+          throw new Error("something went wrong after both writes");
+        }),
+      );
+
+      assert.equal(await editsOf(moment.momentId), 0, "a record outlived its transaction");
+
+      const rows: { caption: string }[] = await database.dataSource.query(
+        `SELECT caption FROM moments WHERE moment_id = $1`,
+        [moment.momentId],
+      );
+      assert.equal(rows[0]?.caption, moment.caption, "the change outlived its transaction");
+    });
+  });
+
+  describe("changing a moment's media", () => {
+    const editsOf = async (momentId: string, kind: string): Promise<number> => {
+      const rows: { count: string }[] = await database.dataSource.query(
+        `SELECT count(*) FROM moment_edits WHERE moment_id = $1 AND kind = $2`,
+        [momentId, kind],
+      );
+
+      return Number(rows[0]?.count ?? "0");
+    };
+
+    const editable = async (mediaCount = 1) => {
+      const credentials = await onboard();
+      const uploadIds: string[] = [];
+
+      for (let index = 0; index < mediaCount; index += 1) {
+        uploadIds.push(await createReadyUpload(database.dataSource, credentials.userId));
+      }
+
+      const moment = (
+        await record(credentials.accessToken, {
+          caption: "As first recorded",
+          occurrence: summer,
+          occurrenceOffsetMinutes: 0,
+          uploadIds,
+        })
+      ).json();
+
+      return { ...credentials, moment, uploadIds };
+    };
+
+    const mediaOf = (body: { media: { uploadId: string }[] }) =>
+      body.media.map((upload) => upload.uploadId);
+
+    it("appends added media without moving the moment", async () => {
+      const { accessToken, userId, moment, uploadIds } = await editable(1);
+      const extra = await createReadyUpload(database.dataSource, userId);
+
+      const response = await app.inject({
+        method: "POST",
+        url: `/moments/${moment.momentId}/media`,
+        headers: authed(accessToken),
+        payload: { uploadIds: [extra] },
+      });
+
+      assert.equal(response.statusCode, 200, response.body);
+      assert.deepEqual(mediaOf(response.json()), [...uploadIds, extra]);
+      // Adding media enriches the representation; it does not change when the
+      // experience happened.
+      assert.deepEqual(response.json().occurrence, moment.occurrence);
+      assert.equal(await editsOf(moment.momentId, "media_added"), 1);
+    });
+
+    it("refuses media a moment already shows", async () => {
+      const { accessToken, moment, uploadIds } = await editable(2);
+
+      const response = await app.inject({
+        method: "POST",
+        url: `/moments/${moment.momentId}/media`,
+        headers: authed(accessToken),
+        payload: { uploadIds: [uploadIds[0]] },
+      });
+
+      assert.equal(response.statusCode, 400, response.body);
+      assert.equal(await editsOf(moment.momentId, "media_added"), 0);
+    });
+
+    it("refuses media that is not ready", async () => {
+      const { accessToken, userId, moment } = await editable(1);
+      const pending = await createPendingUpload(database.dataSource, userId);
+
+      const response = await app.inject({
+        method: "POST",
+        url: `/moments/${moment.momentId}/media`,
+        headers: authed(accessToken),
+        payload: { uploadIds: [pending] },
+      });
+
+      assert.equal(response.statusCode, 400, response.body);
+    });
+
+    it("renumbers what remains when media is removed", async () => {
+      const { accessToken, moment, uploadIds } = await editable(3);
+
+      const response = await app.inject({
+        method: "DELETE",
+        url: `/moments/${moment.momentId}/media/${uploadIds[1]}`,
+        headers: authed(accessToken),
+      });
+
+      assert.equal(response.statusCode, 200, response.body);
+      assert.deepEqual(mediaOf(response.json()), [uploadIds[0], uploadIds[2]]);
+
+      // Dense from zero: a gap would be a position nothing occupies.
+      const rows: { position: number }[] = await database.dataSource.query(
+        `SELECT position FROM moment_media WHERE moment_id = $1 ORDER BY position`,
+        [moment.momentId],
+      );
+      assert.deepEqual(
+        rows.map((row) => row.position),
+        [0, 1],
+      );
+    });
+
+    it("refuses to remove the last medium, and leaves the moment whole", async () => {
+      const { accessToken, moment, uploadIds } = await editable(1);
+
+      const response = await app.inject({
+        method: "DELETE",
+        url: `/moments/${moment.momentId}/media/${uploadIds[0]}`,
+        headers: authed(accessToken),
+      });
+
+      // Media is mandatory, so this would leave a Moment that could not have
+      // been created. Deleting a medium is not deleting the Moment.
+      assert.equal(response.statusCode, 400, response.body);
+
+      const after = await app.inject({
+        method: "GET",
+        url: `/moments/${moment.momentId}`,
+        headers: authed(accessToken),
+      });
+      assert.equal(after.statusCode, 200, after.body);
+      assert.equal(after.json().media.length, 1);
+    });
+
+    it("refuses to remove media the moment does not have", async () => {
+      const { accessToken, moment } = await editable(2);
+
+      const response = await app.inject({
+        method: "DELETE",
+        url: `/moments/${moment.momentId}/media/${randomUUID()}`,
+        headers: authed(accessToken),
+      });
+
+      assert.equal(response.statusCode, 400, response.body);
+    });
+
+    it("reorders media without changing the set", async () => {
+      const { accessToken, moment, uploadIds } = await editable(3);
+      const reversed = [...uploadIds].reverse();
+
+      const response = await app.inject({
+        method: "PUT",
+        url: `/moments/${moment.momentId}/media/order`,
+        headers: authed(accessToken),
+        payload: { uploadIds: reversed },
+      });
+
+      assert.equal(response.statusCode, 200, response.body);
+      assert.deepEqual(mediaOf(response.json()), reversed);
+      // Presentation only: reordering never moves a Moment in chronology.
+      assert.deepEqual(response.json().occurrence, moment.occurrence);
+      assert.equal(await editsOf(moment.momentId, "media_reordered"), 1);
+    });
+
+    it("refuses a reorder that drops something", async () => {
+      const { accessToken, moment, uploadIds } = await editable(2);
+
+      const response = await app.inject({
+        method: "PUT",
+        url: `/moments/${moment.momentId}/media/order`,
+        headers: authed(accessToken),
+        payload: { uploadIds: [uploadIds[0]] },
+      });
+
+      assert.equal(response.statusCode, 400, response.body);
+    });
+
+    it("refuses a reorder that adds something", async () => {
+      const { accessToken, userId, moment, uploadIds } = await editable(2);
+      const extra = await createReadyUpload(database.dataSource, userId);
+
+      const response = await app.inject({
+        method: "PUT",
+        url: `/moments/${moment.momentId}/media/order`,
+        headers: authed(accessToken),
+        payload: { uploadIds: [...uploadIds, extra] },
+      });
+
+      // An addition wearing the wrong name: it would skip the check that the
+      // file is ready and belongs to the author.
+      assert.equal(response.statusCode, 400, response.body);
+    });
+  });
+
+  describe("taking a moment back", () => {
+    const editable = async () => {
+      const credentials = await onboard();
+      const uploadId = await createReadyUpload(database.dataSource, credentials.userId);
+      const moment = (
+        await record(credentials.accessToken, {
+          caption: "Recorded, then withdrawn",
+          occurrence: summer,
+          occurrenceOffsetMinutes: 0,
+          uploadIds: [uploadId],
+        })
+      ).json();
+
+      return { ...credentials, moment };
+    };
+
+    it("stops returning it, and stops listing it", async () => {
+      const { accessToken, moment } = await editable();
+
+      const deleted = await app.inject({
+        method: "DELETE",
+        url: `/moments/${moment.momentId}`,
+        headers: authed(accessToken),
+      });
+      assert.equal(deleted.statusCode, 204, deleted.body);
+
+      const read = await app.inject({
+        method: "GET",
+        url: `/moments/${moment.momentId}`,
+        headers: authed(accessToken),
+      });
+      assert.equal(read.statusCode, 404, read.body);
+
+      const listed = await app.inject({
+        method: "GET",
+        url: "/moments",
+        headers: authed(accessToken),
+      });
+      assert.deepEqual(listed.json().moments, []);
+    });
+
+    it("keeps the row, because this is a tombstone rather than an erasure", async () => {
+      const { accessToken, moment } = await editable();
+
+      await app.inject({
+        method: "DELETE",
+        url: `/moments/${moment.momentId}`,
+        headers: authed(accessToken),
+      });
+
+      const rows: { deleted_at: Date | null }[] = await database.dataSource.query(
+        `SELECT deleted_at FROM moments WHERE moment_id = $1`,
+        [moment.momentId],
+      );
+
+      assert.equal(rows.length, 1, "the row was removed rather than marked");
+      assert.notEqual(rows[0]?.deleted_at, null);
+    });
+
+    it("refuses a second deletion, because it is already gone", async () => {
+      const { accessToken, moment } = await editable();
+
+      await app.inject({
+        method: "DELETE",
+        url: `/moments/${moment.momentId}`,
+        headers: authed(accessToken),
+      });
+      const again = await app.inject({
+        method: "DELETE",
+        url: `/moments/${moment.momentId}`,
+        headers: authed(accessToken),
+      });
+
+      // Reads no longer find it, so this is refused exactly as a Moment that
+      // never existed would be.
+      assert.equal(again.statusCode, 404, again.body);
+    });
+  });
+
+  describe("who may change a moment", () => {
+    it("refuses every edit to somebody else's moment", async () => {
+      const theirs = await someoneWithMedia();
+      const mine = await onboard();
+      const moment = (
+        await record(theirs.accessToken, {
+          caption: "Not yours to correct",
+          occurrence: summer,
+          occurrenceOffsetMinutes: 0,
+          uploadIds: [theirs.uploadId],
+        })
+      ).json();
+
+      const attempts = [
+        app.inject({
+          method: "PATCH",
+          url: `/moments/${moment.momentId}`,
+          headers: authed(mine.accessToken),
+          payload: { caption: "Mine now" },
+        }),
+        app.inject({
+          method: "DELETE",
+          url: `/moments/${moment.momentId}`,
+          headers: authed(mine.accessToken),
+        }),
+        app.inject({
+          method: "PUT",
+          url: `/moments/${moment.momentId}/media/order`,
+          headers: authed(mine.accessToken),
+          payload: { uploadIds: [theirs.uploadId] },
+        }),
+      ];
+
+      for (const attempt of await Promise.all(attempts)) {
+        // Reported as absent, exactly as reading it would be.
+        assert.equal(attempt.statusCode, 404, attempt.body);
+      }
+    });
+
+    it("refuses editing without a caller", async () => {
+      const response = await app.inject({
+        method: "PATCH",
+        url: `/moments/${randomUUID()}`,
+        payload: { caption: "Anonymous correction" },
       });
 
       assert.equal(response.statusCode, 401, response.body);

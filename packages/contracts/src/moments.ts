@@ -135,3 +135,43 @@ export const listMomentsRequestSchema = z.object({
 });
 
 export type ListMomentsRequest = z.infer<typeof listMomentsRequestSchema>;
+
+/** Correcting what a Moment says happened. */
+export const updateCaptionRequestSchema = z.object({ caption: captionSchema });
+
+export type UpdateCaptionRequest = z.infer<typeof updateCaptionRequestSchema>;
+
+/**
+ * Moving a Moment to where it actually belongs in history.
+ *
+ * Its own request rather than part of a general update, because it is not the
+ * same act: `moments.md:443` treats this as a historical correction rather than
+ * an ordinary edit, and it may move the Moment through chronological
+ * navigation.
+ */
+export const correctOccurrenceRequestSchema = z.object({
+  occurrence: occurrenceSchema,
+  occurrenceOffsetMinutes: utcOffsetMinutesSchema,
+});
+
+export type CorrectOccurrenceRequest = z.infer<typeof correctOccurrenceRequestSchema>;
+
+/** Adding media to a Moment, appended in the order given. */
+export const addMediaRequestSchema = z.object({
+  uploadIds: z.array(identifierSchema).min(1).max(100),
+});
+
+export type AddMediaRequest = z.infer<typeof addMediaRequestSchema>;
+
+/**
+ * Changing the order a Moment shows its media in.
+ *
+ * Every medium the Moment has, in the order asked for. A list that adds or
+ * drops anything is refused: that would be an addition or a removal, and each
+ * has rules a reorder does not apply.
+ */
+export const reorderMediaRequestSchema = z.object({
+  uploadIds: z.array(identifierSchema).min(1).max(100),
+});
+
+export type ReorderMediaRequest = z.infer<typeof reorderMediaRequestSchema>;

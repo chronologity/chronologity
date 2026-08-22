@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import {
+  checkAddition,
   checkMedia,
   checkOccurrence,
+  checkRemoval,
+  checkReorder,
+  describeAdditionRejection,
   describeMediaRejection,
   describeOccurrenceRejection,
+  describeRemovalRejection,
+  describeReorderRejection,
   positionMedia,
 } from "./moment.policy.js";
 
@@ -136,5 +142,107 @@ describe("placing media in order", () => {
     // Unreachable through the service, which checks for media first. Covered
     // because the function is total and should stay that way.
     assert.deepEqual(positionMedia([]), []);
+  });
+});
+
+describe("checking a reorder", () => {
+  it("accepts the same media in a different order", () => {
+    assert.equal(checkReorder(["c", "a", "b"], ["a", "b", "c"]), undefined);
+  });
+
+  it("accepts an order that changes nothing", () => {
+    assert.equal(checkReorder(["a", "b"], ["a", "b"]), undefined);
+  });
+
+  it("accepts a single medium", () => {
+    assert.equal(checkReorder(["a"], ["a"]), undefined);
+  });
+
+  it("refuses a list that drops something", () => {
+    assert.equal(checkReorder(["a"], ["a", "b"]), "not_a_permutation");
+  });
+
+  it("refuses a list that adds something", () => {
+    // An addition wearing the wrong name: it would skip the check that the
+    // file is ready and belongs to the author.
+    assert.equal(checkReorder(["a", "b", "c"], ["a", "b"]), "not_a_permutation");
+  });
+
+  it("refuses a list of the right length naming something absent", () => {
+    assert.equal(checkReorder(["a", "z"], ["a", "b"]), "not_a_permutation");
+  });
+
+  it("refuses a list that repeats one medium in place of another", () => {
+    // Same length, same set membership for the first element — only counting
+    // each occurrence catches this.
+    assert.equal(checkReorder(["a", "a"], ["a", "b"]), "not_a_permutation");
+  });
+});
+
+describe("checking a removal", () => {
+  it("accepts removing one of several", () => {
+    assert.equal(checkRemoval("a", ["a", "b"]), undefined);
+  });
+
+  it("refuses removing something the moment does not have", () => {
+    assert.equal(checkRemoval("z", ["a", "b"]), "not_present");
+  });
+
+  it("refuses removing the last medium", () => {
+    // Media is mandatory, so this would leave a Moment that could not have been
+    // created. Deleting a medium is not deleting the Moment.
+    assert.equal(checkRemoval("a", ["a"]), "last_medium");
+  });
+
+  it("reports an absent medium before it considers whether it is the last", () => {
+    assert.equal(checkRemoval("z", ["a"]), "not_present");
+  });
+});
+
+describe("checking an addition", () => {
+  it("accepts media the moment does not have", () => {
+    assert.equal(checkAddition(["c"], ["a", "b"]), undefined);
+  });
+
+  it("accepts several at once", () => {
+    assert.equal(checkAddition(["c", "d"], ["a"]), undefined);
+  });
+
+  it("accepts adding nothing", () => {
+    // Unreachable through the service, which requires at least one. Covered
+    // because the function is total and should stay that way.
+    assert.equal(checkAddition([], ["a"]), undefined);
+  });
+
+  it("refuses media the moment already shows", () => {
+    assert.equal(checkAddition(["a"], ["a", "b"]), "already_present");
+  });
+
+  it("refuses when only one of several is already present", () => {
+    assert.equal(checkAddition(["c", "b"], ["a", "b"]), "already_present");
+  });
+});
+
+describe("describing why an edit was refused", () => {
+  it("explains a reorder that is not a permutation", () => {
+    assert.equal(
+      describeReorderRejection(),
+      "A reorder must list exactly the media the moment already has",
+    );
+  });
+
+  it("explains removing something absent", () => {
+    assert.equal(describeRemovalRejection("not_present"), "That file is not part of this moment");
+  });
+
+  it("explains removing the last medium, and says what to do instead", () => {
+    assert.equal(
+      describeRemovalRejection("last_medium"),
+      "A moment needs at least one image or video; delete the moment instead",
+    );
+  });
+
+  it("explains adding something already there", () => {
+    assert.equal(describeAdditionRejection(), "A moment cannot show the same file twice");
   });
 });

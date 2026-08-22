@@ -591,6 +591,10 @@ while a video is still processing — a real constraint on the experience, and t
 consequence of media being mandatory: a Moment built on a file that later failed
 would be one that could not have been created.
 
+**A Moment's caption, occurrence, and media may be changed after it is recorded, and every change is kept.** `moment_edits` records what kind of change it was and what the changed thing was before, in the same transaction as the change itself (ADR-103). Correcting when something happened is its own operation, separate from correcting a caption, because the two are not the same act: one moves the Moment through chronology and the other does not.
+
+Nothing reads that history back yet. How corrections should be presented remains open, and exposing them would answer it by implementation.
+
 **Deletion is a tombstone, and erasure is separate work.** A deleted Moment is retained as a row, disappears from every read, and its stored media is left untouched. What a deletion service must erase, in what order, and what must be retained for abuse prevention or legal reasons are deliberately unresolved and listed below. Foreign keys remain `RESTRICT` (ADR-097), so nothing is removed as a silent consequence of removing something else.
 
 ## Open Product Questions

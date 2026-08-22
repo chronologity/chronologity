@@ -1,5 +1,9 @@
 import {
+  addMediaRequestSchema,
+  correctOccurrenceRequestSchema,
   createMomentRequestSchema,
+  reorderMediaRequestSchema,
+  updateCaptionRequestSchema,
   identifierSchema,
   listMomentsRequestSchema,
   momentPageSchema,
@@ -51,6 +55,104 @@ export function momentRoutes(moments: MomentService) {
       },
       async (request) =>
         moments.list(request.user.userId, request.query.limit, request.query.cursor),
+    );
+
+    app.patch(
+      "/moments/:momentId",
+      {
+        schema: {
+          params: z.object({ momentId: identifierSchema }),
+          body: updateCaptionRequestSchema,
+          response: { 200: momentSchema },
+        },
+        preHandler: requireUser,
+      },
+      async (request) =>
+        moments.updateCaption(request.params.momentId, request.user.userId, request.body.caption),
+    );
+
+    // Its own endpoint rather than part of the patch above, because correcting
+    // when something happened is not the same act as fixing a typo: it moves
+    // the Moment through chronology, and `moments.md:443` asks that the two not
+    // be flattened into one.
+    app.put(
+      "/moments/:momentId/occurrence",
+      {
+        schema: {
+          params: z.object({ momentId: identifierSchema }),
+          body: correctOccurrenceRequestSchema,
+          response: { 200: momentSchema },
+        },
+        preHandler: requireUser,
+      },
+      async (request) =>
+        moments.correctOccurrence(
+          request.params.momentId,
+          request.user.userId,
+          request.body.occurrence,
+          request.body.occurrenceOffsetMinutes,
+        ),
+    );
+
+    app.post(
+      "/moments/:momentId/media",
+      {
+        schema: {
+          params: z.object({ momentId: identifierSchema }),
+          body: addMediaRequestSchema,
+          response: { 200: momentSchema },
+        },
+        preHandler: requireUser,
+      },
+      async (request) =>
+        moments.addMedia(request.params.momentId, request.user.userId, request.body.uploadIds),
+    );
+
+    app.put(
+      "/moments/:momentId/media/order",
+      {
+        schema: {
+          params: z.object({ momentId: identifierSchema }),
+          body: reorderMediaRequestSchema,
+          response: { 200: momentSchema },
+        },
+        preHandler: requireUser,
+      },
+      async (request) =>
+        moments.reorderMedia(request.params.momentId, request.user.userId, request.body.uploadIds),
+    );
+
+    app.delete(
+      "/moments/:momentId/media/:uploadId",
+      {
+        schema: {
+          params: z.object({ momentId: identifierSchema, uploadId: identifierSchema }),
+          response: { 200: momentSchema },
+        },
+        preHandler: requireUser,
+      },
+      async (request) =>
+        moments.removeMedium(
+          request.params.momentId,
+          request.user.userId,
+          request.params.uploadId,
+        ),
+    );
+
+    app.delete(
+      "/moments/:momentId",
+      {
+        schema: {
+          params: z.object({ momentId: identifierSchema }),
+          response: { 204: z.null() },
+        },
+        preHandler: requireUser,
+      },
+      async (request, reply) => {
+        await moments.delete(request.params.momentId, request.user.userId);
+
+        return reply.status(204).send(null);
+      },
     );
 
     // Association is its own surface rather than a general update, because

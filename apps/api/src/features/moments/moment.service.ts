@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { CreateMomentRequest, Moment, MomentPage } from "@chronologity/contracts";
+import type {
+  CreateMomentRequest,
+  Moment,
+  MomentPage,
+  Occurrence,
+} from "@chronologity/contracts";
 import type { DataSource } from "typeorm";
 import { withTransaction } from "../../lib/database/transaction.js";
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
@@ -8,10 +13,16 @@ import type { LocationRepository } from "../locations/location.repository.js";
 import type { RealWorldEventRepository } from "../real-world-events/real-world-event.repository.js";
 import type { UploadRepository } from "../uploads/upload.repository.js";
 import {
+  checkAddition,
   checkMedia,
   checkOccurrence,
+  checkRemoval,
+  checkReorder,
+  describeAdditionRejection,
   describeMediaRejection,
   describeOccurrenceRejection,
+  describeRemovalRejection,
+  describeReorderRejection,
   positionMedia,
 } from "./moment.policy.js";
 import type { MomentRepository } from "./moment.repository.js";
@@ -300,6 +311,254 @@ export class MomentService {
     );
 
     return this.get(momentId, viewerUserId);
+  }
+
+  /**
+   * Correct what a Moment says happened.
+   *
+   * @param momentId - Which Moment.
+   * @param viewerUserId - Who is asking. Only its author may.
+   * @param caption - The corrected words.
+   * @returns The Moment as it now stands. Its place in history is untouched:
+   *   `moments.md:313` requires that editing descriptive text not move a Moment
+   *   through chronological navigation.
+   * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
+   */
+  async updateCaption(momentId: string, viewerUserId: string, caption: string): Promise<Moment> {
+    const before = await this.get(momentId, viewerUserId);
+    const at = this.clock();
+
+    await withTransaction(this.dataSource, async (tx) => {
+      await this.moments.updateCaption(tx, momentId, caption.trim(), at);
+      await this.moments.recordEdit(tx, {
+        momentId,
+        editedByUserId: viewerUserId,
+        kind: "caption_changed",
+        previous: { caption: before.caption },
+        at,
+      });
+    });
+
+    return this.get(momentId, viewerUserId);
+  }
+
+  /**
+   * Move a Moment to where it actually belongs in history.
+   *
+   * Its own operation rather than part of a general update, because it is not
+   * the same act: `moments.md:443` calls this "a historical correction rather
+   * than an ordinary cosmetic edit", and it may move the Moment through
+   * chronological navigation.
+   *
+   * @param momentId - Which Moment.
+   * @param viewerUserId - Who is asking. Only its author may.
+   * @param occurrence - The corrected interval and precision.
+   * @param offsetMinutes - The corrected offset from UTC.
+   * @returns The Moment as it now stands, in its corrected position.
+   * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
+   * @throws {ValidationError} If the corrected occurrence is incoherent.
+   */
+  async correctOccurrence(
+    momentId: string,
+    viewerUserId: string,
+    occurrence: Occurrence,
+    offsetMinutes: number,
+  ): Promise<Moment> {
+    const before = await this.get(momentId, viewerUserId);
+    const rejection = checkOccurrence(occurrence);
+
+    if (rejection !== undefined) {
+      throw new ValidationError(describeOccurrenceRejection(rejection), { field: "occurrence" });
+    }
+
+    const at = this.clock();
+
+    await withTransaction(this.dataSource, async (tx) => {
+      await this.moments.updateOccurrence(tx, momentId, occurrence, offsetMinutes, at);
+      await this.moments.recordEdit(tx, {
+        momentId,
+        editedByUserId: viewerUserId,
+        kind: "occurrence_corrected",
+        // Where it used to sit. Without this a correction leaves no trace of
+        // what history it is a correction to.
+        previous: {
+          occurrence: before.occurrence,
+          occurrenceOffsetMinutes: before.occurrenceOffsetMinutes,
+        },
+        at,
+      });
+    });
+
+    return this.get(momentId, viewerUserId);
+  }
+
+  /**
+   * Add media to a Moment, enriching what it already represents.
+   *
+   * @param momentId - Which Moment.
+   * @param viewerUserId - Who is asking. Only its author may.
+   * @param uploadIds - The media to add, appended in the order given.
+   * @returns The Moment as it now stands. Its occurrence is untouched: adding
+   *   media "should not automatically create a new Moment or change the
+   *   existing Moment's chronological position" (`moments.md:415`).
+   * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
+   * @throws {ValidationError} If any file is missing, belongs to somebody else,
+   *   is not ready, or is already part of this Moment.
+   */
+  async addMedia(
+    momentId: string,
+    viewerUserId: string,
+    uploadIds: readonly string[],
+  ): Promise<Moment> {
+    await this.get(momentId, viewerUserId);
+
+    const present = await this.moments.findMediaOrder(momentId);
+    const mediaRejection = checkMedia(uploadIds);
+
+    if (mediaRejection !== undefined) {
+      throw new ValidationError(describeMediaRejection(mediaRejection), { field: "uploadIds" });
+    }
+
+    const additionRejection = checkAddition(uploadIds, present);
+
+    if (additionRejection !== undefined) {
+      throw new ValidationError(describeAdditionRejection(), { field: "uploadIds" });
+    }
+
+    await this.checkEveryFileIsUsable(viewerUserId, uploadIds);
+
+    const at = this.clock();
+
+    await withTransaction(this.dataSource, async (tx) => {
+      await this.moments.replaceMedia(tx, momentId, [...present, ...uploadIds], at);
+      await this.moments.recordEdit(tx, {
+        momentId,
+        editedByUserId: viewerUserId,
+        kind: "media_added",
+        previous: { uploadIds: present },
+        at,
+      });
+    });
+
+    return this.get(momentId, viewerUserId);
+  }
+
+  /**
+   * Take a piece of media out of a Moment.
+   *
+   * @param momentId - Which Moment.
+   * @param viewerUserId - Who is asking. Only its author may.
+   * @param uploadId - Which medium.
+   * @returns The Moment as it now stands, its remaining media renumbered so the
+   *   order stays dense.
+   * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
+   * @throws {ValidationError} If that medium is not part of the Moment, or is
+   *   the last one — removing a medium is not deleting the Moment
+   *   (`moments.md:436`), and a Moment without media could not have been
+   *   created.
+   */
+  async removeMedium(momentId: string, viewerUserId: string, uploadId: string): Promise<Moment> {
+    await this.get(momentId, viewerUserId);
+
+    const present = await this.moments.findMediaOrder(momentId);
+    const rejection = checkRemoval(uploadId, present);
+
+    if (rejection !== undefined) {
+      throw new ValidationError(describeRemovalRejection(rejection), { field: "uploadId" });
+    }
+
+    const at = this.clock();
+
+    await withTransaction(this.dataSource, async (tx) => {
+      await this.moments.replaceMedia(
+        tx,
+        momentId,
+        present.filter((present) => present !== uploadId),
+        at,
+      );
+      await this.moments.recordEdit(tx, {
+        momentId,
+        editedByUserId: viewerUserId,
+        kind: "media_removed",
+        previous: { uploadIds: present },
+        at,
+      });
+    });
+
+    return this.get(momentId, viewerUserId);
+  }
+
+  /**
+   * Change the order a Moment shows its media in.
+   *
+   * @param momentId - Which Moment.
+   * @param viewerUserId - Who is asking. Only its author may.
+   * @param uploadIds - Every medium the Moment has, in the order asked for.
+   * @returns The Moment as it now stands. Presentation only: reordering never
+   *   moves a Moment through chronology (`moments.md:157`).
+   * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
+   * @throws {ValidationError} If the list is not exactly the media already
+   *   there — a reorder that adds or drops something is an addition or a
+   *   removal, and each has rules this operation does not apply.
+   */
+  async reorderMedia(
+    momentId: string,
+    viewerUserId: string,
+    uploadIds: readonly string[],
+  ): Promise<Moment> {
+    await this.get(momentId, viewerUserId);
+
+    const present = await this.moments.findMediaOrder(momentId);
+    const rejection = checkReorder(uploadIds, present);
+
+    if (rejection !== undefined) {
+      throw new ValidationError(describeReorderRejection(), { field: "uploadIds" });
+    }
+
+    const at = this.clock();
+
+    await withTransaction(this.dataSource, async (tx) => {
+      await this.moments.replaceMedia(tx, momentId, uploadIds, at);
+      await this.moments.recordEdit(tx, {
+        momentId,
+        editedByUserId: viewerUserId,
+        kind: "media_reordered",
+        previous: { uploadIds: present },
+        at,
+      });
+    });
+
+    return this.get(momentId, viewerUserId);
+  }
+
+  /**
+   * Take a Moment out of ordinary access.
+   *
+   * A tombstone rather than an erasure. The row and its media stay; every read
+   * stops returning it. What must eventually be erased, and what must be
+   * retained for abuse or legal reasons, is deliberately unresolved
+   * (`moments.md:451`) and is not decided here.
+   *
+   * @param momentId - Which Moment.
+   * @param viewerUserId - Who is asking. Only its author may.
+   * @returns Nothing.
+   * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
+   */
+  async delete(momentId: string, viewerUserId: string): Promise<void> {
+    await this.get(momentId, viewerUserId);
+
+    const at = this.clock();
+
+    await withTransaction(this.dataSource, async (tx) => {
+      await this.moments.markDeleted(tx, momentId, at);
+      await this.moments.recordEdit(tx, {
+        momentId,
+        editedByUserId: viewerUserId,
+        kind: "deleted",
+        previous: {},
+        at,
+      });
+    });
   }
 
   /**

@@ -129,14 +129,22 @@ export {
   type SearchPlacesRequest,
 } from "./locations.js";
 export {
+  addMediaRequestSchema,
   captionSchema,
+  correctOccurrenceRequestSchema,
   createMomentRequestSchema,
+  reorderMediaRequestSchema,
+  updateCaptionRequestSchema,
   listMomentsRequestSchema,
   momentPageSchema,
   momentSchema,
   utcOffsetMinutesSchema,
+  type AddMediaRequest,
+  type CorrectOccurrenceRequest,
   type CreateMomentRequest,
   type ListMomentsRequest,
+  type ReorderMediaRequest,
+  type UpdateCaptionRequest,
   type Moment,
   type MomentPage,
 } from "./moments.js";

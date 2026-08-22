@@ -2875,3 +2875,51 @@ No `status` column. Proposed, accepted, and disputed describe a suggestion's lif
 Association is a separate endpoint surface rather than a general update, because `moments.md:407` asks that changing a caption and changing a historical claim not be treated as the same act.
 
 Neither a Location nor an Event has to belong to the caller. Both are shared: a Location is reference data (ADR-098) and an Event's creator holds provenance rather than ownership (ADR-100). Pointing at one somebody else recorded is the point of both being shared, not trespass.
+
+---
+
+# ADR-103 — Keep Every Edit to a Moment, and Correct Its Occurrence Separately
+
+**Status:** Accepted
+
+## Decision
+
+Every change to a Moment writes a row to `moment_edits` recording what kind of change it was and what the changed thing was before. The change and its record commit in one transaction.
+
+Correcting a Moment's occurrence is its own operation, not part of a general update.
+
+Media is edited through separate add, remove, and reorder operations rather than by replacing the list.
+
+Deletion writes `deleted_at`. Nothing is erased.
+
+## Alternatives Considered
+
+Recording only occurrence corrections, on the grounds that a caption typo is not history.
+
+Recording nothing, which `moments.md:443` arguably permits by deferring auditability to "eventually".
+
+Editing media by replacing the whole ordered list in one call, which would have reused the creation rules unchanged.
+
+## Rationale
+
+`moments.md:534` states the requirement plainly: "Preserve historical meaning. **Represent corrections explicitly.** Respect privacy and removal requirements." The same section is equally clear that this "does not mean preventing legitimate corrections" — historical integrity here is not immutability, it is traceability.
+
+Recording every kind rather than only occurrence corrections is the more conservative choice in the direction that cannot be undone. Which kinds matter is an open product question; keeping all of them means it can be answered later from real records, while keeping only some means the answer is fixed now and the discarded ones are unrecoverable.
+
+Separate media operations and recording every edit reinforce each other, and the pairing is why both were chosen. A whole-list replace cannot say whether media was added or removed — it produces a diff, and the intent has to be guessed from it. Separate operations put the intent in the request, so the record can state it rather than infer it. The cost is three code paths that must each enforce the media rules, which is why the rules are pure functions the paths share.
+
+Occurrence correction is its own endpoint because `moments.md:443` says it is its own act: "a historical correction rather than an ordinary cosmetic edit", one that may move the Moment through chronological navigation. Folding it into a general `PATCH` alongside the caption would flatten exactly the distinction `moments.md:407` asks the product to preserve.
+
+## Consequences
+
+**`moment_edits` has a foreign key and cascades, unlike the audit tables.** `auth_audit_events` and `authorization_audit_events` deliberately have none, so security evidence outlives what it describes (ADR-097). This is a different kind of record: a Moment's edit history is the author's own content, not evidence held against them. When erasure eventually removes a Moment it must take this with it, or the record of what somebody wrote would outlive their right to remove it.
+
+`previous` is `jsonb`, following the `context jsonb` both audit tables already carry. The shapes genuinely differ — an occurrence has three parts, a removal has one identifier — and the alternative is a table of mostly-null columns.
+
+**Nothing reads `moment_edits` back.** It is written and kept. How corrections should be presented to users is still an open product question, and answering it by exposing an endpoint would be answering it by implementation.
+
+Reordering is written as a delete and an insert rather than as a difference, because positions are dense and unique per Moment: swapping two rows in place collides with the index before the second can land.
+
+Removing the last medium is refused rather than deleting the Moment. Media is mandatory, so a Moment without it could not have been created, and `moments.md:436` is explicit that deleting a medium is not deleting the Moment.
+
+Deletion is a tombstone and there is no undelete. Restoring is not simply the inverse once erasure exists, and building it before those semantics are settled would be guessing at them.
