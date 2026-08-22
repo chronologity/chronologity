@@ -65,6 +65,8 @@ async function main(): Promise<void> {
   // Likewise: uploads owns it, and Moments read through it to check that media
   // exists, belongs to the author, and has actually been opened by a decoder.
   const uploadRepository = new UploadRepository(database.dataSource);
+  // Moments check that an occurrence they name actually exists.
+  const realWorldEventRepository = new RealWorldEventRepository(database.dataSource);
 
   // Sessions are built before identities because proving who someone is ends in
   // granting them one: the dependency runs that way and only that way.
@@ -116,10 +118,12 @@ async function main(): Promise<void> {
       database.dataSource,
       new MomentRepository(database.dataSource),
       uploadRepository,
+      locationRepository,
+      realWorldEventRepository,
     ),
     realWorldEvents: new RealWorldEventService(
       database.dataSource,
-      new RealWorldEventRepository(database.dataSource),
+      realWorldEventRepository,
       locationRepository,
     ),
   });

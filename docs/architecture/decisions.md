@@ -2833,3 +2833,45 @@ Cursors are opaque and refused when malformed rather than ignored, because silen
 `toUpload` is exported from the Upload repository so a Moment returns its media whole. The shape a caller receives is decided once, by the feature that owns the table.
 
 Whether one upload may appear in two Moments is deliberately undecided. The primary key prevents the same file twice within one Moment, which is the incoherent case; a unique index on the upload alone would have decided the other silently, and neither `moments.md` nor `media.md` decides it.
+
+---
+
+# ADR-102 — Associate a Moment With One Place and Any Number of Occurrences
+
+**Status:** Accepted
+
+## Decision
+
+A Moment has at most one Location and any number of real-world Events. Both associations are their own tables carrying an `origin` column, and both reference their target with `RESTRICT`.
+
+`origin` admits one value today: `user-asserted`.
+
+## Alternatives Considered
+
+Symmetry — either one of each, or several of each.
+
+Two nullable foreign keys on `moments`, which is smaller and needs no join.
+
+Adopting the `status` and `origin` vocabulary that `timeline-first-curation-and-discovery.md` defines for Timeline relationships.
+
+## Rationale
+
+The asymmetry follows from what the two things are. `locations.md:433` says "the Moment-level historical Location should represent the experience as a whole", and that media pointing at several distinct places "may indicate the User has created a Moment whose historical boundaries should be reconsidered" — several places is usually several Moments. An Event is the opposite kind of thing: a shared occurrence that may span a marathon route or three cities, and a photograph at a wedding that is also part of a family reunion is genuinely both.
+
+Foreign keys on `moments` were rejected because an association is an assertion, not a property. Both specifications require provenance in almost the same words — `real-world-events.md:508` asks whether an association was "explicitly established by a User; suggested by the system; inferred algorithmically; imported from trusted metadata", and `locations.md:420` requires inference "remain distinguishable from explicit User assertion or reliable embedded metadata". Provenance needs somewhere to live, and a column on the Moment is the wrong place for a fact about a relationship.
+
+`origin` names only what something can produce. This follows the precedent 5F-2 set for `Location.source`: "Naming a source before anything can produce it would only invite something to be labelled with it inaccurately." The check constraint is widened when a capability arrives, which is what adding suggestions will look like.
+
+No `status` column. Proposed, accepted, and disputed describe a suggestion's life, and suggestions do not exist; every association today is made by the author and accepted the moment it is written. The curation document's vocabulary is the right one to reuse when suggestions arrive, and adding it then is additive.
+
+## Consequences
+
+**A Moment's reads got deeper.** Returning Events whole means loading each Event's aliases and Locations too, so a page of Moments joins across six tables. That is a correctness-first choice: nothing has measured it, and `CLAUDE.md` asks for measured bottlenecks before optimisation. If a Timeline page proves slow, the narrower fix is an Event summary shape rather than a cache.
+
+`toLocation` and `toRealWorldEvent` are exported alongside `toUpload`, so the shape a caller receives is decided once by the feature that owns each table. `toRealWorldEvent` reports what it is given: an Event loaded without its aliases looks like one that has none, which is why the relations are loaded explicitly at both read sites.
+
+`RESTRICT` means a Location or Event that Moments still point at cannot be deleted. Nothing deletes either today, so this blocks nothing — it obliges whatever eventually does to decide what happens to the Moments first, which is the same position ADR-097 took throughout.
+
+Association is a separate endpoint surface rather than a general update, because `moments.md:407` asks that changing a caption and changing a historical claim not be treated as the same act.
+
+Neither a Location nor an Event has to belong to the caller. Both are shared: a Location is reference data (ADR-098) and an Event's creator holds provenance rather than ownership (ADR-100). Pointing at one somebody else recorded is the point of both being shared, not trespass.

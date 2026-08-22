@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { identifierSchema } from "./identifiers.js";
+import { locationSchema } from "./locations.js";
+import { realWorldEventSchema } from "./real-world-events.js";
 import { occurrenceSchema, timestampSchema } from "./time.js";
 import { uploadSchema } from "./uploads.js";
 
@@ -63,6 +65,10 @@ export const createMomentRequestSchema = z.object({
    * (`moments.md:143`).
    */
   uploadIds: z.array(identifierSchema).min(1).max(100),
+  /** Where it happened, if anybody knows. */
+  locationId: identifierSchema.optional(),
+  /** The larger occurrences it was part of, if any. */
+  realWorldEventIds: z.array(identifierSchema).max(20).optional(),
 });
 
 export type CreateMomentRequest = z.infer<typeof createMomentRequestSchema>;
@@ -82,6 +88,24 @@ export const momentSchema = z.object({
   occurrenceOffsetMinutes: utcOffsetMinutesSchema,
   /** The media in presentation order, whole rather than by identifier. */
   media: z.array(uploadSchema),
+  /**
+   * Where the experience happened, or null when nobody said.
+   *
+   * One place, not several: `locations.md:433` asks that the Moment-level
+   * Location represent the experience as a whole, and media pointing at
+   * several distinct places usually means several Moments.
+   *
+   * Null rather than absent, because "not known" is a fact about the history
+   * and a missing key would only mean "not loaded".
+   */
+  location: locationSchema.nullable(),
+  /**
+   * The larger occurrences it was part of.
+   *
+   * Several are permitted, unlike Locations: a photograph at a wedding that is
+   * also part of a family reunion is genuinely both.
+   */
+  realWorldEvents: z.array(realWorldEventSchema),
   /** Who may see it. One value for now, and stated rather than implied. */
   visibility: z.literal("private"),
   /** When it was recorded, which is not when it happened. */

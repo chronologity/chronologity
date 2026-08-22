@@ -53,6 +53,78 @@ export function momentRoutes(moments: MomentService) {
         moments.list(request.user.userId, request.query.limit, request.query.cursor),
     );
 
+    // Association is its own surface rather than a general update, because
+    // these are historical claims rather than fields. Saying where something
+    // happened and correcting a caption are not the same kind of act, and
+    // `moments.md:407` asks that the difference not be flattened.
+    app.put(
+      "/moments/:momentId/location",
+      {
+        schema: {
+          params: z.object({ momentId: identifierSchema }),
+          body: z.object({ locationId: identifierSchema }),
+          response: { 200: momentSchema },
+        },
+        preHandler: requireUser,
+      },
+      async (request) =>
+        moments.setLocation(
+          request.params.momentId,
+          request.user.userId,
+          request.body.locationId,
+        ),
+    );
+
+    app.delete(
+      "/moments/:momentId/location",
+      {
+        schema: {
+          params: z.object({ momentId: identifierSchema }),
+          response: { 200: momentSchema },
+        },
+        preHandler: requireUser,
+      },
+      async (request) => moments.clearLocation(request.params.momentId, request.user.userId),
+    );
+
+    app.post(
+      "/moments/:momentId/real-world-events",
+      {
+        schema: {
+          params: z.object({ momentId: identifierSchema }),
+          body: z.object({ realWorldEventId: identifierSchema }),
+          response: { 200: momentSchema },
+        },
+        preHandler: requireUser,
+      },
+      async (request) =>
+        moments.addRealWorldEvent(
+          request.params.momentId,
+          request.user.userId,
+          request.body.realWorldEventId,
+        ),
+    );
+
+    app.delete(
+      "/moments/:momentId/real-world-events/:realWorldEventId",
+      {
+        schema: {
+          params: z.object({
+            momentId: identifierSchema,
+            realWorldEventId: identifierSchema,
+          }),
+          response: { 200: momentSchema },
+        },
+        preHandler: requireUser,
+      },
+      async (request) =>
+        moments.removeRealWorldEvent(
+          request.params.momentId,
+          request.user.userId,
+          request.params.realWorldEventId,
+        ),
+    );
+
     app.get(
       "/moments/:momentId",
       {

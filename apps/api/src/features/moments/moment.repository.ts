@@ -4,7 +4,14 @@ import { IsNull } from "typeorm";
 import type { Transaction } from "../../lib/database/transaction.js";
 import type { Upload as UploadRow } from "../uploads/upload.model.js";
 import { toUpload } from "../uploads/upload.repository.js";
-import { Moment as MomentRow, MomentMedium } from "./moment.model.js";
+import { toLocation } from "../locations/location.repository.js";
+import { toRealWorldEvent } from "../real-world-events/real-world-event.repository.js";
+import {
+  Moment as MomentRow,
+  MomentLocation,
+  MomentMedium,
+  MomentRealWorldEvent,
+} from "./moment.model.js";
 import type { MomentCursor, NewMoment } from "./moment.types.js";
 
 /**
@@ -44,6 +51,16 @@ function toMoment(row: MomentRow): MomentContract {
     },
     occurrenceOffsetMinutes: row.occurrenceOffsetMinutes,
     media,
+    // Where it happened, whole. Null rather than absent when nobody said: a
+    // missing key would mean "not loaded", and this means "not known".
+    location: row.place?.location === undefined ? null : toLocation(row.place.location),
+    // The larger occurrences it was part of, whole. Ordered by name so a caller
+    // sees the same list twice running; the database has no opinion.
+    realWorldEvents: (row.realWorldEvents ?? [])
+      .map((association) => association.realWorldEvent)
+      .filter((event): event is NonNullable<typeof event> => event !== undefined)
+      .map(toRealWorldEvent)
+      .sort((one, other) => one.name.localeCompare(other.name)),
     visibility: "private",
     createdAt: row.createdAt.toISOString(),
   };
@@ -103,7 +120,11 @@ export class MomentRepository {
   async findById(momentId: string): Promise<MomentContract | undefined> {
     const row = await this.dataSource.getRepository(MomentRow).findOne({
       where: { momentId, deletedAt: IsNull() },
-      relations: { media: { upload: true } },
+      relations: {
+        media: { upload: true },
+        place: { location: true },
+        realWorldEvents: { realWorldEvent: { aliases: true, locations: true } },
+      },
     });
 
     return row === null ? undefined : toMoment(row);
@@ -130,6 +151,12 @@ export class MomentRepository {
       .createQueryBuilder("moment")
       .leftJoinAndSelect("moment.media", "medium")
       .leftJoinAndSelect("medium.upload", "upload")
+      .leftJoinAndSelect("moment.place", "place")
+      .leftJoinAndSelect("place.location", "location")
+      .leftJoinAndSelect("moment.realWorldEvents", "association")
+      .leftJoinAndSelect("association.realWorldEvent", "event")
+      .leftJoinAndSelect("event.aliases", "alias")
+      .leftJoinAndSelect("event.locations", "eventPlace")
       .where("moment.author_user_id = :authorUserId", { authorUserId })
       .andWhere("moment.deleted_at IS NULL");
 
@@ -149,5 +176,88 @@ export class MomentRepository {
       .getMany();
 
     return rows.map(toMoment);
+  }
+
+  /**
+   * Say where a Moment happened, replacing whatever was said before.
+   *
+   * @param tx - The caller's transaction.
+   * @param momentId - Which Moment.
+   * @param locationId - Which place.
+   * @param at - When the association was made.
+   * @returns Nothing. Written as an upsert because a Moment has one place and
+   *   saying where it happened twice is a correction rather than a second
+   *   claim.
+   */
+  async setLocation(
+    tx: Transaction,
+    momentId: string,
+    locationId: string,
+    at: Date,
+  ): Promise<void> {
+    await tx
+      .createQueryBuilder()
+      .insert()
+      .into(MomentLocation)
+      .values({ momentId, locationId, origin: "user-asserted", createdAt: at })
+      .orUpdate(["location_id", "origin", "created_at"], ["moment_id"])
+      .execute();
+  }
+
+  /**
+   * Take back where a Moment happened.
+   *
+   * @param tx - The caller's transaction.
+   * @param momentId - Which Moment.
+   * @returns True if there was a place to remove. False means there was none,
+   *   which a caller asking to remove one can treat as already done.
+   */
+  async clearLocation(tx: Transaction, momentId: string): Promise<boolean> {
+    const { affected } = await tx.delete(MomentLocation, { momentId });
+
+    return affected === 1;
+  }
+
+  /**
+   * Say a Moment was part of an occurrence.
+   *
+   * @param tx - The caller's transaction.
+   * @param momentId - Which Moment.
+   * @param realWorldEventId - Which occurrence.
+   * @param at - When the association was made.
+   * @returns Nothing. Saying it twice is the same claim made twice, which is
+   *   one association — so a repeat is ignored rather than refused.
+   */
+  async addRealWorldEvent(
+    tx: Transaction,
+    momentId: string,
+    realWorldEventId: string,
+    at: Date,
+  ): Promise<void> {
+    await tx
+      .createQueryBuilder()
+      .insert()
+      .into(MomentRealWorldEvent)
+      .values({ momentId, realWorldEventId, origin: "user-asserted", createdAt: at })
+      .orIgnore()
+      .execute();
+  }
+
+  /**
+   * Take back a Moment's association with an occurrence.
+   *
+   * @param tx - The caller's transaction.
+   * @param momentId - Which Moment.
+   * @param realWorldEventId - Which occurrence.
+   * @returns True if there was an association to remove.
+   */
+  async removeRealWorldEvent(
+    tx: Transaction,
+    momentId: string,
+    realWorldEventId: string,
+  ): Promise<boolean> {
+    const { affected } = await tx.delete(MomentRealWorldEvent, { momentId, realWorldEventId });
+
+    return affected === 1;
   }
 }

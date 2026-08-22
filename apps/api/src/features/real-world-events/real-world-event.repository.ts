@@ -26,11 +26,16 @@ import type { NewRealWorldEvent } from "./real-world-event.types.js";
 /**
  * Shape a row and its attachments into the boundary contract.
  *
+ * Exported because a Moment returns the occurrences it was part of whole rather
+ * than by identifier. The caller must have loaded the aliases and places, since
+ * this reports what it was given: an Event read without them looks like one
+ * with none.
+ *
  * @param row - As read from `real_world_events`, with aliases and places
  *   loaded.
  * @returns The Event as a caller receives it.
  */
-function toRealWorldEvent(row: EventRow): RealWorldEvent {
+export function toRealWorldEvent(row: EventRow): RealWorldEvent {
   const occurrence: Occurrence = {
     start: row.occurrenceStart.toISOString(),
     end: row.occurrenceEnd.toISOString(),

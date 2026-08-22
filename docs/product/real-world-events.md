@@ -1477,6 +1477,8 @@ These were open questions. Implementation settled them, and they are requirement
 
 One piece of context for whoever answers the hierarchy question: `timeline-first-curation-and-discovery.md` describes `parent_of` and `child_of` as relationships between *Timelines*, while this document describes containment as a property of Events. Whether it belongs to Events, to Timelines, or to both should be settled once, across both documents, rather than separately in each.
 
+**One Moment may belong to several Events** (ADR-102). A photograph at a wedding that is also part of a family reunion is genuinely both, and the two occurrences do not conflict. When that is redundant rather than legitimate is left to judgement rather than to a constraint.
+
 **Duplicate Events are permitted and expected.** Nothing prevents two people recording the same occurrence separately, because identity is the identifier rather than the name and reconciliation does not exist yet. Refusing the second would refuse real history to protect a guess.
 
 **Recording an Event confers no ownership of the occurrence.** The creator is stored as provenance only.
@@ -1513,7 +1515,6 @@ The following questions require deliberate resolution:
 - Can an Event creator remove another User's Moment association?
 - Who can dispute an Event association?
 - What happens while an Event association is disputed?
-- Can one Moment belong to multiple Events?
 - If yes, when is that historically legitimate rather than redundant?
 - Should parent-Event association be derived when a Moment belongs to a child Event?
 - What exact provenance should be visible for Event associations?

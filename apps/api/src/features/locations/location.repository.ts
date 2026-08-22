@@ -22,10 +22,14 @@ import type { NewLocation } from "./location.types.js";
 /**
  * Shape a row into the boundary contract.
  *
+ * Exported because a Moment returns the place it happened whole rather than by
+ * identifier, and the shape a caller receives should be decided in one place —
+ * here, by the feature that owns the table.
+ *
  * @param row - As read from `locations`.
  * @returns The place as a caller receives it.
  */
-function toLocation(row: LocationRow): Location {
+export function toLocation(row: LocationRow): Location {
   return {
     locationId: row.locationId,
     name: row.name,

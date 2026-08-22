@@ -1291,6 +1291,8 @@ These were open questions. Implementation settled them, and they are requirement
 
 **A Location may be created that no provider has heard of.** The provider reference is optional, so a name typed by hand is a first-class place rather than a degraded one.
 
+**A Moment has at most one Location** (ADR-102). The Moment-level Location represents the experience as a whole; media pointing at several distinct places usually means the Moment's historical boundaries should be reconsidered rather than that it needs several places. A primary Location is therefore not required, because there is never more than one. Routes and moving experiences remain unresolved, and belong with whatever eventually represents them for Events too.
+
 **How a place came to be known is recorded and returned.** `source` distinguishes a place someone searched for and chose, one a device reported, and one read out of a photograph's metadata. The distinction cannot be recovered once lost, and the three are not equally strong claims.
 
 ## Open Product Questions
@@ -1301,9 +1303,6 @@ The following questions require deliberate resolution:
 - What Location precision options should Users see explicitly?
 - Should the product use labels such as exact, approximate, city-level, and hidden?
 - If so, how is free-form historical text later reconciled with stable Location identity?
-- Should day-one Moments support multiple explicit Locations?
-- If not, how should routes and moving experiences be represented without corrupting the domain model?
-- Should a primary Location be required when multiple Locations exist?
 - Can individual media items expose different supporting Location metadata within one Moment?
 - Should Users be able to inspect per-media metadata without turning it into separate Moment chronology?
 - Should device-derived Location require explicit confirmation before becoming historical metadata?

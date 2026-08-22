@@ -140,3 +140,58 @@ export async function createPendingUpload(
 
   return uploadId;
 }
+
+/**
+ * A recorded place.
+ *
+ * Inserted directly, because a test about Moments should not have to drive a
+ * map-service search to obtain somewhere for something to have happened.
+ *
+ * @param dataSource - The database under test.
+ * @param recordedByUserId - Who first recorded it. Provenance, not ownership:
+ *   anybody's Moment may point at it (ADR-098).
+ * @returns The new place's identifier.
+ */
+export async function createLocation(
+  dataSource: DataSource,
+  recordedByUserId: string,
+): Promise<string> {
+  const locationId = randomUUID();
+
+  await dataSource.query(
+    `INSERT INTO locations (
+       location_id, recorded_by_user_id, name, latitude, longitude,
+       precision, source, created_at, updated_at
+     ) VALUES ($1, $2, $3, 40.7505, -73.9934, 'exact', 'explicit-selection', now(), now())`,
+    [locationId, recordedByUserId, `Somewhere ${locationId.slice(0, 8)}`],
+  );
+
+  return locationId;
+}
+
+/**
+ * A recorded real-world Event.
+ *
+ * @param dataSource - The database under test.
+ * @param createdByUserId - Who first recorded it. Provenance, not ownership.
+ * @param name - Optional. Names are not unique and are not identity, so one is
+ *   generated rather than defaulted to something fixed.
+ * @returns The new occurrence's identifier.
+ */
+export async function createRealWorldEvent(
+  dataSource: DataSource,
+  createdByUserId: string,
+  name?: string,
+): Promise<string> {
+  const realWorldEventId = randomUUID();
+
+  await dataSource.query(
+    `INSERT INTO real_world_events (
+       real_world_event_id, created_by_user_id, name,
+       occurrence_start, occurrence_end, occurrence_precision, created_at, updated_at
+     ) VALUES ($1, $2, $3, '2026-11-20T00:00:00Z', '2026-11-22T23:59:59Z', 'day', now(), now())`,
+    [realWorldEventId, createdByUserId, name ?? `Occurrence ${realWorldEventId.slice(0, 8)}`],
+  );
+
+  return realWorldEventId;
+}

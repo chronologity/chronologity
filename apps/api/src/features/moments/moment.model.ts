@@ -1,4 +1,15 @@
-import { Column, Entity, Index, JoinColumn, ManyToOne, OneToMany, PrimaryColumn } from "typeorm";
+import {
+  Column,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  OneToMany,
+  OneToOne,
+  PrimaryColumn,
+} from "typeorm";
+import { Location } from "../locations/location.model.js";
+import { RealWorldEvent } from "../real-world-events/real-world-event.model.js";
 import { Upload } from "../uploads/upload.model.js";
 import { User } from "../users/user.model.js";
 
@@ -82,6 +93,83 @@ export class Moment {
 
   @OneToMany(() => MomentMedium, (medium) => medium.moment)
   media?: MomentMedium[];
+
+  @OneToOne(() => MomentLocation, (place) => place.moment)
+  place?: MomentLocation;
+
+  @OneToMany(() => MomentRealWorldEvent, (association) => association.moment)
+  realWorldEvents?: MomentRealWorldEvent[];
+}
+
+/**
+ * Where a Moment's experience happened.
+ *
+ * One per Moment, which the primary key enforces. `locations.md:433` asks that
+ * the Moment-level Location represent the experience as a whole; media pointing
+ * at several distinct places usually means several Moments rather than one
+ * Moment in several places.
+ *
+ * A row rather than a column on the Moment, because an association is an
+ * assertion carrying its own provenance.
+ */
+@Entity("moment_locations")
+export class MomentLocation {
+  @PrimaryColumn("uuid", { name: "moment_id" })
+  momentId!: string;
+
+  @Column("uuid", { name: "location_id" })
+  locationId!: string;
+
+  /**
+   * How the association came to be. `user-asserted` is the only value anything
+   * can currently produce; suggestion, inference, and import are named by the
+   * specifications and arrive with the capabilities that make them.
+   */
+  @Column("text")
+  origin!: string;
+
+  @Column("timestamptz", { name: "created_at" })
+  createdAt!: Date;
+
+  @OneToOne(() => Moment, (moment) => moment.place)
+  @JoinColumn({ name: "moment_id" })
+  moment?: Moment;
+
+  @ManyToOne(() => Location)
+  @JoinColumn({ name: "location_id" })
+  location?: Location;
+}
+
+/**
+ * A larger occurrence a Moment was part of.
+ *
+ * Several are permitted: a photograph at a wedding that is also part of a family
+ * reunion is genuinely both. The asymmetry with Locations is deliberate — an
+ * Event is a shared occurrence that may span places, a Moment is one person's
+ * experience of somewhere.
+ */
+@Entity("moment_real_world_events")
+export class MomentRealWorldEvent {
+  @PrimaryColumn("uuid", { name: "moment_id" })
+  momentId!: string;
+
+  @PrimaryColumn("uuid", { name: "real_world_event_id" })
+  realWorldEventId!: string;
+
+  /** As on `MomentLocation`: one producible value, widened by capability. */
+  @Column("text")
+  origin!: string;
+
+  @Column("timestamptz", { name: "created_at" })
+  createdAt!: Date;
+
+  @ManyToOne(() => Moment, (moment) => moment.realWorldEvents)
+  @JoinColumn({ name: "moment_id" })
+  moment?: Moment;
+
+  @ManyToOne(() => RealWorldEvent)
+  @JoinColumn({ name: "real_world_event_id" })
+  realWorldEvent?: RealWorldEvent;
 }
 
 /**

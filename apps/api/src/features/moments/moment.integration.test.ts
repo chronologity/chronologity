@@ -10,7 +10,14 @@ import { createTestAuthentication, type TestAuthentication } from "../../testing
 import { UserRepository } from "../users/user.repository.js";
 import { UserService } from "../users/user.service.js";
 import { UploadRepository } from "../uploads/upload.repository.js";
-import { createPendingUpload, createReadyUpload } from "../../testing/fixtures.js";
+import { LocationRepository } from "../locations/location.repository.js";
+import { RealWorldEventRepository } from "../real-world-events/real-world-event.repository.js";
+import {
+  createLocation,
+  createPendingUpload,
+  createReadyUpload,
+  createRealWorldEvent,
+} from "../../testing/fixtures.js";
 import { MomentRepository } from "./moment.repository.js";
 import { MomentService } from "./moment.service.js";
 
@@ -111,6 +118,8 @@ describe("moments", () => {
         database.dataSource,
         new MomentRepository(database.dataSource),
         new UploadRepository(database.dataSource),
+        new LocationRepository(database.dataSource),
+        new RealWorldEventRepository(database.dataSource),
       ),
     });
   });
@@ -642,6 +651,295 @@ describe("moments", () => {
 
     it("refuses listing without a caller", async () => {
       const response = await app.inject({ method: "GET", url: "/moments" });
+
+      assert.equal(response.statusCode, 401, response.body);
+    });
+  });
+
+  describe("where it happened, and what it was part of", () => {
+    it("records a place and several occurrences at creation, and returns them whole", async () => {
+      const { accessToken, userId, uploadId } = await someoneWithMedia();
+      const locationId = await createLocation(database.dataSource, userId);
+      const wedding = await createRealWorldEvent(database.dataSource, userId, "A wedding");
+      const reunion = await createRealWorldEvent(database.dataSource, userId, "A family reunion");
+
+      const response = await record(accessToken, {
+        caption: "The toast",
+        occurrence: summer,
+        occurrenceOffsetMinutes: 0,
+        uploadIds: [uploadId],
+        locationId,
+        realWorldEventIds: [wedding, reunion],
+      });
+
+      assert.equal(response.statusCode, 201, response.body);
+
+      // Whole, not by identifier: a client showing a Moment should not need
+      // three more round trips to say where it was.
+      assert.equal(response.json().location.locationId, locationId);
+      assert.ok(response.json().location.name.length > 0);
+      assert.deepEqual(
+        response.json().realWorldEvents.map((event: { name: string }) => event.name),
+        ["A family reunion", "A wedding"],
+      );
+    });
+
+    it("records no place when nobody said where", async () => {
+      const { accessToken, uploadId } = await someoneWithMedia();
+
+      const response = await record(accessToken, {
+        caption: "Somewhere, once",
+        occurrence: summer,
+        occurrenceOffsetMinutes: 0,
+        uploadIds: [uploadId],
+      });
+
+      // Null rather than absent: "not known" is a fact about the history.
+      assert.equal(response.json().location, null);
+      assert.deepEqual(response.json().realWorldEvents, []);
+    });
+
+    it("replaces the place rather than accumulating them", async () => {
+      const { accessToken, userId, uploadId } = await someoneWithMedia();
+      const first = await createLocation(database.dataSource, userId);
+      const corrected = await createLocation(database.dataSource, userId);
+
+      const moment = (
+        await record(accessToken, {
+          caption: "Actually it was next door",
+          occurrence: summer,
+          occurrenceOffsetMinutes: 0,
+          uploadIds: [uploadId],
+          locationId: first,
+        })
+      ).json();
+
+      const response = await app.inject({
+        method: "PUT",
+        url: `/moments/${moment.momentId}/location`,
+        headers: authed(accessToken),
+        payload: { locationId: corrected },
+      });
+
+      assert.equal(response.statusCode, 200, response.body);
+      // A Moment has one place. Saying where twice is a correction, not a
+      // second claim.
+      assert.equal(response.json().location.locationId, corrected);
+    });
+
+    it("lets a place be taken back, leaving the moment intact", async () => {
+      const { accessToken, userId, uploadId } = await someoneWithMedia();
+      const locationId = await createLocation(database.dataSource, userId);
+
+      const moment = (
+        await record(accessToken, {
+          caption: "On reflection nobody knows",
+          occurrence: summer,
+          occurrenceOffsetMinutes: 0,
+          uploadIds: [uploadId],
+          locationId,
+        })
+      ).json();
+
+      const response = await app.inject({
+        method: "DELETE",
+        url: `/moments/${moment.momentId}/location`,
+        headers: authed(accessToken),
+      });
+
+      assert.equal(response.statusCode, 200, response.body);
+      assert.equal(response.json().location, null);
+      // The Moment survives losing its place. Removing context is not removing
+      // history.
+      assert.equal(response.json().momentId, moment.momentId);
+      assert.equal(response.json().media.length, 1);
+    });
+
+    it("treats removing a place a moment never had as already done", async () => {
+      const { accessToken, uploadId } = await someoneWithMedia();
+      const moment = (
+        await record(accessToken, {
+          caption: "Never had one",
+          occurrence: summer,
+          occurrenceOffsetMinutes: 0,
+          uploadIds: [uploadId],
+        })
+      ).json();
+
+      const response = await app.inject({
+        method: "DELETE",
+        url: `/moments/${moment.momentId}/location`,
+        headers: authed(accessToken),
+      });
+
+      // The caller asked for a state that already holds, which is not an error.
+      assert.equal(response.statusCode, 200, response.body);
+      assert.equal(response.json().location, null);
+    });
+
+    it("associates and dissociates an occurrence", async () => {
+      const { accessToken, userId, uploadId } = await someoneWithMedia();
+      const realWorldEventId = await createRealWorldEvent(database.dataSource, userId);
+
+      const moment = (
+        await record(accessToken, {
+          caption: "Part of something larger",
+          occurrence: summer,
+          occurrenceOffsetMinutes: 0,
+          uploadIds: [uploadId],
+        })
+      ).json();
+
+      const added = await app.inject({
+        method: "POST",
+        url: `/moments/${moment.momentId}/real-world-events`,
+        headers: authed(accessToken),
+        payload: { realWorldEventId },
+      });
+
+      assert.equal(added.statusCode, 200, added.body);
+      assert.equal(added.json().realWorldEvents.length, 1);
+
+      const removed = await app.inject({
+        method: "DELETE",
+        url: `/moments/${moment.momentId}/real-world-events/${realWorldEventId}`,
+        headers: authed(accessToken),
+      });
+
+      assert.equal(removed.statusCode, 200, removed.body);
+      assert.deepEqual(removed.json().realWorldEvents, []);
+    });
+
+    it("treats the same occurrence twice as one association", async () => {
+      const { accessToken, userId, uploadId } = await someoneWithMedia();
+      const realWorldEventId = await createRealWorldEvent(database.dataSource, userId);
+
+      const moment = (
+        await record(accessToken, {
+          caption: "Said twice",
+          occurrence: summer,
+          occurrenceOffsetMinutes: 0,
+          uploadIds: [uploadId],
+          realWorldEventIds: [realWorldEventId],
+        })
+      ).json();
+
+      const again = await app.inject({
+        method: "POST",
+        url: `/moments/${moment.momentId}/real-world-events`,
+        headers: authed(accessToken),
+        payload: { realWorldEventId },
+      });
+
+      // The same claim made twice is one association.
+      assert.equal(again.statusCode, 200, again.body);
+      assert.equal(again.json().realWorldEvents.length, 1);
+    });
+
+    it("may point at somebody else's place and occurrence", async () => {
+      const stranger = await onboard();
+      const locationId = await createLocation(database.dataSource, stranger.userId);
+      const realWorldEventId = await createRealWorldEvent(database.dataSource, stranger.userId);
+      const mine = await someoneWithMedia();
+
+      const response = await record(mine.accessToken, {
+        caption: "Somebody else recorded the venue first",
+        occurrence: summer,
+        occurrenceOffsetMinutes: 0,
+        uploadIds: [mine.uploadId],
+        locationId,
+        realWorldEventIds: [realWorldEventId],
+      });
+
+      // Neither is owned. A Location is shared reference data and an Event is
+      // shared history — pointing at one somebody else recorded is the point.
+      assert.equal(response.statusCode, 201, response.body);
+      assert.equal(response.json().location.locationId, locationId);
+    });
+  });
+
+  describe("refusing context that is not real", () => {
+    it("refuses a place that does not exist rather than dropping it", async () => {
+      const { accessToken, uploadId } = await someoneWithMedia();
+
+      const response = await record(accessToken, {
+        caption: "Nowhere",
+        occurrence: summer,
+        occurrenceOffsetMinutes: 0,
+        uploadIds: [uploadId],
+        locationId: randomUUID(),
+      });
+
+      // Silently discarding it would record a Moment claiming less than the
+      // person said.
+      assert.equal(response.statusCode, 400, response.body);
+    });
+
+    it("refuses an occurrence that does not exist", async () => {
+      const { accessToken, uploadId } = await someoneWithMedia();
+
+      const response = await record(accessToken, {
+        caption: "Part of nothing",
+        occurrence: summer,
+        occurrenceOffsetMinutes: 0,
+        uploadIds: [uploadId],
+        realWorldEventIds: [randomUUID()],
+      });
+
+      assert.equal(response.statusCode, 400, response.body);
+    });
+
+    it("refuses to give context to somebody else's moment", async () => {
+      const theirs = await someoneWithMedia();
+      const mine = await onboard();
+      const locationId = await createLocation(database.dataSource, mine.userId);
+
+      const moment = (
+        await record(theirs.accessToken, {
+          caption: "Not yours to annotate",
+          occurrence: summer,
+          occurrenceOffsetMinutes: 0,
+          uploadIds: [theirs.uploadId],
+        })
+      ).json();
+
+      const response = await app.inject({
+        method: "PUT",
+        url: `/moments/${moment.momentId}/location`,
+        headers: authed(mine.accessToken),
+        payload: { locationId },
+      });
+
+      // Reported as absent, exactly as reading it would be.
+      assert.equal(response.statusCode, 404, response.body);
+    });
+
+    it("refuses to remove a place a moment still points at", async () => {
+      const { accessToken, userId, uploadId } = await someoneWithMedia();
+      const locationId = await createLocation(database.dataSource, userId);
+
+      await record(accessToken, {
+        caption: "Anchored here",
+        occurrence: summer,
+        occurrenceOffsetMinutes: 0,
+        uploadIds: [uploadId],
+        locationId,
+      });
+
+      // RESTRICT, per ADR-097. A Location is shared reference data that
+      // outlives any one Moment's use of it, and removing it should be refused
+      // rather than quietly unpick somebody's history.
+      await assert.rejects(
+        database.dataSource.query(`DELETE FROM locations WHERE location_id = $1`, [locationId]),
+      );
+    });
+
+    it("refuses association without a caller", async () => {
+      const response = await app.inject({
+        method: "PUT",
+        url: `/moments/${randomUUID()}/location`,
+        payload: { locationId: randomUUID() },
+      });
 
       assert.equal(response.statusCode, 401, response.body);
     });

@@ -12,7 +12,12 @@ import {
 } from "../../features/authentication/session.model.js";
 import { AuthorizationAuditEvent, RoleAssignment } from "../../features/authorization/authorization.model.js";
 import { Location } from "../../features/locations/location.model.js";
-import { Moment, MomentMedium } from "../../features/moments/moment.model.js";
+import {
+  Moment,
+  MomentLocation,
+  MomentMedium,
+  MomentRealWorldEvent,
+} from "../../features/moments/moment.model.js";
 import {
   RealWorldEvent,
   RealWorldEventAlias,
@@ -65,6 +70,8 @@ const entities = [
   Location,
   Moment,
   MomentMedium,
+  MomentLocation,
+  MomentRealWorldEvent,
   RealWorldEvent,
   RealWorldEventAlias,
   RealWorldEventLocation,

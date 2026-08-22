@@ -4,6 +4,8 @@ import type { DataSource } from "typeorm";
 import { withTransaction } from "../../lib/database/transaction.js";
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
+import type { LocationRepository } from "../locations/location.repository.js";
+import type { RealWorldEventRepository } from "../real-world-events/real-world-event.repository.js";
 import type { UploadRepository } from "../uploads/upload.repository.js";
 import {
   checkMedia,
@@ -38,12 +40,18 @@ export class MomentService {
    * @param moments - Where Moments are stored.
    * @param uploads - Used to check that media exists, belongs to the author,
    *   and has actually been opened by a decoder.
+   * @param locations - Used to check that a place named actually exists.
+   * @param realWorldEvents - Used to check that an occurrence named actually
+   *   exists. Unlike media, neither has to belong to the author: a Location is
+   *   shared reference data and an Event is shared history.
    * @param clock - Injected so tests can move time without waiting.
    */
   constructor(
     private readonly dataSource: DataSource,
     private readonly moments: MomentRepository,
     private readonly uploads: UploadRepository,
+    private readonly locations: LocationRepository,
+    private readonly realWorldEvents: RealWorldEventRepository,
     private readonly clock: () => Date = () => new Date(),
   ) {}
 
@@ -74,6 +82,7 @@ export class MomentService {
     }
 
     await this.checkEveryFileIsUsable(authorUserId, request.uploadIds);
+    await this.checkContextExists(request.locationId, request.realWorldEventIds);
 
     const momentId = randomUUID();
 
@@ -88,6 +97,8 @@ export class MomentService {
         createdAt: this.clock(),
       }),
     );
+
+    await this.associate(momentId, request.locationId, request.realWorldEventIds);
 
     const recorded = await this.moments.findById(momentId);
 
@@ -131,6 +142,164 @@ export class MomentService {
         });
       }
     }
+  }
+
+  /**
+   * Attach the context a Moment was created with.
+   *
+   * Separate from the Moment's own write, because the Moment is complete
+   * without it: `locations.md` is explicit that a Moment need not have a place,
+   * and an Event association is optional too. A failure here leaves a Moment
+   * that exists and lacks context, which is a truthful state.
+   *
+   * @param momentId - The Moment just recorded.
+   * @param locationId - Where it happened, if anybody said.
+   * @param realWorldEventIds - What it was part of, if anything.
+   * @returns Nothing.
+   */
+  private async associate(
+    momentId: string,
+    locationId: string | undefined,
+    realWorldEventIds: readonly string[] | undefined,
+  ): Promise<void> {
+    const events = [...new Set(realWorldEventIds ?? [])];
+
+    if (locationId === undefined && events.length === 0) {
+      return;
+    }
+
+    const at = this.clock();
+
+    await withTransaction(this.dataSource, async (tx) => {
+      if (locationId !== undefined) {
+        await this.moments.setLocation(tx, momentId, locationId, at);
+      }
+
+      for (const realWorldEventId of events) {
+        await this.moments.addRealWorldEvent(tx, momentId, realWorldEventId, at);
+      }
+    });
+  }
+
+  /**
+   * Check that the context a Moment claims actually exists.
+   *
+   * Neither has to belong to the caller. A Location is shared reference data
+   * (ADR-098) and an Event is shared history whose creator holds provenance
+   * rather than ownership — so pointing at somebody else's is not trespass, it
+   * is the entire point of both being shared.
+   *
+   * @param locationId - Where it happened, if anybody said.
+   * @param realWorldEventIds - What it was part of, if anything.
+   * @returns Nothing when everything named exists.
+   * @throws {ValidationError} Naming the first thing that does not. Refused
+   *   rather than dropped: silently discarding it would record a Moment
+   *   claiming less than the person said.
+   */
+  private async checkContextExists(
+    locationId: string | undefined,
+    realWorldEventIds: readonly string[] | undefined,
+  ): Promise<void> {
+    if (locationId !== undefined && (await this.locations.findById(locationId)) === undefined) {
+      throw new ValidationError("No such location", { field: "locationId" });
+    }
+
+    for (const realWorldEventId of new Set(realWorldEventIds ?? [])) {
+      if ((await this.realWorldEvents.findById(realWorldEventId)) === undefined) {
+        throw new ValidationError("No such real-world event", { field: "realWorldEventIds" });
+      }
+    }
+  }
+
+  /**
+   * Say where a Moment happened, replacing whatever was said before.
+   *
+   * @param momentId - Which Moment.
+   * @param viewerUserId - Who is asking. Only its author may.
+   * @param locationId - Which place.
+   * @returns The Moment as it now stands.
+   * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
+   * @throws {ValidationError} If there is no such place.
+   */
+  async setLocation(
+    momentId: string,
+    viewerUserId: string,
+    locationId: string,
+  ): Promise<Moment> {
+    await this.get(momentId, viewerUserId);
+    await this.checkContextExists(locationId, undefined);
+
+    await withTransaction(this.dataSource, (tx) =>
+      this.moments.setLocation(tx, momentId, locationId, this.clock()),
+    );
+
+    return this.get(momentId, viewerUserId);
+  }
+
+  /**
+   * Take back where a Moment happened.
+   *
+   * @param momentId - Which Moment.
+   * @param viewerUserId - Who is asking. Only its author may.
+   * @returns The Moment as it now stands. Removing a place a Moment never had
+   *   is not an error: the caller asked for a state that already holds.
+   * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
+   */
+  async clearLocation(momentId: string, viewerUserId: string): Promise<Moment> {
+    await this.get(momentId, viewerUserId);
+
+    await withTransaction(this.dataSource, (tx) => this.moments.clearLocation(tx, momentId));
+
+    return this.get(momentId, viewerUserId);
+  }
+
+  /**
+   * Say a Moment was part of an occurrence.
+   *
+   * @param momentId - Which Moment.
+   * @param viewerUserId - Who is asking. Only its author may.
+   * @param realWorldEventId - Which occurrence.
+   * @returns The Moment as it now stands. Saying it twice is the same claim
+   *   made twice, and leaves one association.
+   * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
+   * @throws {ValidationError} If there is no such occurrence.
+   */
+  async addRealWorldEvent(
+    momentId: string,
+    viewerUserId: string,
+    realWorldEventId: string,
+  ): Promise<Moment> {
+    await this.get(momentId, viewerUserId);
+    await this.checkContextExists(undefined, [realWorldEventId]);
+
+    await withTransaction(this.dataSource, (tx) =>
+      this.moments.addRealWorldEvent(tx, momentId, realWorldEventId, this.clock()),
+    );
+
+    return this.get(momentId, viewerUserId);
+  }
+
+  /**
+   * Take back a Moment's association with an occurrence.
+   *
+   * @param momentId - Which Moment.
+   * @param viewerUserId - Who is asking. Only its author may.
+   * @param realWorldEventId - Which occurrence.
+   * @returns The Moment as it now stands.
+   * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
+   */
+  async removeRealWorldEvent(
+    momentId: string,
+    viewerUserId: string,
+    realWorldEventId: string,
+  ): Promise<Moment> {
+    await this.get(momentId, viewerUserId);
+
+    await withTransaction(this.dataSource, (tx) =>
+      this.moments.removeRealWorldEvent(tx, momentId, realWorldEventId),
+    );
+
+    return this.get(momentId, viewerUserId);
   }
 
   /**
