@@ -1293,6 +1293,8 @@ These were open questions. Implementation settled them, and they are requirement
 
 **A Moment has at most one Location** (ADR-102). The Moment-level Location represents the experience as a whole; media pointing at several distinct places usually means the Moment's historical boundaries should be reconsidered rather than that it needs several places. A primary Location is therefore not required, because there is never more than one. Routes and moving experiences remain unresolved, and belong with whatever eventually represents them for Events too.
 
+**A Location may be followed** (ADR-105). Anybody may ask to hear about Moments recorded at a place, with no approval, for the same reason: a Location is shared reference data, and its recorder holds provenance rather than authority. Following grants no access.
+
 **How a place came to be known is recorded and returned.** `source` distinguishes a place someone searched for and chose, one a device reported, and one read out of a photograph's metadata. The distinction cannot be recovered once lost, and the three are not equally strong claims.
 
 ## Open Product Questions

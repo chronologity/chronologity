@@ -1481,6 +1481,8 @@ One piece of context for whoever answers the hierarchy question: `timeline-first
 
 **Duplicate Events are permitted and expected.** Nothing prevents two people recording the same occurrence separately, because identity is the identifier rather than the name and reconciliation does not exist yet. Refusing the second would refuse real history to protect a guess.
 
+**An Event may be followed** (ADR-105). Anybody may ask to hear about Moments that become associated with it, and no approval is involved: an Event is shared history, and whoever recorded it first holds provenance rather than authority over who may watch it. Following grants no access to Moments that are not otherwise visible.
+
 **Recording an Event confers no ownership of the occurrence.** The creator is stored as provenance only.
 
 ## Open Product Questions

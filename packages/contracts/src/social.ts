@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { identifierSchema } from "./identifiers.js";
 import { timestampSchema } from "./time.js";
+import { locationSchema } from "./locations.js";
+import { realWorldEventSchema } from "./real-world-events.js";
 import { publicUserSchema } from "./users.js";
 
 /**
@@ -96,3 +98,24 @@ export const listFollowsRequestSchema = z.object({
 });
 
 export type ListFollowsRequest = z.infer<typeof listFollowsRequestSchema>;
+
+/**
+ * A page of real-world Events somebody follows.
+ *
+ * Each Event whole rather than by identifier, so a client listing what somebody
+ * follows can show it without a round trip per row.
+ */
+export const followedEventListSchema = z.object({
+  realWorldEvents: z.array(realWorldEventSchema),
+  nextCursor: z.string().optional(),
+});
+
+export type FollowedEventList = z.infer<typeof followedEventListSchema>;
+
+/** A page of Locations somebody follows. */
+export const followedLocationListSchema = z.object({
+  locations: z.array(locationSchema),
+  nextCursor: z.string().optional(),
+});
+
+export type FollowedLocationList = z.infer<typeof followedLocationListSchema>;

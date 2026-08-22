@@ -2971,3 +2971,47 @@ Declining does not block, does not notify, and does not prevent asking again. Ea
 `POST /users/:userId/follow` returns either a Follow or a request, and the answer says which. No endpoint discloses whether an account requires approval, because asking already reveals exactly as much as the asker needs.
 
 Nothing notifies. Notifications are phase 5Q, and four open questions cover what should be sent and when.
+
+---
+
+# ADR-105 — Follow the Context, Not the Timeline, and Page on a Pair
+
+**Status:** Accepted
+
+## Decision
+
+A person may follow a real-world Event or a Location. Each is its own table with real foreign keys. Neither requires approval, and neither grants access.
+
+Every list in the social feature pages on a pair — the moment plus an identifier — rather than on the moment alone.
+
+## Alternatives Considered
+
+A single polymorphic `context_follows` table keyed on a context kind, matching how the reconciled relationship graph stores its nodes.
+
+Making Timelines followable directly, which is what "follow a Timeline" sounds like it needs.
+
+Leaving the 5I-1 cursors as they were, since no test was failing.
+
+## Rationale
+
+**Following a Timeline is following a context.** A Timeline is derived — it is what a viewer sees when they look at a Location, an Event, or a person — so there is nothing there to attach a follow to. The context is the stable thing, and following it produces exactly the behaviour asked for: when a Moment becomes associated with the Apollo Program, everybody following that Event is a lookup away. An interface may still say "follow this timeline"; the distinction is in the model, not the wording.
+
+This also makes the notification trigger something that already happens. A stored Timeline would have needed membership maintained by something, and would have notified on membership change — which is the filing problem `timelines.md:48` exists to avoid.
+
+Separate tables were chosen over one polymorphic table because a follow does not have the problem that made the relationship graph polymorphic: an edge joins two different kinds, a follow joins a person to one kind. Two tables keep real foreign keys, and ADR-097 added eleven of those precisely because nothing enforced that a Session belonged to an Identity that existed.
+
+No approval, because there is nobody to ask. An Event's creator holds provenance rather than authority (ADR-100) and a Location is shared reference data (ADR-098). Requiring approval would give whoever typed a venue name first a veto over who may watch it.
+
+## Consequences
+
+**The cursors 5I-1 shipped were defective, and this corrects them.** They encoded a timestamp alone, while `GET /moments` encodes `(occurrence_start, moment_id)` for the reason that two rows can share a moment. Two follows made in the same millisecond — ordinary when somebody follows several people in quick succession — could be skipped or repeated across a page boundary. Nothing was failing because nothing exercised a tie.
+
+Every social list now pages on a pair, and two tests force the tie deliberately by setting several relationships to one instant. Both were verified to fail against the old cursor.
+
+The indexes on `user_follows` were rebuilt to carry the tie-breaking column, in both directions, because both are paged.
+
+**Following still grants nothing.** A test asserts that following an Event gives no access to a private Moment associated with it. Following says what somebody wants to hear about; it says nothing about what they may see, and 5I-4 is where that changes deliberately.
+
+There is no combined "everything I follow" list. Whether the two kinds share anything beyond the word is an open question, and one endpoint returning both would answer it.
+
+`RESTRICT` means an Event or Location that people still follow cannot be deleted. Nothing deletes either today, so this blocks nothing and obliges whatever eventually does to decide what happens to the followers first.

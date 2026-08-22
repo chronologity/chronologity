@@ -1,4 +1,6 @@
 import {
+  followedEventListSchema,
+  followedLocationListSchema,
   followListSchema,
   followOutcomeSchema,
   followRequestListSchema,
@@ -67,6 +69,111 @@ export function followRoutes(follows: FollowService) {
 
         return reply.status(204).send(null);
       },
+    );
+
+    // Following a context rather than a person. No approval: an Event is shared
+    // history and a Location is shared reference data, so there is nobody to
+    // ask. An interface may present either as "follow this timeline".
+    app.post(
+      "/real-world-events/:realWorldEventId/follow",
+      {
+        schema: {
+          params: z.object({ realWorldEventId: identifierSchema }),
+          response: { 204: z.null() },
+        },
+        preHandler: requireUser,
+      },
+      async (request, reply) => {
+        await follows.followContext(
+          request.user.userId,
+          "real-world-event",
+          request.params.realWorldEventId,
+        );
+
+        return reply.status(204).send(null);
+      },
+    );
+
+    app.delete(
+      "/real-world-events/:realWorldEventId/follow",
+      {
+        schema: {
+          params: z.object({ realWorldEventId: identifierSchema }),
+          response: { 204: z.null() },
+        },
+        preHandler: requireUser,
+      },
+      async (request, reply) => {
+        await follows.unfollowContext(
+          request.user.userId,
+          "real-world-event",
+          request.params.realWorldEventId,
+        );
+
+        return reply.status(204).send(null);
+      },
+    );
+
+    app.post(
+      "/locations/:locationId/follow",
+      {
+        schema: {
+          params: z.object({ locationId: identifierSchema }),
+          response: { 204: z.null() },
+        },
+        preHandler: requireUser,
+      },
+      async (request, reply) => {
+        await follows.followContext(request.user.userId, "location", request.params.locationId);
+
+        return reply.status(204).send(null);
+      },
+    );
+
+    app.delete(
+      "/locations/:locationId/follow",
+      {
+        schema: {
+          params: z.object({ locationId: identifierSchema }),
+          response: { 204: z.null() },
+        },
+        preHandler: requireUser,
+      },
+      async (request, reply) => {
+        await follows.unfollowContext(request.user.userId, "location", request.params.locationId);
+
+        return reply.status(204).send(null);
+      },
+    );
+
+    app.get(
+      "/following/real-world-events",
+      {
+        schema: {
+          querystring: listFollowsRequestSchema,
+          response: { 200: followedEventListSchema },
+        },
+        preHandler: requireUser,
+      },
+      async (request) =>
+        follows.listFollowedEvents(request.user.userId, request.query.limit, request.query.cursor),
+    );
+
+    app.get(
+      "/following/locations",
+      {
+        schema: {
+          querystring: listFollowsRequestSchema,
+          response: { 200: followedLocationListSchema },
+        },
+        preHandler: requireUser,
+      },
+      async (request) =>
+        follows.listFollowedLocations(
+          request.user.userId,
+          request.query.limit,
+          request.query.cursor,
+        ),
     );
 
     app.get(

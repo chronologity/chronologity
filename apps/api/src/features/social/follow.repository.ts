@@ -1,9 +1,22 @@
 import { randomUUID } from "node:crypto";
-import type { PublicUser } from "@chronologity/contracts";
+import type {
+  Location as LocationContract,
+  PublicUser,
+  RealWorldEvent as RealWorldEventContract,
+} from "@chronologity/contracts";
 import type { DataSource } from "typeorm";
 import type { Transaction } from "../../lib/database/transaction.js";
+import type { Location } from "../locations/location.model.js";
+import { toLocation } from "../locations/location.repository.js";
+import type { RealWorldEvent } from "../real-world-events/real-world-event.model.js";
+import { toRealWorldEvent } from "../real-world-events/real-world-event.repository.js";
 import { User } from "../users/user.model.js";
-import { FollowRequest, UserFollow } from "./follow.model.js";
+import {
+  FollowRequest,
+  LocationFollow,
+  RealWorldEventFollow,
+  UserFollow,
+} from "./follow.model.js";
 
 /**
  * Where following is stored.
@@ -30,6 +43,18 @@ function toPublicUser(row: User): PublicUser {
     biography: row.biography,
     createdAt: row.createdAt.toISOString(),
   };
+}
+
+/**
+ * Where a page continues from.
+ *
+ * Both halves are needed. The moment orders the page and the identifier settles
+ * ties, so two relationships made in the same millisecond cannot be skipped or
+ * repeated across a boundary — the same reason `GET /moments` pages on a pair.
+ */
+export interface FollowCursor {
+  readonly at: Date;
+  readonly otherUserId: string;
 }
 
 /** Reads and writes following. */
@@ -220,16 +245,16 @@ export class FollowRepository {
    * @param direction - `following` for people they follow, `followers` for
    *   people who follow them.
    * @param limit - How many at most.
-   * @param before - Continue from before this moment, or undefined to start.
+   * @param after - Where to continue from, or undefined to start.
    * @returns The people, most recent relationship first, each with the moment
-   *   the relationship began so a caller can continue from it.
+   *   and identifier a cursor needs to continue past them.
    */
   async listPeople(
     userId: string,
     direction: "following" | "followers",
     limit: number,
-    before?: Date,
-  ): Promise<{ user: PublicUser; createdAt: Date }[]> {
+    after?: FollowCursor,
+  ): Promise<{ user: PublicUser; createdAt: Date; otherUserId: string }[]> {
     const mine = direction === "following" ? "follower_user_id" : "followed_user_id";
     const theirs = direction === "following" ? "followed_user_id" : "follower_user_id";
 
@@ -241,13 +266,192 @@ export class FollowRepository {
       .orderBy("follow.created_at", "DESC")
       .take(limit);
 
-    if (before !== undefined) {
-      query.andWhere("follow.created_at < :before", { before });
+    if (after !== undefined) {
+      // Compared as a tuple, so a row sharing its moment with the last of the
+      // previous page is neither repeated nor skipped. A cursor over the
+      // timestamp alone cannot do this, and two follows made in quick
+      // succession share one readily.
+      query.andWhere(`(follow.created_at, follow.${theirs}) < (:at, :otherUserId)`, {
+        at: after.at,
+        otherUserId: after.otherUserId,
+      });
     }
 
-    const rows = (await query.getMany()) as (UserFollow & { other: User })[];
+    const rows = (await query
+      .addOrderBy(`follow.${theirs}`, "DESC")
+      .getMany()) as (UserFollow & { other: User })[];
 
-    return rows.map((row) => ({ user: toPublicUser(row.other), createdAt: row.createdAt }));
+    return rows.map((row) => ({
+      user: toPublicUser(row.other),
+      createdAt: row.createdAt,
+      otherUserId: direction === "following" ? row.followedUserId : row.followerUserId,
+    }));
+  }
+
+  /**
+   * Record that somebody follows a real-world Event.
+   *
+   * @param tx - The caller's transaction.
+   * @param followerUserId - Who is following.
+   * @param realWorldEventId - Which occurrence.
+   * @param at - When.
+   * @returns Nothing. Following something already followed is the same
+   *   relationship asserted twice, so a repeat is ignored.
+   */
+  async followEvent(
+    tx: Transaction,
+    followerUserId: string,
+    realWorldEventId: string,
+    at: Date,
+  ): Promise<void> {
+    await tx
+      .createQueryBuilder()
+      .insert()
+      .into(RealWorldEventFollow)
+      .values({ followerUserId, realWorldEventId, createdAt: at })
+      .orIgnore()
+      .execute();
+  }
+
+  /**
+   * Stop following a real-world Event.
+   *
+   * @param tx - The caller's transaction.
+   * @param followerUserId - Who was following.
+   * @param realWorldEventId - Which occurrence.
+   * @returns Nothing.
+   */
+  async unfollowEvent(
+    tx: Transaction,
+    followerUserId: string,
+    realWorldEventId: string,
+  ): Promise<void> {
+    await tx.delete(RealWorldEventFollow, { followerUserId, realWorldEventId });
+  }
+
+  /**
+   * Record that somebody follows a Location.
+   *
+   * @param tx - The caller's transaction.
+   * @param followerUserId - Who is following.
+   * @param locationId - Which place.
+   * @param at - When.
+   * @returns Nothing.
+   */
+  async followLocation(
+    tx: Transaction,
+    followerUserId: string,
+    locationId: string,
+    at: Date,
+  ): Promise<void> {
+    await tx
+      .createQueryBuilder()
+      .insert()
+      .into(LocationFollow)
+      .values({ followerUserId, locationId, createdAt: at })
+      .orIgnore()
+      .execute();
+  }
+
+  /**
+   * Stop following a Location.
+   *
+   * @param tx - The caller's transaction.
+   * @param followerUserId - Who was following.
+   * @param locationId - Which place.
+   * @returns Nothing.
+   */
+  async unfollowLocation(
+    tx: Transaction,
+    followerUserId: string,
+    locationId: string,
+  ): Promise<void> {
+    await tx.delete(LocationFollow, { followerUserId, locationId });
+  }
+
+  /**
+   * Read a page of the occurrences somebody follows.
+   *
+   * @param followerUserId - Whose list.
+   * @param limit - How many at most.
+   * @param after - Where to continue from.
+   * @returns The Events whole, newest relationship first, each with what the
+   *   cursor needs to continue.
+   */
+  async listFollowedEvents(
+    followerUserId: string,
+    limit: number,
+    after?: FollowCursor,
+  ): Promise<{ event: RealWorldEventContract; createdAt: Date; otherId: string }[]> {
+    const query = this.dataSource
+      .getRepository(RealWorldEventFollow)
+      .createQueryBuilder("follow")
+      .innerJoinAndSelect("follow.realWorldEvent", "event")
+      .leftJoinAndSelect("event.aliases", "alias")
+      .leftJoinAndSelect("event.locations", "place")
+      .where("follow.follower_user_id = :followerUserId", { followerUserId })
+      .orderBy("follow.created_at", "DESC")
+      .addOrderBy("follow.real_world_event_id", "DESC")
+      .take(limit);
+
+    if (after !== undefined) {
+      query.andWhere(
+        "(follow.created_at, follow.real_world_event_id) < (:at, :otherUserId)",
+        { at: after.at, otherUserId: after.otherUserId },
+      );
+    }
+
+    const rows = await query.getMany();
+
+    return rows
+      .filter((row): row is RealWorldEventFollow & { realWorldEvent: RealWorldEvent } =>
+        row.realWorldEvent !== undefined,
+      )
+      .map((row) => ({
+        event: toRealWorldEvent(row.realWorldEvent),
+        createdAt: row.createdAt,
+        otherId: row.realWorldEventId,
+      }));
+  }
+
+  /**
+   * Read a page of the places somebody follows.
+   *
+   * @param followerUserId - Whose list.
+   * @param limit - How many at most.
+   * @param after - Where to continue from.
+   * @returns The places whole, newest relationship first.
+   */
+  async listFollowedLocations(
+    followerUserId: string,
+    limit: number,
+    after?: FollowCursor,
+  ): Promise<{ location: LocationContract; createdAt: Date; otherId: string }[]> {
+    const query = this.dataSource
+      .getRepository(LocationFollow)
+      .createQueryBuilder("follow")
+      .innerJoinAndSelect("follow.location", "place")
+      .where("follow.follower_user_id = :followerUserId", { followerUserId })
+      .orderBy("follow.created_at", "DESC")
+      .addOrderBy("follow.location_id", "DESC")
+      .take(limit);
+
+    if (after !== undefined) {
+      query.andWhere("(follow.created_at, follow.location_id) < (:at, :otherUserId)", {
+        at: after.at,
+        otherUserId: after.otherUserId,
+      });
+    }
+
+    const rows = await query.getMany();
+
+    return rows
+      .filter((row): row is LocationFollow & { location: Location } => row.location !== undefined)
+      .map((row) => ({
+        location: toLocation(row.location),
+        createdAt: row.createdAt,
+        otherId: row.locationId,
+      }));
   }
 
   /**
@@ -255,7 +459,7 @@ export class FollowRepository {
    *
    * @param requestedUserId - Who was asked.
    * @param limit - How many at most.
-   * @param before - Continue from before this moment, or undefined to start.
+   * @param after - Where to continue from, or undefined to start.
    * @returns The pending requests, most recent first, each with who asked.
    *   Resolved ones are omitted: somebody reviewing what is waiting on them
    *   wants what is open now.
@@ -263,7 +467,7 @@ export class FollowRepository {
   async listPendingRequests(
     requestedUserId: string,
     limit: number,
-    before?: Date,
+    after?: FollowCursor,
   ): Promise<{ request: FollowRequest; requester: PublicUser }[]> {
     const query = this.dataSource
       .getRepository(FollowRequest)
@@ -277,10 +481,14 @@ export class FollowRepository {
       .where("request.requested_user_id = :requestedUserId", { requestedUserId })
       .andWhere("request.status = 'pending'")
       .orderBy("request.requested_at", "DESC")
+      .addOrderBy("request.request_id", "DESC")
       .take(limit);
 
-    if (before !== undefined) {
-      query.andWhere("request.requested_at < :before", { before });
+    if (after !== undefined) {
+      query.andWhere("(request.requested_at, request.request_id) < (:at, :otherUserId)", {
+        at: after.at,
+        otherUserId: after.otherUserId,
+      });
     }
 
     const rows = (await query.getMany()) as (FollowRequest & { asker: User })[];

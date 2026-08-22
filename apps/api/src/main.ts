@@ -120,6 +120,8 @@ async function main(): Promise<void> {
       database.dataSource,
       new FollowRepository(database.dataSource),
       accounts,
+      realWorldEventRepository,
+      locationRepository,
     ),
     moments: new MomentService(
       database.dataSource,

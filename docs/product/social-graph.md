@@ -70,7 +70,8 @@ Follow a User      → their eligible Moments, subject to approval
 Follow a context   → Moments associated with it, no approval
 ```
 
-`timelines.md` defines context following. Neither is a relationship to a
+`timelines.md` defines context following, and it is built: a real-world Event or
+a Location may be followed, with no approval and no access granted (ADR-105). Neither is a relationship to a
 Timeline: a Timeline is derived, and is what a viewer sees when they look at a
 context.
 

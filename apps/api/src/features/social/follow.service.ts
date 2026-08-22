@@ -3,13 +3,17 @@ import type {
   FollowOutcome,
   FollowRequest,
   FollowRequestList,
+  FollowedEventList,
+  FollowedLocationList,
 } from "@chronologity/contracts";
 import type { DataSource } from "typeorm";
 import { withTransaction } from "../../lib/database/transaction.js";
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
+import type { LocationRepository } from "../locations/location.repository.js";
+import type { RealWorldEventRepository } from "../real-world-events/real-world-event.repository.js";
 import type { UserRepository } from "../users/user.repository.js";
-import type { FollowRepository } from "./follow.repository.js";
+import type { FollowCursor, FollowRepository } from "./follow.repository.js";
 import {
   checkFollow,
   checkRequestResolution,
@@ -37,12 +41,17 @@ export class FollowService {
    * @param dataSource - Opens the transactions this service's writes commit in.
    * @param follows - Where following is stored.
    * @param users - Used to check that the other account exists.
+   * @param realWorldEvents - Used to check that an occurrence being followed
+   *   actually exists.
+   * @param locations - Used to check that a place being followed exists.
    * @param clock - Injected so tests can move time without waiting.
    */
   constructor(
     private readonly dataSource: DataSource,
     private readonly follows: FollowRepository,
     private readonly users: UserRepository,
+    private readonly realWorldEvents: RealWorldEventRepository,
+    private readonly locations: LocationRepository,
     private readonly clock: () => Date = () => new Date(),
   ) {}
 
@@ -255,6 +264,141 @@ export class FollowService {
   }
 
   /**
+   * Follow a real-world Event, or a Location.
+   *
+   * No approval, unlike following a person. An Event is shared history and a
+   * Location is shared reference data — neither is owned, and their recorders
+   * hold provenance rather than authority, so there is nobody to ask.
+   *
+   * @param followerUserId - Who is following.
+   * @param kind - Which sort of context.
+   * @param contextId - Which one.
+   * @returns Nothing. Following something already followed is the state already
+   *   holding rather than a conflict.
+   * @throws {NotFoundError} If there is no such Event or place.
+   */
+  async followContext(
+    followerUserId: string,
+    kind: "real-world-event" | "location",
+    contextId: string,
+  ): Promise<void> {
+    await this.requireContext(kind, contextId);
+
+    const at = this.clock();
+
+    await withTransaction(this.dataSource, (tx) =>
+      kind === "real-world-event"
+        ? this.follows.followEvent(tx, followerUserId, contextId, at)
+        : this.follows.followLocation(tx, followerUserId, contextId, at),
+    );
+  }
+
+  /**
+   * Stop following a real-world Event, or a Location.
+   *
+   * @param followerUserId - Who was following.
+   * @param kind - Which sort of context.
+   * @param contextId - Which one.
+   * @returns Nothing. Unfollowing something never followed is not an error: the
+   *   caller asked for a state that already holds.
+   */
+  async unfollowContext(
+    followerUserId: string,
+    kind: "real-world-event" | "location",
+    contextId: string,
+  ): Promise<void> {
+    await withTransaction(this.dataSource, (tx) =>
+      kind === "real-world-event"
+        ? this.follows.unfollowEvent(tx, followerUserId, contextId)
+        : this.follows.unfollowLocation(tx, followerUserId, contextId),
+    );
+  }
+
+  /**
+   * Check that the thing being followed exists.
+   *
+   * @param kind - Which sort of context.
+   * @param contextId - Which one.
+   * @returns Nothing when it exists.
+   * @throws {NotFoundError} If it does not. Neither has to belong to the
+   *   caller: both are shared, and following somebody else's record of a place
+   *   is the point of it being shared.
+   */
+  private async requireContext(
+    kind: "real-world-event" | "location",
+    contextId: string,
+  ): Promise<void> {
+    const found =
+      kind === "real-world-event"
+        ? await this.realWorldEvents.findById(contextId)
+        : await this.locations.findById(contextId);
+
+    if (found === undefined) {
+      throw new NotFoundError(
+        kind === "real-world-event" ? "No such real-world event" : "No such location",
+      );
+    }
+  }
+
+  /**
+   * Read a page of the occurrences somebody follows.
+   *
+   * @param followerUserId - Whose list. Always the caller.
+   * @param limit - How many at most.
+   * @param cursor - Where to continue from.
+   * @returns The page, each Event whole rather than by identifier.
+   * @throws {ValidationError} If the cursor is not one this service issued.
+   */
+  async listFollowedEvents(
+    followerUserId: string,
+    limit: number,
+    cursor?: string,
+  ): Promise<FollowedEventList> {
+    const rows = await this.follows.listFollowedEvents(
+      followerUserId,
+      limit,
+      decodeCursor(cursor),
+    );
+    const last = rows.length === limit ? rows[rows.length - 1] : undefined;
+
+    return {
+      realWorldEvents: rows.map((row) => row.event),
+      ...(last === undefined
+        ? {}
+        : { nextCursor: encodeCursor(last.createdAt, last.otherId) }),
+    };
+  }
+
+  /**
+   * Read a page of the places somebody follows.
+   *
+   * @param followerUserId - Whose list. Always the caller.
+   * @param limit - How many at most.
+   * @param cursor - Where to continue from.
+   * @returns The page, each place whole.
+   * @throws {ValidationError} If the cursor is not one this service issued.
+   */
+  async listFollowedLocations(
+    followerUserId: string,
+    limit: number,
+    cursor?: string,
+  ): Promise<FollowedLocationList> {
+    const rows = await this.follows.listFollowedLocations(
+      followerUserId,
+      limit,
+      decodeCursor(cursor),
+    );
+    const last = rows.length === limit ? rows[rows.length - 1] : undefined;
+
+    return {
+      locations: rows.map((row) => row.location),
+      ...(last === undefined
+        ? {}
+        : { nextCursor: encodeCursor(last.createdAt, last.otherId) }),
+    };
+  }
+
+  /**
    * Read who somebody follows, or who follows them.
    *
    * Only your own. Whether follower lists are visible to anybody else is four
@@ -278,7 +422,9 @@ export class FollowService {
 
     return {
       users: rows.map((row) => row.user),
-      ...(last === undefined ? {} : { nextCursor: encodeCursor(last.createdAt) }),
+      ...(last === undefined
+        ? {}
+        : { nextCursor: encodeCursor(last.createdAt, last.otherUserId) }),
     };
   }
 
@@ -312,7 +458,7 @@ export class FollowService {
       })),
       ...(last === undefined
         ? {}
-        : { nextCursor: encodeCursor(last.request.requestedAt) }),
+        : { nextCursor: encodeCursor(last.request.requestedAt, last.request.requestId) }),
     };
   }
 }
@@ -320,35 +466,43 @@ export class FollowService {
 /**
  * Encode where the next page continues from.
  *
- * Both lists are ordered by a single moment, so that moment is the whole
- * cursor. Opaque so a caller does not come to depend on the ordering.
+ * A pair, not a moment. Two relationships made in the same millisecond are
+ * ordinary — somebody following several people in quick succession produces
+ * them — and a cursor over the moment alone would skip or repeat a row at the
+ * page boundary. The identifier settles it, exactly as `GET /moments` does.
+ *
+ * Opaque so a caller does not come to depend on the ordering.
  *
  * @param at - The moment the last row on the page carries.
+ * @param otherId - The identifier that settles ties at that moment.
  * @returns The cursor to hand back.
  */
-function encodeCursor(at: Date): string {
-  return Buffer.from(at.toISOString(), "utf8").toString("base64url");
+function encodeCursor(at: Date, otherId: string): string {
+  return Buffer.from(`${at.toISOString()}:${otherId}`, "utf8").toString("base64url");
 }
 
 /**
  * Decode where a page should continue from.
  *
  * @param cursor - What a caller sent back, or undefined for the first page.
- * @returns The moment to continue before, or undefined.
+ * @returns The moment and identifier to continue after, or undefined.
  * @throws {ValidationError} If it is not a cursor this module produced. Refused
  *   rather than ignored: silently starting again would repeat a page the caller
  *   believes it has read.
  */
-function decodeCursor(cursor?: string): Date | undefined {
+function decodeCursor(cursor?: string): FollowCursor | undefined {
   if (cursor === undefined) {
     return undefined;
   }
 
-  const at = new Date(Buffer.from(cursor, "base64url").toString("utf8"));
+  const raw = Buffer.from(cursor, "base64url").toString("utf8");
+  const separator = raw.lastIndexOf(":");
+  const at = new Date(raw.slice(0, separator));
+  const otherUserId = raw.slice(separator + 1);
 
-  if (Number.isNaN(at.getTime())) {
+  if (separator === -1 || Number.isNaN(at.getTime()) || otherUserId.length === 0) {
     throw new ValidationError("Malformed cursor", { field: "cursor" });
   }
 
-  return at;
+  return { at, otherUserId };
 }

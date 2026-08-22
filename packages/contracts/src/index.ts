@@ -129,6 +129,8 @@ export {
   type SearchPlacesRequest,
 } from "./locations.js";
 export {
+  followedEventListSchema,
+  followedLocationListSchema,
   followListSchema,
   followOutcomeSchema,
   followRequestListSchema,
@@ -137,6 +139,8 @@ export {
   followSchema,
   listFollowsRequestSchema,
   type Follow,
+  type FollowedEventList,
+  type FollowedLocationList,
   type FollowList,
   type FollowOutcome,
   type FollowRequest,

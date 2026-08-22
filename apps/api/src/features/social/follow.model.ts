@@ -1,4 +1,6 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryColumn } from "typeorm";
+import { Location } from "../locations/location.model.js";
+import { RealWorldEvent } from "../real-world-events/real-world-event.model.js";
 import { User } from "../users/user.model.js";
 
 /**
@@ -21,7 +23,8 @@ import { User } from "../users/user.model.js";
  * something the product has asked to keep.
  */
 @Entity("user_follows")
-@Index("user_follows_followed_idx", ["followedUserId", "createdAt"])
+@Index("user_follows_followed_idx", ["followedUserId", "createdAt", "followerUserId"])
+@Index("user_follows_follower_idx", ["followerUserId", "createdAt", "followedUserId"])
 export class UserFollow {
   @PrimaryColumn("uuid", { name: "follower_user_id" })
   followerUserId!: string;
@@ -82,4 +85,66 @@ export class FollowRequest {
   @ManyToOne(() => User)
   @JoinColumn({ name: "requested_user_id" })
   requested?: User;
+}
+
+/**
+ * Somebody following a real-world Event.
+ *
+ * What an interface may present as "follow this Timeline". A Timeline is
+ * derived and has nothing to follow; what is followed is the context it is
+ * derived from (`timelines.md`).
+ *
+ * No approval, unlike following a person: an Event is shared history whose
+ * creator holds provenance rather than authority, so there is nobody to ask.
+ */
+@Entity("real_world_event_follows")
+@Index("real_world_event_follows_follower_idx", [
+  "followerUserId",
+  "createdAt",
+  "realWorldEventId",
+])
+export class RealWorldEventFollow {
+  @PrimaryColumn("uuid", { name: "follower_user_id" })
+  followerUserId!: string;
+
+  @PrimaryColumn("uuid", { name: "real_world_event_id" })
+  realWorldEventId!: string;
+
+  @Column("timestamptz", { name: "created_at" })
+  createdAt!: Date;
+
+  @ManyToOne(() => User)
+  @JoinColumn({ name: "follower_user_id" })
+  follower?: User;
+
+  @ManyToOne(() => RealWorldEvent)
+  @JoinColumn({ name: "real_world_event_id" })
+  realWorldEvent?: RealWorldEvent;
+}
+
+/**
+ * Somebody following a Location.
+ *
+ * The same idea in space: tell me what happens at this place. A Location is
+ * shared reference data (ADR-098), so again there is nobody to ask.
+ */
+@Entity("location_follows")
+@Index("location_follows_follower_idx", ["followerUserId", "createdAt", "locationId"])
+export class LocationFollow {
+  @PrimaryColumn("uuid", { name: "follower_user_id" })
+  followerUserId!: string;
+
+  @PrimaryColumn("uuid", { name: "location_id" })
+  locationId!: string;
+
+  @Column("timestamptz", { name: "created_at" })
+  createdAt!: Date;
+
+  @ManyToOne(() => User)
+  @JoinColumn({ name: "follower_user_id" })
+  follower?: User;
+
+  @ManyToOne(() => Location)
+  @JoinColumn({ name: "location_id" })
+  location?: Location;
 }

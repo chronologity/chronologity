@@ -9,7 +9,11 @@ import { buildApp } from "../../server/app.js";
 import { createTestAuthentication, type TestAuthentication } from "../../testing/authentication.js";
 import { UserRepository } from "../users/user.repository.js";
 import { UserService } from "../users/user.service.js";
-import { createReadyUpload } from "../../testing/fixtures.js";
+import {
+  createLocation,
+  createReadyUpload,
+  createRealWorldEvent,
+} from "../../testing/fixtures.js";
 import { LocationRepository } from "../locations/location.repository.js";
 import { MomentRepository } from "../moments/moment.repository.js";
 import { MomentService } from "../moments/moment.service.js";
@@ -117,6 +121,8 @@ describe("following", () => {
         database.dataSource,
         new FollowRepository(database.dataSource),
         accounts,
+        new RealWorldEventRepository(database.dataSource),
+        new LocationRepository(database.dataSource),
       ),
       // Mounted so the property this whole sub-phase rests on can be asserted
       // rather than assumed: following somebody must not let you read their
@@ -677,6 +683,276 @@ describe("following", () => {
       // Approval is consent to be followed, not consent to be read. Those
       // become the same thing only when visibility gains a value that says so.
       assert.equal(read.statusCode, 404, read.body);
+    });
+  });
+
+  describe("following a place and an occurrence", () => {
+    const followEvent = async (accessToken: string, id: string) =>
+      app.inject({
+        method: "POST",
+        url: `/real-world-events/${id}/follow`,
+        headers: authed(accessToken),
+      });
+
+    const followPlace = async (accessToken: string, id: string) =>
+      app.inject({ method: "POST", url: `/locations/${id}/follow`, headers: authed(accessToken) });
+
+    const followedEvents = async (accessToken: string, query = "") =>
+      app.inject({
+        method: "GET",
+        url: `/following/real-world-events${query}`,
+        headers: authed(accessToken),
+      });
+
+    it("follows an occurrence immediately, with no request and no approval", async () => {
+      const person = await onboard();
+      const realWorldEventId = await createRealWorldEvent(database.dataSource, person.userId);
+
+      const response = await followEvent(person.accessToken, realWorldEventId);
+
+      // Nobody approves who watches shared history.
+      assert.equal(response.statusCode, 204, response.body);
+      assert.deepEqual(
+        (await followedEvents(person.accessToken))
+          .json()
+          .realWorldEvents.map((event: { realWorldEventId: string }) => event.realWorldEventId),
+        [realWorldEventId],
+      );
+    });
+
+    it("follows a place immediately", async () => {
+      const person = await onboard();
+      const locationId = await createLocation(database.dataSource, person.userId);
+
+      const response = await followPlace(person.accessToken, locationId);
+
+      assert.equal(response.statusCode, 204, response.body);
+      const listed = await app.inject({
+        method: "GET",
+        url: "/following/locations",
+        headers: authed(person.accessToken),
+      });
+      assert.deepEqual(
+        listed.json().locations.map((place: { locationId: string }) => place.locationId),
+        [locationId],
+      );
+    });
+
+    it("returns what is followed whole, not as identifiers", async () => {
+      const person = await onboard();
+      const realWorldEventId = await createRealWorldEvent(
+        database.dataSource,
+        person.userId,
+        "Anime NYC 2026",
+      );
+
+      await followEvent(person.accessToken, realWorldEventId);
+
+      const [event] = (await followedEvents(person.accessToken)).json().realWorldEvents;
+
+      // A client listing what somebody follows should not need a round trip
+      // per row to show it.
+      assert.equal(event.name, "Anime NYC 2026");
+      assert.ok(event.occurrence.start.length > 0);
+    });
+
+    it("treats following twice as the state already holding", async () => {
+      const person = await onboard();
+      const realWorldEventId = await createRealWorldEvent(database.dataSource, person.userId);
+
+      await followEvent(person.accessToken, realWorldEventId);
+      const again = await followEvent(person.accessToken, realWorldEventId);
+
+      assert.equal(again.statusCode, 204, again.body);
+      assert.equal(
+        (await followedEvents(person.accessToken)).json().realWorldEvents.length,
+        1,
+      );
+    });
+
+    it("lets somebody follow an occurrence and a place recorded by anybody else", async () => {
+      const recorder = await onboard();
+      const follower = await onboard();
+      const realWorldEventId = await createRealWorldEvent(database.dataSource, recorder.userId);
+      const locationId = await createLocation(database.dataSource, recorder.userId);
+
+      // Neither is owned. Their recorders hold provenance, not authority.
+      assert.equal((await followEvent(follower.accessToken, realWorldEventId)).statusCode, 204);
+      assert.equal((await followPlace(follower.accessToken, locationId)).statusCode, 204);
+    });
+
+    it("stops following, and treats stopping twice as already done", async () => {
+      const person = await onboard();
+      const realWorldEventId = await createRealWorldEvent(database.dataSource, person.userId);
+      await followEvent(person.accessToken, realWorldEventId);
+
+      const stopped = await app.inject({
+        method: "DELETE",
+        url: `/real-world-events/${realWorldEventId}/follow`,
+        headers: authed(person.accessToken),
+      });
+      const again = await app.inject({
+        method: "DELETE",
+        url: `/real-world-events/${realWorldEventId}/follow`,
+        headers: authed(person.accessToken),
+      });
+
+      assert.equal(stopped.statusCode, 204, stopped.body);
+      assert.equal(again.statusCode, 204, again.body);
+      assert.deepEqual((await followedEvents(person.accessToken)).json().realWorldEvents, []);
+    });
+
+    it("refuses following something that does not exist", async () => {
+      const person = await onboard();
+
+      assert.equal((await followEvent(person.accessToken, randomUUID())).statusCode, 404);
+      assert.equal((await followPlace(person.accessToken, randomUUID())).statusCode, 404);
+    });
+
+    it("refuses removing an occurrence somebody still follows", async () => {
+      const person = await onboard();
+      const realWorldEventId = await createRealWorldEvent(database.dataSource, person.userId);
+      await followEvent(person.accessToken, realWorldEventId);
+
+      // RESTRICT: an occurrence people are watching should not vanish from
+      // under them.
+      await assert.rejects(
+        database.dataSource.query(`DELETE FROM real_world_events WHERE real_world_event_id = $1`, [
+          realWorldEventId,
+        ]),
+      );
+    });
+
+    it("grants no access to private moments about what is followed", async () => {
+      const author = await onboard();
+      const follower = await onboard();
+      const realWorldEventId = await createRealWorldEvent(database.dataSource, author.userId);
+      const uploadId = await createReadyUpload(database.dataSource, author.userId);
+
+      const moment = (
+        await app.inject({
+          method: "POST",
+          url: "/moments",
+          headers: authed(author.accessToken),
+          payload: {
+            caption: "I was there",
+            occurrence: {
+              start: "2026-11-20T00:00:00.000Z",
+              end: "2026-11-20T00:00:00.000Z",
+              precision: "instant",
+            },
+            occurrenceOffsetMinutes: 0,
+            uploadIds: [uploadId],
+            realWorldEventIds: [realWorldEventId],
+          },
+        })
+      ).json();
+
+      await followEvent(follower.accessToken, realWorldEventId);
+
+      const read = await app.inject({
+        method: "GET",
+        url: `/moments/${moment.momentId}`,
+        headers: authed(follower.accessToken),
+      });
+
+      // Following an occurrence says what you want to hear about. It says
+      // nothing about what you may see, and must not quietly start to.
+      assert.equal(read.statusCode, 404, read.body);
+    });
+
+    it("refuses following without a caller", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: `/real-world-events/${randomUUID()}/follow`,
+      });
+
+      assert.equal(response.statusCode, 401, response.body);
+    });
+  });
+
+  describe("paging when relationships share a moment", () => {
+    it("returns every followed occurrence exactly once across pages", async () => {
+      const person = await onboard();
+      const ids: string[] = [];
+
+      for (let index = 0; index < 5; index += 1) {
+        const realWorldEventId = await createRealWorldEvent(database.dataSource, person.userId);
+        ids.push(realWorldEventId);
+        await app.inject({
+          method: "POST",
+          url: `/real-world-events/${realWorldEventId}/follow`,
+          headers: authed(person.accessToken),
+        });
+      }
+
+      // Force the tie the cursor has to survive: every relationship at one
+      // instant. A cursor over the moment alone would loop or skip here.
+      await database.dataSource.query(
+        `UPDATE real_world_event_follows SET created_at = '2026-01-01T00:00:00Z'
+          WHERE follower_user_id = $1`,
+        [person.userId],
+      );
+
+      const seen: string[] = [];
+      let cursor: string | undefined;
+
+      do {
+        const response = await app.inject({
+          method: "GET",
+          url: `/following/real-world-events?limit=2${cursor === undefined ? "" : `&cursor=${cursor}`}`,
+          headers: authed(person.accessToken),
+        });
+
+        assert.equal(response.statusCode, 200, response.body);
+        seen.push(
+          ...response
+            .json()
+            .realWorldEvents.map((event: { realWorldEventId: string }) => event.realWorldEventId),
+        );
+        cursor = response.json().nextCursor;
+      } while (cursor !== undefined);
+
+      assert.equal(seen.length, 5, "a row was skipped or repeated");
+      assert.deepEqual([...seen].sort(), [...ids].sort());
+    });
+
+    it("returns every followed person exactly once when follows share a moment", async () => {
+      const follower = await onboard();
+      const followed: string[] = [];
+
+      for (let index = 0; index < 5; index += 1) {
+        const other = await onboard();
+        followed.push(other.userId);
+        await app.inject({
+          method: "POST",
+          url: `/users/${other.userId}/follow`,
+          headers: authed(follower.accessToken),
+        });
+      }
+
+      // The tie 5I-1 could not survive, and the reason its cursor changed.
+      await database.dataSource.query(
+        `UPDATE user_follows SET created_at = '2026-01-01T00:00:00Z' WHERE follower_user_id = $1`,
+        [follower.userId],
+      );
+
+      const seen: string[] = [];
+      let cursor: string | undefined;
+
+      do {
+        const response = await app.inject({
+          method: "GET",
+          url: `/following?limit=2${cursor === undefined ? "" : `&cursor=${cursor}`}`,
+          headers: authed(follower.accessToken),
+        });
+
+        seen.push(...response.json().users.map((user: { userId: string }) => user.userId));
+        cursor = response.json().nextCursor;
+      } while (cursor !== undefined);
+
+      assert.equal(seen.length, 5, "a row was skipped or repeated");
+      assert.deepEqual([...seen].sort(), [...followed].sort());
     });
   });
 });
