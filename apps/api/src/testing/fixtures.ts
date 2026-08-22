@@ -72,3 +72,71 @@ export async function createUser(dataSource: DataSource, handle?: string): Promi
 
   return { userId, identityId, handle: chosen };
 }
+
+/**
+ * An upload that has already been checked and accepted.
+ *
+ * Inserted directly, at the state the media worker would have left it in. A
+ * test about Moments should not have to run a decoder over a real file to
+ * obtain a piece of media — that path has its own suite, and reproducing it
+ * here would test the upload lifecycle again rather than the thing under test.
+ *
+ * @param dataSource - The database under test.
+ * @param ownerUserId - Who registered it. Only they may build a Moment from it.
+ * @param kind - Whether it stands for an image or a video.
+ * @returns The new upload's identifier.
+ */
+export async function createReadyUpload(
+  dataSource: DataSource,
+  ownerUserId: string,
+  kind: "image" | "video" = "image",
+): Promise<string> {
+  const uploadId = randomUUID();
+
+  await dataSource.query(
+    `INSERT INTO uploads (
+       upload_id, owner_user_id, kind, declared_content_type, declared_byte_size,
+       storage_key, state, media_kind, byte_size, content_type,
+       width, height, checked_at, registered_at, expires_at, updated_at
+     ) VALUES ($1, $2, $3, $4, 1024, $5, 'ready', $3, 1024, $4,
+               100, 100, now(), now(), now() + interval '1 hour', now())`,
+    [
+      uploadId,
+      ownerUserId,
+      kind,
+      kind === "image" ? "image/jpeg" : "video/mp4",
+      `test/${uploadId}`,
+    ],
+  );
+
+  return uploadId;
+}
+
+/**
+ * An upload that has been registered but not yet checked.
+ *
+ * The state a file is in between being announced and being opened by a decoder.
+ * A Moment must refuse it: media is mandatory, so building on a file that might
+ * still fail would produce a Moment that could not have been created.
+ *
+ * @param dataSource - The database under test.
+ * @param ownerUserId - Who registered it.
+ * @returns The new upload's identifier.
+ */
+export async function createPendingUpload(
+  dataSource: DataSource,
+  ownerUserId: string,
+): Promise<string> {
+  const uploadId = randomUUID();
+
+  await dataSource.query(
+    `INSERT INTO uploads (
+       upload_id, owner_user_id, kind, declared_content_type, declared_byte_size,
+       storage_key, state, registered_at, expires_at, updated_at
+     ) VALUES ($1, $2, 'image', 'image/jpeg', 1024, $3, 'registered',
+               now(), now() + interval '1 hour', now())`,
+    [uploadId, ownerUserId, `test/${uploadId}`],
+  );
+
+  return uploadId;
+}

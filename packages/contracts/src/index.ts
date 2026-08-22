@@ -129,6 +129,18 @@ export {
   type SearchPlacesRequest,
 } from "./locations.js";
 export {
+  captionSchema,
+  createMomentRequestSchema,
+  listMomentsRequestSchema,
+  momentPageSchema,
+  momentSchema,
+  utcOffsetMinutesSchema,
+  type CreateMomentRequest,
+  type ListMomentsRequest,
+  type Moment,
+  type MomentPage,
+} from "./moments.js";
+export {
   createRealWorldEventRequestSchema,
   eventNameSchema,
   realWorldEventSchema,

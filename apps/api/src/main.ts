@@ -20,6 +20,8 @@ import { AuthorizationRepository } from "./features/authorization/authorization.
 import { AuthorizationService } from "./features/authorization/authorization.service.js";
 import { LocationRepository } from "./features/locations/location.repository.js";
 import { LocationService } from "./features/locations/location.service.js";
+import { MomentRepository } from "./features/moments/moment.repository.js";
+import { MomentService } from "./features/moments/moment.service.js";
 import { RealWorldEventRepository } from "./features/real-world-events/real-world-event.repository.js";
 import { RealWorldEventService } from "./features/real-world-events/real-world-event.service.js";
 import { UploadRepository } from "./features/uploads/upload.repository.js";
@@ -60,6 +62,9 @@ async function main(): Promise<void> {
   // Named because two services read through it: Locations, and real-world
   // Events checking that a place it was given actually exists.
   const locationRepository = new LocationRepository(database.dataSource);
+  // Likewise: uploads owns it, and Moments read through it to check that media
+  // exists, belongs to the author, and has actually been opened by a decoder.
+  const uploadRepository = new UploadRepository(database.dataSource);
 
   // Sessions are built before identities because proving who someone is ends in
   // granting them one: the dependency runs that way and only that way.
@@ -94,7 +99,7 @@ async function main(): Promise<void> {
     ),
     uploads: new UploadService(
       database.dataSource,
-      new UploadRepository(database.dataSource),
+      uploadRepository,
       storage,
       config.uploadLimits,
       {
@@ -107,6 +112,11 @@ async function main(): Promise<void> {
       },
     ),
     locations: new LocationService(database.dataSource, locationRepository, places),
+    moments: new MomentService(
+      database.dataSource,
+      new MomentRepository(database.dataSource),
+      uploadRepository,
+    ),
     realWorldEvents: new RealWorldEventService(
       database.dataSource,
       new RealWorldEventRepository(database.dataSource),

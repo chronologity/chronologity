@@ -20,12 +20,16 @@ import { Upload as UploadRow } from "./upload.model.js";
 /**
  * Shape a row into the boundary contract.
  *
+ * Exported because Moments return their media whole rather than by identifier,
+ * and the shape a caller receives should be decided in one place — here, by the
+ * feature that owns the table.
+ *
  * @param row - As read from `uploads`.
  * @returns The Upload as its owner sees it. Neither the storage key nor any
  *   URL is included: the key is infrastructure, and a durable signed URL is
  *   exactly what must not be stored or returned (`media.md:520`).
  */
-function toUpload(row: UploadRow): Upload {
+export function toUpload(row: UploadRow): Upload {
   return {
     uploadId: row.uploadId,
     kind: row.kind as MediaKind,

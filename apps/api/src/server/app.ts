@@ -6,6 +6,7 @@ import { loggerOptions } from "../lib/logger/logger.js";
 import type { AuthenticationWiring } from "../features/authentication/authentication.types.js";
 import type { AuthorizationService } from "../features/authorization/authorization.service.js";
 import type { LocationService } from "../features/locations/location.service.js";
+import type { MomentService } from "../features/moments/moment.service.js";
 import type { RealWorldEventService } from "../features/real-world-events/real-world-event.service.js";
 import type { UploadService } from "../features/uploads/upload.service.js";
 import type { UserService } from "../features/users/user.service.js";
@@ -47,6 +48,8 @@ export interface BuildAppOptions {
   locations?: LocationService | undefined;
   /** The real-world Event service. Mounted only alongside users. */
   realWorldEvents?: RealWorldEventService | undefined;
+  /** The Moment service. Mounted only alongside users. */
+  moments?: MomentService | undefined;
 }
 
 /**
@@ -69,6 +72,7 @@ export async function buildApp({
   uploads,
   locations,
   realWorldEvents,
+  moments,
 }: BuildAppOptions): Promise<FastifyInstance> {
   // Typed explicitly: Fastify's overloads otherwise resolve a broadly-typed
   // `logger` to the HTTP/2 signature, and every later use of the instance
@@ -115,6 +119,7 @@ export async function buildApp({
     uploads,
     locations,
     realWorldEvents,
+    moments,
   );
 
   return app;

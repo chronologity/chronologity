@@ -2787,3 +2787,49 @@ What makes it safe meanwhile is that nothing enumerates Events. There is no list
 Duplicate Events are permitted, and `name` carries no unique constraint. Two people recording the same convention produce two Events, which is correct — every night of a tour shares a name and each is its own occurrence. Reconciliation is a later phase and needs the duplicates to exist in order to have anything to reconcile.
 
 `created_by_user_id` is provenance and never ownership. It is commented as such in the migration and in the entity, because a column of that name invites exactly the opposite reading, and `real-world-events.md:549-563` is explicit that recording a public occurrence first confers no authority over anyone else's history of it.
+
+---
+
+# ADR-101 — Store a Moment's Occurrence With Its Offset, and Break Ties on Identity
+
+**Status:** Accepted
+
+## Decision
+
+A Moment's occurrence is a bounded interval with the precision it is known at, reusing `occurrenceSchema` exactly as real-world Events do (ADR-100), plus one column real-world Events do not have: `occurrence_offset_minutes`, the UTC offset the client sent.
+
+Chronological order is `(occurrence_start, moment_id)`. When two Moments share an occurrence, the identifier settles it.
+
+Media must be `ready` and owned by the author before a Moment can be built from it.
+
+## Alternatives Considered
+
+Storing an IANA zone name rather than an offset, which survives daylight-saving rule changes and supports local reasoning the offset cannot.
+
+Storing the instant alone, as real-world Events do, and treating local time as a presentation concern.
+
+Ordering on occurrence alone, with ties left to whatever the database returned.
+
+## Rationale
+
+A `timestamptz` column keeps the instant and discards the offset. That is usually the right thing and here it is not: `moments.md:263` asks that enough context survive to reconstruct the intended historical meaning, and "half past seven in the evening" is not recoverable from an instant. A Moment at 19:30 in New York and one at 19:30 in Tokyo are the same experience described locally and two different instants; without the offset neither can be shown as the person lived it.
+
+The offset was chosen over an IANA zone because the contract already carries it — `timestampSchema` is `z.iso.datetime({ offset: true })`, so every request has one and none has to be invented. A zone name is richer and would have to be asked for, which a phone can answer and an imported photograph often cannot. Widening to a zone later is additive; requiring one now would refuse history that arrives without it.
+
+`moments.md:284` requires a deterministic order when two Moments share a time and leaves the mechanism open. The identifier is arbitrary but stable, which is what determinism means here. It deliberately does not claim to know which happened first — the specification says the interface should not imply more certainty than the data supports, and a random tie-break implies none.
+
+The `ready` requirement follows from media being mandatory. An upload reaches `ready` only after a decoder has opened it and found it to be what it claimed (ADR-086). A Moment built on a file that later fails checking would be a Moment that could not have been created, and the constraint that made it valid would already have been satisfied.
+
+## Consequences
+
+Real-world Events store their occurrence without an offset. That is now an inconsistency: the same argument applies to an Event held at eight in the evening somewhere. It is left alone rather than changed in passing — Events have no offset to migrate from, and adding the column is additive whenever it is wanted.
+
+**Nothing can be committed while a video transcodes.** This answers `moments.md`'s open question and is a real constraint on the experience, not merely a storage rule: someone who uploads a long video waits for it to be checked before recording the Moment. If that proves unacceptable, the alternative is a Moment that can become invalid after the fact, and that is the trade to reopen.
+
+Paging uses `(occurrence_start, moment_id)` as a tuple rather than occurrence alone. A cursor on occurrence alone would either loop forever or skip a page whenever several Moments shared a time, which is not an edge case — a backfilled album of photographs from one afternoon produces exactly that.
+
+Cursors are opaque and refused when malformed rather than ignored, because silently restarting would hand a caller a page it believes it has already read. They are not a security boundary: every read is authorized against the caller regardless, so a forged cursor can only move somebody around inside their own history.
+
+`toUpload` is exported from the Upload repository so a Moment returns its media whole. The shape a caller receives is decided once, by the feature that owns the table.
+
+Whether one upload may appear in two Moments is deliberately undecided. The primary key prevents the same file twice within one Moment, which is the incoherent case; a unique index on the upload alone would have decided the other silently, and neither `moments.md` nor `media.md` decides it.

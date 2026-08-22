@@ -6,6 +6,8 @@ import type { AuthorizationService } from "../features/authorization/authorizati
 import { healthRoutes } from "../features/health/index.js";
 import { locationRoutes } from "../features/locations/location.routes.js";
 import type { LocationService } from "../features/locations/location.service.js";
+import { momentRoutes } from "../features/moments/moment.routes.js";
+import type { MomentService } from "../features/moments/moment.service.js";
 import { realWorldEventRoutes } from "../features/real-world-events/real-world-event.routes.js";
 import type { RealWorldEventService } from "../features/real-world-events/real-world-event.service.js";
 import { uploadRoutes } from "../features/uploads/upload.routes.js";
@@ -31,6 +33,8 @@ import type { UserService } from "../features/users/user.service.js";
  *   since recording a place requires an account.
  * @param realWorldEvents - The real-world Event service; mounted only alongside
  *   users, since recording an occurrence requires an account.
+ * @param moments - The Moment service; mounted only alongside users, since a
+ *   Moment belongs to whoever recorded it.
  * @returns Nothing.
  */
 export async function registerRoutes(
@@ -41,6 +45,7 @@ export async function registerRoutes(
   uploads?: UploadService | undefined,
   locations?: LocationService | undefined,
   realWorldEvents?: RealWorldEventService | undefined,
+  moments?: MomentService | undefined,
 ): Promise<void> {
   await app.register(healthRoutes);
 
@@ -67,6 +72,10 @@ export async function registerRoutes(
 
       if (realWorldEvents !== undefined) {
         await app.register(realWorldEventRoutes(realWorldEvents));
+      }
+
+      if (moments !== undefined) {
+        await app.register(momentRoutes(moments));
       }
     }
   }

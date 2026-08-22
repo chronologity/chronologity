@@ -312,7 +312,12 @@ Chronologity must not assume that every Moment has a location, has a precise loc
 
 ## Description
 
-A Moment may include descriptive text that helps explain what happened.
+A Moment **must** include descriptive text saying what happened.
+
+Media and a timestamp alone are a photograph with a date on it. The caption is
+what makes the record be about an experience rather than about a file, which is
+the distinction this document opens with. This was decided deliberately and
+replaces an earlier statement that descriptive text was optional.
 
 Editing descriptive text should not change occurrence time or move the Moment through chronological navigation. The product should distinguish enriching the representation of history from changing the historical event itself.
 
@@ -569,7 +574,7 @@ Historical integrity means users should be able to trust what a Moment represent
 
 These were open questions. They were decided deliberately, ahead of the implementation that depends on them, rather than being answered by accident during it.
 
-**A Moment requires an occurrence and at least one image or video.** A caption, a Location, and a real-world Event are optional. Media-less Moments are therefore not permitted in the initial product.
+**A Moment requires an occurrence, at least one image or video, and a caption.** A Location and a real-world Event are optional. Media-less Moments are therefore not permitted in the initial product.
 
 This has a consequence `moments.md` anticipated: because the last media asset cannot be removed without leaving a Moment that could not have been created, **removing the final media asset is refused**. It does not silently delete the Moment. Deleting a media asset and deleting a Moment remain different operations, and an edit must not destroy history as a side effect. Someone who wants the Moment gone deletes the Moment.
 
@@ -579,6 +584,13 @@ This has a consequence `moments.md` anticipated: because the last media asset ca
 
 **Every Moment is private in the initial product**, visible to its author and to nobody else. No audience or sharing model exists until the social graph does, and Location precision follows the Moment rather than being controlled separately — while the author is the only viewer, there is no second viewer to reduce precision for. That `locations.md` requires the two to diverge eventually is not in doubt; it cannot be built against viewers who do not exist.
 
+**Media must be checked before it can represent a Moment.** An upload reaches
+`ready` only once a decoder has opened it and found it to be what it claimed
+(ADR-086), and nothing else may be attached. So a Moment cannot be committed
+while a video is still processing — a real constraint on the experience, and the
+consequence of media being mandatory: a Moment built on a file that later failed
+would be one that could not have been created.
+
 **Deletion is a tombstone, and erasure is separate work.** A deleted Moment is retained as a row, disappears from every read, and its stored media is left untouched. What a deletion service must erase, in what order, and what must be retained for abuse prevention or legal reasons are deliberately unresolved and listed below. Foreign keys remain `RESTRICT` (ADR-097), so nothing is removed as a silent consequence of removing something else.
 
 ## Open Product Questions
@@ -586,7 +598,6 @@ This has a consequence `moments.md` anticipated: because the last media asset ca
 The following behaviors should remain open until deliberately designed rather than answered accidentally during implementation:
 
 - What should happen when some media assets succeed during upload or processing and others fail?
-- Can users commit a Moment while some associated media is still processing?
 - How should extremely large Moments be presented without making Moment depth difficult to navigate?
 - How should historical corrections be presented to users?
 - How should participation, tagging, and consent work when other people appear in a Moment?
