@@ -222,16 +222,21 @@ describe("identities", () => {
   describe("resetting a password", () => {
     it("sends nothing for an address nobody has registered", async () => {
       sent = [];
+      const unregistered = uniqueEmail();
 
-      await identities.requestPasswordReset(uniqueEmail(), context());
+      await identities.requestPasswordReset(unregistered, context());
 
       // Unlike a sign-in link, a reset link means nothing without an account,
       // so none is issued. The caller cannot tell, which is the point.
       assert.deepEqual(sent, []);
 
+      // Counted for this address rather than for everything issued recently.
+      // The address is unique to this test, so no other test can satisfy or
+      // break the assertion — which a time window could, and did.
       const rows: { count: string }[] = await database.dataSource.query(
-        `SELECT count(*) FROM magic_link_tokens WHERE purpose = 'reset_password'
-           AND created_at > now() - interval '5 seconds'`,
+        `SELECT count(*) FROM magic_link_tokens
+          WHERE purpose = 'reset_password' AND lower(email) = lower($1)`,
+        [unregistered],
       );
       assert.equal(rows[0]?.count, "0");
     });
