@@ -1,6 +1,15 @@
 import { DataSource } from "typeorm";
 import type { DatabaseConfig } from "../../config/database-config.js";
-import { AuthAuditEvent, Identity, IdentityEmail, IdentityPassword, MagicLinkToken, Session } from "../../features/authentication/identity.model.js";
+import {
+  Identity,
+  IdentityEmail,
+  IdentityPassword,
+} from "../../features/authentication/identity.model.js";
+import {
+  AuthAuditEvent,
+  MagicLinkToken,
+  Session,
+} from "../../features/authentication/session.model.js";
 import { AuthorizationAuditEvent, RoleAssignment } from "../../features/authorization/authorization.model.js";
 import { Location } from "../../features/locations/location.model.js";
 import {

@@ -1,5 +1,5 @@
 import type { DataSource } from "typeorm";
-import { AuthAuditEvent } from "../../features/authentication/identity.model.js";
+import { AuthAuditEvent } from "../../features/authentication/session.model.js";
 import type { Transaction } from "../database/transaction.js";
 import { generateId } from "../ids/generate-id.js";
 

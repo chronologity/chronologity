@@ -1,7 +1,7 @@
 import type { SessionSummary } from "@chronologity/contracts";
 import { IsNull, type DataSource } from "typeorm";
 import type { Transaction } from "../../lib/database/transaction.js";
-import { Session } from "./identity.model.js";
+import { Session } from "./session.model.js";
 import type { NewSession, SessionRecord } from "./authentication.types.js";
 
 /**

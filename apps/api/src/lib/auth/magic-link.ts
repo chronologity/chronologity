@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { LessThan } from "typeorm";
-import { MagicLinkToken } from "../../features/authentication/identity.model.js";
+import { MagicLinkToken } from "../../features/authentication/session.model.js";
 import type { Transaction } from "../database/transaction.js";
 import { hashToken } from "./tokens.js";
 
