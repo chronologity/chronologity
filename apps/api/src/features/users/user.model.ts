@@ -129,6 +129,17 @@ export class Preferences {
   @Column("boolean", { name: "reduced_motion", default: false })
   reducedMotion!: boolean;
 
+  /**
+   * Whether this account has to approve who follows it.
+   *
+   * Deliberately independent of anything else. `social-graph.md` asks for both
+   * open and approval-based following "even if the exact account-level privacy
+   * model is refined separately", so this is one setting with one meaning
+   * rather than a privacy model invented ahead of its specification.
+   */
+  @Column("boolean", { name: "requires_follow_approval", default: false })
+  requiresFollowApproval!: boolean;
+
   @Column("timestamptz", { name: "updated_at" })
   updatedAt!: Date;
 

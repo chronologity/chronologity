@@ -20,6 +20,8 @@ import { AuthorizationRepository } from "./features/authorization/authorization.
 import { AuthorizationService } from "./features/authorization/authorization.service.js";
 import { LocationRepository } from "./features/locations/location.repository.js";
 import { LocationService } from "./features/locations/location.service.js";
+import { FollowRepository } from "./features/social/follow.repository.js";
+import { FollowService } from "./features/social/follow.service.js";
 import { MomentRepository } from "./features/moments/moment.repository.js";
 import { MomentService } from "./features/moments/moment.service.js";
 import { RealWorldEventRepository } from "./features/real-world-events/real-world-event.repository.js";
@@ -114,6 +116,11 @@ async function main(): Promise<void> {
       },
     ),
     locations: new LocationService(database.dataSource, locationRepository, places),
+    follows: new FollowService(
+      database.dataSource,
+      new FollowRepository(database.dataSource),
+      accounts,
+    ),
     moments: new MomentService(
       database.dataSource,
       new MomentRepository(database.dataSource),

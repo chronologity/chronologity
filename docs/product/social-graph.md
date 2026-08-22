@@ -828,11 +828,20 @@ The initial release does not require:
 
 Those capabilities should be added only when they solve a demonstrated product problem.
 
+## Established Following Decisions
+
+These were open questions. Implementation settled them, and they are requirements now rather than possibilities.
+
+**Follow approval is a single setting, independent of profile visibility** (ADR-104). An account either requires approval to be followed or it does not, and that says nothing about what its profile shows. A broader account privacy model, if one is ever wanted, can arrive without this having guessed at its shape.
+
+**A Follow grants no access on its own.** It is a relationship, not a permission. What a follower may see is decided by the visibility rules of individual Moments, which a Follow must never bypass.
+
+**Every Follow Request is kept.** Asking again after a refusal creates a second request rather than reusing the first, so what was asked and refused survives. That is what makes a cooldown implementable when its policy is decided; the policy itself remains open.
+
 ## Open Product Questions
 
 The following questions require deliberate resolution:
 
-- Are accounts either public or approval-based for following, or can Follow approval be configured independently from Profile visibility?
 - What terminology should the UI use for approval-based accounts?
 - Does a private or approval-based account expose its follower and following counts publicly?
 - Are follower and following identity lists visible to everyone, followers only, mutual followers only, or according to another rule?

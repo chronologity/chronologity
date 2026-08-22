@@ -129,6 +129,22 @@ export {
   type SearchPlacesRequest,
 } from "./locations.js";
 export {
+  followListSchema,
+  followOutcomeSchema,
+  followRequestListSchema,
+  followRequestSchema,
+  followRequestStatusSchema,
+  followSchema,
+  listFollowsRequestSchema,
+  type Follow,
+  type FollowList,
+  type FollowOutcome,
+  type FollowRequest,
+  type FollowRequestList,
+  type FollowRequestStatus,
+  type ListFollowsRequest,
+} from "./social.js";
+export {
   addMediaRequestSchema,
   captionSchema,
   correctOccurrenceRequestSchema,

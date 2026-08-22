@@ -2923,3 +2923,51 @@ Reordering is written as a delete and an insert rather than as a difference, bec
 Removing the last medium is refused rather than deleting the Moment. Media is mandatory, so a Moment without it could not have been created, and `moments.md:436` is explicit that deleting a medium is not deleting the Moment.
 
 Deletion is a tombstone and there is no undelete. Restoring is not simply the inverse once erasure exists, and building it before those semantics are settled would be guessing at them.
+
+---
+
+# ADR-104 — Keep Every Follow Request, and Let a Follow Grant Nothing Yet
+
+**Status:** Accepted
+
+## Decision
+
+Following is stored in `user_follows`, named for the fact that it relates two **people**. Approval is controlled by one preference, `requires_follow_approval`, independent of anything else.
+
+Follow requests are never reused. A second ask after a refusal is a second row, and a partial unique index allows one pending request at a time.
+
+**A Follow grants no access.** Every Moment remains private to its author.
+
+## Alternatives Considered
+
+Naming the table `follows`, which reads better at every call site.
+
+Reusing one request row per pair, flipping its status back to pending when somebody asks again.
+
+Deriving approval from a broader account privacy mode.
+
+Letting a Follow confer visibility immediately, so the relationship does something.
+
+## Rationale
+
+`follows` was rejected because "follow" already means two things. `timeline-first-curation-and-discovery.md` counts "Contexts saved or followed", and following a historical context has different rules — nobody approves who watches shared history, and there is nothing there to block. The codebase has met this before: `real_world_events` is spelled out because three other tables use "event" for something else. A bare `follows` would claim a word that is not free.
+
+Requests are kept because `social-graph.md:184` requires that repeated requests not become a harassment mechanism, says the cooldown policy belongs to later product design, and adds that "the social model must support it". Support means the data has to make it possible. A reused row would overwrite the moment of the last refusal, and a cooldown cannot be applied to a fact that was erased. Keeping every request costs one row per ask and leaves the policy open.
+
+Approval is one preference rather than a privacy mode because `social-graph.md:165` asks for both semantics "even if the exact account-level privacy model is refined separately". That is permission to add a setting rather than wait, and a broader mode would have answered two of `users.md`'s open questions by implementation.
+
+**The Follow granting nothing is the load-bearing decision.** `social-graph.md:167` says a Follow "must never bypass the visibility rules of individual Moments". Those rules currently permit one value, so the honest result of following somebody is that nothing changes. Making a Follow confer access would decide what a follower may see as a side effect of building relationships, which is precisely the accident this sequencing avoids: blocking does not exist yet, so there would be no way to stop it.
+
+## Consequences
+
+Three integration tests assert that following, and having a request accepted, grant no access. They were verified to fail — removing the authorship check in `MomentService.get` breaks exactly those and nothing else.
+
+Approval is consent to be followed, not consent to be read. Those become the same thing only when a later sub-phase says so.
+
+Only your own followers and following are readable. Whose lists are visible to whom is four open questions in `social-graph.md`, and an endpoint would have answered them.
+
+Declining does not block, does not notify, and does not prevent asking again. Each is required or left open by the specification, and none is a gap.
+
+`POST /users/:userId/follow` returns either a Follow or a request, and the answer says which. No endpoint discloses whether an account requires approval, because asking already reveals exactly as much as the asker needs.
+
+Nothing notifies. Notifications are phase 5Q, and four open questions cover what should be sent and when.
