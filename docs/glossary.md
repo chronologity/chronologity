@@ -156,7 +156,9 @@ A social-graph relationship through which one User elects to receive or more eas
 
 Following does not override privacy, blocking, moderation, or authorization.
 
-See `product/social-graph.md`.
+A User may also follow a **Historical Context** — a real-world Event, a Location, or another explicitly defined scope — to hear about Moments associated with it. That is a different relationship: a context is shared history rather than a person, so it needs no approval and cannot be blocked. Neither kind follows a Timeline, which is derived.
+
+See `product/social-graph.md` and `product/timelines.md`.
 
 ## Follower
 
@@ -171,6 +173,8 @@ See `product/social-graph.md`.
 Context that helps explain a Moment, Event, Person, Location, or other historical entity within the broader record of what occurred.
 
 Historical context may be factual, relational, interpretive, causal, uncertain, disputed, or derived and should preserve appropriate provenance.
+
+A Historical Context is also what a **Timeline** is derived from, and what the relationship graph in `product/timeline-first-curation-and-discovery.md` connects. Locations, real-world Events, and People are contexts; a Subject is a context type the product has not yet defined.
 
 ## Historical Correction
 
@@ -469,6 +473,8 @@ See `product/timeline.md`, `product/historical-significance.md`, and `product/ac
 Chronologity's primary historical navigation experience.
 
 The Timeline is a derived chronological representation of history rather than a separate User-created container.
+
+A Timeline is never stored, owned, or followed directly. It is what a viewer sees when they look at a **Historical Context**, and following that context is what an interface may present as "following a Timeline".
 
 Its conceptual dimensions are:
 

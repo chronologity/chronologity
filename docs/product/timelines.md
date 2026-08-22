@@ -126,6 +126,53 @@ Chronologity may also derive chronological views for other product-defined conte
 
 These are derived chronological views, not independent user-created Timeline containers.
 
+## Contexts May Relate to One Another
+
+The contexts a Timeline is derived from are not isolated. One real-world Event
+may contain another, precede another, or have caused another; a Person may be
+connected to an Event; two accounts of one occurrence may contradict each other.
+
+Those relationships form a graph, and traversing it is what horizontal
+navigation is: moving from one context to another, and seeing the Timeline that
+falls out of the new one.
+
+```text
+Context A ──parent_of──▶ Context B
+    │                        │
+    ▼                        ▼
+ Timeline A              Timeline B
+```
+
+The graph connects **contexts**, never Timelines. A Timeline has no identity to
+put at either end of an edge, and giving it one would make it the stored entity
+this document says it is not. `timeline-first-curation-and-discovery.md`
+describes the relationship types, their provenance, and how they are traversed.
+
+## Following a Context
+
+A User may follow a context — a real-world Event, a Location, or another
+explicitly defined historical scope — and thereby ask to hear about Moments that
+become associated with it.
+
+What is followed is the context. A Timeline is not followed, because there is
+nothing there to follow: it is the view produced by looking at a context, and it
+already changes whenever the underlying history does.
+
+```text
+Follow a context
+      ↓
+Hear about new Moments in it
+      ↓
+Which is to say: its Timeline grew
+```
+
+An interface may reasonably present this as "follow this Timeline". The
+distinction matters in the model, not in the wording a person sees.
+
+Following never grants access. A follower hears about Moments they were already
+permitted to see, and `social-graph.md` is explicit that a Follow "must never
+bypass the visibility rules of individual Moments".
+
 ## Viewer-Specific Timelines
 
 Two viewers may see different chronological representations of what appears to be the same broader historical context because they have access to different Moments.

@@ -53,6 +53,27 @@ User B ──is followed by──▶ User A
 
 A following relationship does not inherently require reciprocity.
 
+## Following a User Versus Following a Context
+
+"Follow" in this document always means following a **User**. It is a
+relationship between two people, and it is the one that carries approval,
+requests, and blocking.
+
+Chronologity also lets a User follow a **historical context** — a real-world
+Event, a Location, or another explicitly defined scope — in order to hear about
+Moments that become associated with it. That is a different relationship with
+different semantics: a context is shared history rather than a person, so
+nobody approves who watches it, and there is nothing there to block.
+
+```text
+Follow a User      → their eligible Moments, subject to approval
+Follow a context   → Moments associated with it, no approval
+```
+
+`timelines.md` defines context following. Neither is a relationship to a
+Timeline: a Timeline is derived, and is what a viewer sees when they look at a
+context.
+
 ## Why Following Rather Than Friendship
 
 A symmetric friendship model requires both Users to agree before the relationship exists:
@@ -844,6 +865,8 @@ The following questions require deliberate resolution:
 - Which social signals, if any, may be used for User recommendations?
 - Should contact-based discovery ever be supported?
 - If contact discovery is introduced, what privacy-preserving matching design is acceptable?
+- What is a curator? `timeline-first-curation-and-discovery.md` gives curators identity, assertions, annotations, publishing, and moderation, and this document does not mention them. Are they a kind of User, a role in the existing authorization model, or something else?
+- Should following a User and following a historical context share any semantics beyond the word, such as a combined list of what somebody follows?
 - Should organization accounts eventually participate in the same Follow graph?
 - Are there any circumstances in which a system or administrative actor can establish a Follow on behalf of a User?
 - How should migrated relationships behave if Chronologity ever supports account import from another service?

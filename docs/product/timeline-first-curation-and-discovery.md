@@ -2,7 +2,9 @@
 
 ## Status
 
-Product and implementation direction for Chronologity's curation, discovery, and Timeline graph.
+Product and implementation direction for Chronologity's curation, discovery, and the graph of historical contexts that makes both navigable.
+
+This document directs how history is discovered. It does not define what a Timeline is: `timelines.md` does that, and a Timeline remains a derived chronological view rather than a stored entity. Where this document once described Timelines as graph nodes, the nodes are **historical contexts** — the Locations, real-world Events, People, and subjects a Timeline can be derived from. The graph, its relationship types, and its provenance model are unchanged by that correction; only what they connect is stated properly.
 
 ## Core Thesis
 
@@ -106,51 +108,66 @@ Examples:
 - A parallel technological development
 - A Timeline that disputes the current interpretation
 
-## Timeline Graph
+## Historical Context Graph
 
 ### Concept
 
-Timelines should form a graph rather than a flat collection.
+Historical contexts should form a graph rather than a flat collection.
 
-- A **Timeline** is a graph node.
-- A **Timeline relationship** is a directed, typed edge from one Timeline to another.
+- A **historical context** is a graph node: a Location, a real-world Event, a Person, or another explicitly defined historical scope (`timelines.md`).
+- A **context relationship** is a directed, typed edge from one context to another.
 - A relationship may be asserted by a user, curator, institution, or system process.
 - A relationship has provenance and moderation state so that Chronologity does not present every assertion as an undisputed fact.
+
+A **Timeline** is not a node in this graph. A Timeline is what a viewer sees when they look at a context:
+
+```text
+Temporal position + Context -> Derived chronological view
+```
+
+Traversing an edge therefore changes which context is being viewed, and the Timeline follows from it. That is what makes horizontal navigation possible without any Timeline being stored, owned, or filed into.
 
 This graph is the structural foundation for Timeline-first discovery. It should be stored independently from personalized recommendation scores, which are derived and user-specific.
 
 ### Initial relationship types
 
-| Type | Directional meaning | Typical inverse | Example |
-| --- | --- | --- | --- |
-| `parent_of` | Source is broader and contains the target | `child_of` | Apollo program -> Apollo 11 |
-| `child_of` | Source is narrower and belongs within the target | `parent_of` | Apollo 11 -> Apollo program |
-| `precedes` | Source occurs before the target in a meaningful sequence | `continues` or `succeeds` | Phase One -> Phase Two |
-| `continues` | Source directly continues the target | `precedes` | Phase Two -> Phase One |
-| `overlaps` | Source and target occur during overlapping periods | `overlaps` | Two concurrent movements |
-| `same_location` | Source and target concern the same place | `same_location` | Two eras of Times Square |
-| `same_subject` | Source and target concern the same entity or topic | `same_subject` | Two periods in an artist's career |
-| `related_person` | Source connects to a Timeline centered on a participant | Context-dependent | Apollo 11 -> Neil Armstrong |
-| `caused_by` | Source documents an outcome attributable to the target | `resulted_in` | Protest -> precipitating event |
-| `resulted_in` | Source contributed to the target outcome | `caused_by` | Precipitating event -> protest |
-| `alternate_perspective` | Target provides another account of substantially the same event | `alternate_perspective` | Witness account A -> witness account B |
-| `contradicts` | Source disputes a claim or interpretation represented by the target | `contradicts` | Competing historical accounts |
-| `inspired_by` | Source was meaningfully influenced by the target | `inspired` if later required | Film -> earlier work |
-| `related_to` | A deliberately broad association when no stronger type applies | `related_to` | Two contextually related histories |
+Each type names the kind of context it connects. Where a relationship is already
+described by another document, that document governs it and this table follows.
 
-`curated_collection` should not be a Timeline-to-Timeline relationship type. Curated collections and paths require ordered membership, editorial annotations, and potentially selected entry and exit Moments. They should use separate tables.
+| Type | Connects | Directional meaning | Typical inverse | Example |
+| --- | --- | --- | --- | --- |
+| `parent_of` | Event → Event | Source is broader and contains the target | `child_of` | Apollo program -> Apollo 11 |
+| `child_of` | Event → Event | Source is narrower and belongs within the target | `parent_of` | Apollo 11 -> Apollo program |
+| `precedes` | Event → Event | Source occurs before the target in a meaningful sequence | `continues` or `succeeds` | Phase One -> Phase Two |
+| `continues` | Event → Event | Source directly continues the target | `precedes` | Phase Two -> Phase One |
+| `overlaps` | Event → Event | Source and target occur during overlapping periods. **Derivable** from occurrence intervals | `overlaps` | Two concurrent movements |
+| `same_location` | Event → Event | Source and target concern the same place. **Derivable** from Location association | `same_location` | Two eras of Times Square |
+| `same_subject` | Subject → Subject | Source and target concern the same entity or topic. Requires a Subject context, which does not yet exist | `same_subject` | Two periods in an artist's career |
+| `related_person` | Event → Person | Source connects to a context centred on a participant | Context-dependent | Apollo 11 -> Neil Armstrong |
+| `caused_by` | Event → Event | Source documents an outcome attributable to the target | `resulted_in` | Protest -> precipitating event |
+| `resulted_in` | Event → Event | Source contributed to the target outcome | `caused_by` | Precipitating event -> protest |
+| `alternate_perspective` | Moment → Moment | Target provides another account of substantially the same occurrence | `alternate_perspective` | Witness account A -> witness account B |
+| `contradicts` | Moment → Moment, or Event → Event | Source disputes a claim or interpretation represented by the target | `contradicts` | Competing historical accounts |
+| `inspired_by` | Event → Event | Source was meaningfully influenced by the target | `inspired` if later required | Film -> earlier work |
+| `related_to` | Any → any | A deliberately broad association when no stronger type applies | `related_to` | Two contextually related histories |
 
-Likewise, `same_location`, `same_subject`, and temporal overlap may eventually be derived from normalized place, subject, and time data. They can remain explicit edge types initially, but the implementation should record whether an edge was asserted or derived.
+`parent_of` and `child_of` between Events are what `real-world-events.md` calls Event Hierarchy. That document governs them; this one describes how they are traversed. Naming containment in two places was how the same question came to be asked twice.
+
+`curated_collection` should not be a context relationship type. Curated collections and paths require ordered membership, editorial annotations, and potentially selected entry and exit Moments. They should use separate tables.
+
+`same_location` and `overlaps` are **already derivable**, now that contexts rather than Timelines are the nodes: two Events sharing a Location share a row in `real_world_event_locations`, and overlapping occurrence intervals are a comparison rather than an assertion. They remain explicit edge types so that a curator may assert one deliberately, and the implementation must record whether an edge was asserted or derived.
+
+`same_subject` cannot yet be derived or asserted, because the Subject context it connects does not exist. See the open questions.
 
 ### Directed-edge semantics
 
 Every stored relationship must have an unambiguous sentence-level interpretation:
 
-> `{source_timeline} {relationship_type} {target_timeline}`
+> `{source_context} {relationship_type} {target_context}`
 
 For example:
 
-> `The Apollo 11 Timeline child_of The Apollo Program Timeline.`
+> `The Apollo 11 Event child_of The Apollo Program Event.`
 
 The API must not silently reverse a directional relationship. If clients require both directions, the read layer can derive the inverse or store a paired inverse edge through one controlled service. Application code should not independently create both sides because they can drift apart.
 
@@ -163,8 +180,10 @@ A Timeline relationship should support the following properties:
 | Property | Purpose |
 | --- | --- |
 | `id` | Stable relationship identifier |
-| `source_timeline_id` | Timeline at the directed edge's origin |
-| `target_timeline_id` | Timeline at the directed edge's destination |
+| `source_context_type` | Which kind of context the origin is: Event, Location, Person, Moment |
+| `source_context_id` | Context at the directed edge's origin |
+| `target_context_type` | Which kind of context the destination is |
+| `target_context_id` | Context at the directed edge's destination |
 | `relationship_type` | Controlled semantic type |
 | `status` | Proposed, accepted, disputed, rejected, or removed |
 | `origin` | User-asserted, curator-asserted, institution-asserted, system-derived, or imported |
@@ -186,7 +205,7 @@ A Timeline relationship should support the following properties:
 The following is a starting point, not a final migration:
 
 ```sql
-create type timeline_relationship_type as enum (
+create type context_relationship_type as enum (
   'parent_of',
   'child_of',
   'precedes',
@@ -203,7 +222,7 @@ create type timeline_relationship_type as enum (
   'related_to'
 );
 
-create type timeline_relationship_status as enum (
+create type context_relationship_status as enum (
   'proposed',
   'accepted',
   'disputed',
@@ -211,7 +230,7 @@ create type timeline_relationship_status as enum (
   'removed'
 );
 
-create type timeline_relationship_origin as enum (
+create type context_relationship_origin as enum (
   'user_asserted',
   'curator_asserted',
   'institution_asserted',
@@ -219,13 +238,24 @@ create type timeline_relationship_origin as enum (
   'imported'
 );
 
-create table timeline_relationships (
+create type context_kind as enum ('event', 'location', 'person', 'moment');
+
+create table context_relationships (
   id uuid primary key,
-  source_timeline_id uuid not null references timelines(id),
-  target_timeline_id uuid not null references timelines(id),
-  relationship_type timeline_relationship_type not null,
-  status timeline_relationship_status not null default 'proposed',
-  origin timeline_relationship_origin not null,
+
+  -- Polymorphic on purpose: a context is a real-world Event, a Location, a
+  -- Person, or a Moment, each in its own table. There is no `timelines` table
+  -- to reference, because a Timeline is derived rather than stored
+  -- (`timelines.md`). Referential integrity is therefore the writing service's
+  -- responsibility rather than a foreign key's -- the same trade
+  -- `outbox_messages.aggregate_id` already makes.
+  source_context_kind context_kind not null,
+  source_context_id uuid not null,
+  target_context_kind context_kind not null,
+  target_context_id uuid not null,
+  relationship_type context_relationship_type not null,
+  status context_relationship_status not null default 'proposed',
+  origin context_relationship_origin not null,
   created_by_user_id uuid null references users(id),
   created_by_system text null,
   confidence numeric(5, 4) null check (confidence between 0 and 1),
@@ -238,25 +268,30 @@ create table timeline_relationships (
   removed_at timestamptz null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  check (source_timeline_id <> target_timeline_id),
+  check (
+    source_context_kind <> target_context_kind
+    or source_context_id <> target_context_id
+  ),
   check (valid_to is null or valid_from is null or valid_to > valid_from),
   check (created_by_user_id is not null or created_by_system is not null)
 );
 
-create unique index timeline_relationships_active_unique
-  on timeline_relationships (
-    source_timeline_id,
-    target_timeline_id,
+create unique index context_relationships_active_unique
+  on context_relationships (
+    source_context_kind,
+    source_context_id,
+    target_context_kind,
+    target_context_id,
     relationship_type
   )
   where removed_at is null and status not in ('rejected', 'removed');
 
-create index timeline_relationships_source_traversal
-  on timeline_relationships (source_timeline_id, relationship_type, status)
+create index context_relationships_source_traversal
+  on context_relationships (source_context_kind, source_context_id, relationship_type, status)
   where removed_at is null;
 
-create index timeline_relationships_target_traversal
-  on timeline_relationships (target_timeline_id, relationship_type, status)
+create index context_relationships_target_traversal
+  on context_relationships (target_context_id, relationship_type, status)
   where removed_at is null;
 ```
 
@@ -286,7 +321,7 @@ The recommended initial choice is an enum because relationship semantics will af
 ]
 ```
 
-If evidence later needs independent moderation, citations, reuse, or querying, promote it to `timeline_relationship_evidence` rather than expanding JSONB indefinitely.
+If evidence later needs independent moderation, citations, reuse, or querying, promote it to `context_relationship_evidence` rather than expanding JSONB indefinitely.
 
 ### Integrity rules
 
@@ -467,12 +502,13 @@ Entry-point selection may choose:
 
 Once entered, the Timeline remains chronological.
 
-Personalized recommendation data should live separately from `timeline_relationships`. For example, a derived store may contain:
+Personalized recommendation data should live separately from `context_relationships`. For example, a derived store may contain:
 
 ```text
-user_timeline_recommendations
+user_context_recommendations
 - user_id
-- timeline_id
+- context_kind
+- context_id
 - entry_moment_id
 - score
 - reason_code
@@ -498,7 +534,7 @@ Candidate metrics include:
 - Depth transitions
 - Related Timelines opened
 - Curated paths completed
-- Timelines saved or followed
+- Contexts saved or followed
 - Return visits to ongoing Timelines
 - Moments contributed after exploration
 - Diversity of periods and perspectives explored
@@ -539,12 +575,31 @@ The precise threshold for "meaningfully explore" should be validated empirically
 - Add serendipitous discovery and perspective diversity.
 - Evaluate ranking against exploration quality, not only engagement.
 
+## Open Questions
+
+Naming the graph's nodes properly made two gaps visible that the earlier wording
+concealed. Neither is invented here.
+
+- What is a **Subject**? `same_subject` connects "an artist's career" or "a
+  neighbourhood over time", which is neither a Location, a real-world Event, a
+  Person, nor a Moment. It is a context type that does not exist.
+- What is a **curator**? This document gives them identity, assertions,
+  annotations, publishing, and moderation, and `social-graph.md` does not
+  mention them at all. Are they a kind of User, a role in the existing
+  authorization model, or something else?
+- Which contexts may be **followed**? Events and Locations follow obviously.
+  Whether a search result or an arbitrary scope can be is unresolved.
+- Should a derived edge such as `same_location` be materialised, or computed on
+  traversal?
+
 ## Non-Goals and Guardrails
 
 - Do not make individual media the primary recommendation unit.
 - Do not reorder canonical Timeline history for personalization.
 - Do not store personalized recommendation scores on canonical graph edges.
-- Do not treat curated paths as Timeline relationships.
+- Do not treat curated paths as context relationships.
+- Do not reintroduce the Timeline as a stored entity. It is derived
+  (`timelines.md`), and the graph connects the contexts it is derived from.
 - Do not use generic `related_to` when a stronger semantic type is known.
 - Do not present machine-derived or user-proposed connections as accepted historical facts.
 - Do not optimize the product primarily for media views, watch time, or endless scrolling.
