@@ -227,3 +227,82 @@ export async function countAbandoned(dataSource: DataSource): Promise<number> {
 export async function countPending(dataSource: DataSource): Promise<number> {
   return dataSource.getRepository(OutboxRow).countBy({ publishedAt: IsNull() });
 }
+
+/** How much of a sweep the caller asked for, and what it found. */
+export interface SweepResult {
+  /** How many rows were removed. */
+  readonly removed: number;
+  /**
+   * Whether the sweep ran out of work rather than out of batch.
+   *
+   * A full batch almost certainly leaves more behind and should go again; a
+   * short one means there is nothing left to remove for now.
+   */
+  readonly reachedEnd: boolean;
+}
+
+/**
+ * Remove published messages that are old enough to be of no further use.
+ *
+ * The outbox is a queue, not a record. A published row has done its job, and
+ * keeping every one forever grows a table nothing reads and holds payloads
+ * describing people indefinitely — which the privacy rules do not permit merely
+ * because nobody got round to deleting them.
+ *
+ * A window rather than deleting on publish, because the row is the evidence
+ * that an event was emitted at all. When a consumer says it never received
+ * something, that is the thing worth looking at, and it is only worth looking
+ * at soon after.
+ *
+ * Three kinds of row are deliberately left alone:
+ *
+ * - unpublished ones, which are still owed to the broker;
+ * - abandoned ones, which are the only record of a message that could not be
+ *   delivered and must survive until somebody has looked at why;
+ * - published ones inside the window.
+ *
+ * Concurrent sweepers take disjoint rows through `FOR UPDATE SKIP LOCKED`,
+ * the same mechanism that lets several publishers run.
+ *
+ * @param dataSource - The database to sweep.
+ * @param retainForMs - How long a published message is kept, in milliseconds,
+ *   measured from when it was published.
+ * @param batchSize - How many rows to remove at most, so a long-neglected table
+ *   is drained over several passes rather than in one long-held lock.
+ * @param now - Injected so tests can move time without waiting.
+ * @returns How many rows were removed, and whether there is more to do.
+ */
+export async function sweepPublishedOutbox(
+  dataSource: DataSource,
+  retainForMs: number,
+  batchSize: number,
+  now: Date = new Date(),
+): Promise<SweepResult> {
+  const before = new Date(now.getTime() - retainForMs);
+
+  // Counted by the database rather than by the length of what comes back. A
+  // `DELETE ... RETURNING` run through the driver yields the rows and the row
+  // count together, so measuring the result is measuring the wrong thing — it
+  // is two either way.
+  const counted: { removed: number }[] = await dataSource.query(
+    `WITH swept AS (
+       DELETE FROM outbox_messages
+        WHERE id IN (
+          SELECT id
+            FROM outbox_messages
+           WHERE published_at IS NOT NULL
+             AND published_at < $1
+           ORDER BY published_at
+           LIMIT $2
+             FOR UPDATE SKIP LOCKED
+        )
+        RETURNING id
+     )
+     SELECT count(*)::int AS removed FROM swept`,
+    [before, batchSize],
+  );
+
+  const removed = counted[0]?.removed ?? 0;
+
+  return { removed, reachedEnd: removed < batchSize };
+}

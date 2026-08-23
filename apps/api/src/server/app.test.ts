@@ -19,6 +19,7 @@ const config: AppConfig = {
     password: "unused",
   },
   messaging: { brokers: ["unused:9092"], clientId: "test" },
+  outbox: { retentionMs: 0 },
   auth: {
     jwtSecret: new TextEncoder().encode("test-secret-value-long-enough-for-hs256"),
     issuer: "chronologity",

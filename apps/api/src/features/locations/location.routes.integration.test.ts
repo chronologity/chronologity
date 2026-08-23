@@ -43,6 +43,7 @@ const config: AppConfig = {
     password: process.env.POSTGRES_PASSWORD ?? "chronologity",
   },
   messaging: { brokers: ["localhost:9092"], clientId: "locations-integration" },
+  outbox: { retentionMs: 0 },
   auth: {
     jwtSecret: new TextEncoder().encode("integration-test-secret-long-enough-for-hs256"),
     issuer: "chronologity",

@@ -7,6 +7,7 @@ import { migrate } from "../../lib/database/migrations.js";
 import {
   countAbandoned,
   enqueueOutboxMessage,
+  sweepPublishedOutbox,
   type MessageSubject,
 } from "../../lib/database/outbox.js";
 import { connectDatabase, createDatabase, type Database } from "../../lib/database/postgres.js";
@@ -440,6 +441,143 @@ describe("outbox publication against real infrastructure", () => {
 
       assert.equal(result.published, 1, "clearing abandonment did not requeue it");
       assert.equal(await countAbandoned(database.dataSource), 0);
+    });
+  });
+
+  describe("retention", () => {
+    const HOUR_MS = 60 * 60 * 1_000;
+
+    /** Put a message in the table in whatever state the test needs. */
+    const seed = async (state: {
+      publishedAgoMs?: number;
+      abandonedAgoMs?: number;
+    }): Promise<string> => {
+      const id = await withTransaction(database.dataSource, (tx) =>
+        enqueueOutboxMessage(tx, {
+          topic: TOPIC,
+          partitionKey: randomUUID(),
+          ...subject(),
+          eventType: "ThingHappened",
+          eventVersion: 1,
+          payload: { value: 1 },
+          metadata: metadata(),
+        }),
+      );
+
+      if (state.publishedAgoMs !== undefined) {
+        await database.dataSource.query(
+          `UPDATE outbox_messages SET published_at = $2 WHERE id = $1`,
+          [id, new Date(Date.now() - state.publishedAgoMs)],
+        );
+      }
+
+      if (state.abandonedAgoMs !== undefined) {
+        await database.dataSource.query(
+          `UPDATE outbox_messages SET abandoned_at = $2, attempts = 10 WHERE id = $1`,
+          [id, new Date(Date.now() - state.abandonedAgoMs)],
+        );
+      }
+
+      return id;
+    };
+
+    const survivors = async (): Promise<string[]> => {
+      const rows: { id: string }[] = await database.dataSource.query(
+        `SELECT id FROM outbox_messages ORDER BY created_at`,
+      );
+
+      return rows.map((row) => row.id);
+    };
+
+    it("removes a published message once it is older than the window", async () => {
+      await seed({ publishedAgoMs: 4 * HOUR_MS });
+
+      const swept = await sweepPublishedOutbox(database.dataSource, HOUR_MS, 100);
+
+      assert.equal(swept.removed, 1);
+      assert.deepEqual(await survivors(), []);
+    });
+
+    it("keeps a published message still inside the window", async () => {
+      const recent = await seed({ publishedAgoMs: 10 * 60 * 1_000 });
+
+      const swept = await sweepPublishedOutbox(database.dataSource, HOUR_MS, 100);
+
+      assert.equal(swept.removed, 0);
+      assert.deepEqual(await survivors(), [recent]);
+    });
+
+    it("never removes an unpublished message, however old", async () => {
+      const pending = await seed({});
+      await database.dataSource.query(
+        `UPDATE outbox_messages SET created_at = now() - interval '30 days' WHERE id = $1`,
+        [pending],
+      );
+
+      const swept = await sweepPublishedOutbox(database.dataSource, 0, 100);
+
+      // Still owed to the broker. Age is not the test; delivery is.
+      assert.equal(swept.removed, 0);
+      assert.deepEqual(await survivors(), [pending]);
+    });
+
+    it("never removes an abandoned message, however old", async () => {
+      const abandoned = await seed({ abandonedAgoMs: 30 * 24 * HOUR_MS });
+
+      const swept = await sweepPublishedOutbox(database.dataSource, 0, 100);
+
+      // The only record that something could not be delivered. Sweeping it
+      // would destroy the evidence before anybody had looked at why.
+      assert.equal(swept.removed, 0);
+      assert.deepEqual(await survivors(), [abandoned]);
+    });
+
+    it("stops at the batch size and says there is more to do", async () => {
+      for (let index = 0; index < 3; index += 1) {
+        await seed({ publishedAgoMs: 4 * HOUR_MS });
+      }
+
+      const swept = await sweepPublishedOutbox(database.dataSource, HOUR_MS, 2);
+
+      assert.equal(swept.removed, 2);
+      assert.equal(swept.reachedEnd, false);
+      assert.equal((await survivors()).length, 1);
+    });
+
+    it("says it reached the end when there is nothing to remove", async () => {
+      const swept = await sweepPublishedOutbox(database.dataSource, HOUR_MS, 100);
+
+      assert.deepEqual(swept, { removed: 0, reachedEnd: true });
+    });
+
+    it("sweeps as soon as a message is published when nothing is retained", async () => {
+      await seed({ publishedAgoMs: 0 });
+
+      const swept = await sweepPublishedOutbox(database.dataSource, 0, 100);
+
+      assert.equal(swept.removed, 1);
+    });
+
+    it("leaves a message the publisher has just delivered", async () => {
+      await withTransaction(database.dataSource, (tx) =>
+        enqueueOutboxMessage(tx, {
+          topic: TOPIC,
+          partitionKey: randomUUID(),
+          ...subject(),
+          eventType: "ThingHappened",
+          eventVersion: 1,
+          payload: { value: 1 },
+          metadata: metadata(),
+        }),
+      );
+
+      await publishOutboxBatch({ dataSource: database.dataSource, producer });
+      const swept = await sweepPublishedOutbox(database.dataSource, HOUR_MS, 100);
+
+      // The window is what makes "did we emit that?" answerable. A sweep that
+      // ran behind the publisher would take the answer away immediately.
+      assert.equal(swept.removed, 0);
+      assert.equal((await survivors()).length, 1);
     });
   });
 });

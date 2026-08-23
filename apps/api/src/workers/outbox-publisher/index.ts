@@ -5,6 +5,7 @@ import "reflect-metadata";
 
 import { ConfigurationError } from "@chronologity/config";
 import { loadConfig } from "../../config/app-config.js";
+import { sweepPublishedOutbox } from "../../lib/database/outbox.js";
 import { connectDatabase, createDatabase } from "../../lib/database/postgres.js";
 import { createMessaging } from "../../lib/messaging/kafka.js";
 import { createEventProducer } from "../../lib/messaging/producer.js";
@@ -24,6 +25,24 @@ import { publishOutboxBatch } from "./publish-outbox.js";
 
 const POLL_INTERVAL_MS = 1_000;
 const BATCH_SIZE = 100;
+
+/**
+ * How often to sweep published messages.
+ *
+ * Far less often than the publisher polls. Retention is measured in hours, so
+ * checking every minute is already more precise than the policy it enforces,
+ * and sweeping on every idle pass would run a delete a second for nothing.
+ */
+const SWEEP_INTERVAL_MS = 60_000;
+
+/**
+ * How many rows one sweep removes at most.
+ *
+ * Larger than a publish batch because a delete by primary key is cheap, and
+ * bounded so a table left unswept for a long time is drained over several
+ * passes rather than in one transaction holding locks the publisher needs.
+ */
+const SWEEP_BATCH_SIZE = 1_000;
 
 /**
  * Run the publisher until asked to stop.
@@ -51,6 +70,8 @@ async function main(): Promise<void> {
   process.once("SIGTERM", () => void shutdown());
   process.once("SIGINT", () => void shutdown());
 
+  let sweepDueAt = 0;
+
   while (running) {
     const { reachedEnd } = await publishOutboxBatch({
       dataSource: database.dataSource,
@@ -60,9 +81,25 @@ async function main(): Promise<void> {
 
     // Idle only once the queue is drained. A pass that filled its batch has
     // almost certainly left more behind and should go again immediately.
-    if (reachedEnd) {
-      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+    if (!reachedEnd) {
+      continue;
     }
+
+    // Swept while idle, and never at the expense of publishing: delivery is
+    // owed to somebody, housekeeping is not.
+    if (Date.now() >= sweepDueAt) {
+      const swept = await sweepPublishedOutbox(
+        database.dataSource,
+        config.outbox.retentionMs,
+        SWEEP_BATCH_SIZE,
+      );
+
+      // A full batch means there is more to remove, so go again next pass
+      // rather than waiting out the interval on a backlog.
+      sweepDueAt = swept.reachedEnd ? Date.now() + SWEEP_INTERVAL_MS : 0;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
 }
 

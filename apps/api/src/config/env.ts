@@ -26,6 +26,15 @@ export const envSchema = z.object({
   POSTGRES_PASSWORD: z.string(),
 
   KAFKA_BROKERS: z.string().min(1),
+  /**
+   * How long a published outbox message is kept before it is swept.
+   *
+   * Long enough that "did we emit that event?" is still answerable when a
+   * consumer complains, and short enough that a queue does not quietly become
+   * an archive of payloads describing people. Zero is permitted and means
+   * sweep as soon as a message is published.
+   */
+  OUTBOX_RETENTION_HOURS: z.coerce.number().int().min(0).max(8_760).default(72),
 
   // No default for the signing secret: a development fallback would eventually
   // reach an environment nobody re-checked, and a known signing key is a
