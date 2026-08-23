@@ -11,6 +11,7 @@ import { toLocation } from "../locations/location.repository.js";
 import type { RealWorldEvent } from "../real-world-events/real-world-event.model.js";
 import { toRealWorldEvent } from "../real-world-events/real-world-event.repository.js";
 import { User } from "../users/user.model.js";
+import { UserBlock } from "./block.model.js";
 import {
   FollowRequest,
   LocationFollow,
@@ -494,5 +495,147 @@ export class FollowRepository {
     const rows = (await query.getMany()) as (FollowRequest & { asker: User })[];
 
     return rows.map((row) => ({ request: row, requester: toPublicUser(row.asker) }));
+  }
+
+  /**
+   * Which way a block runs between two people, if either way does.
+   *
+   * @param userId - The person acting.
+   * @param otherUserId - The person they are acting on.
+   * @returns Both directions, because they mean different things: being blocked
+   *   is reported as the other account not existing, while having blocked is
+   *   said plainly.
+   */
+  async blocksBetween(
+    userId: string,
+    otherUserId: string,
+  ): Promise<{ theyBlockedMe: boolean; iBlockedThem: boolean }> {
+    const rows = await this.dataSource.getRepository(UserBlock).find({
+      where: [
+        { blockerUserId: otherUserId, blockedUserId: userId },
+        { blockerUserId: userId, blockedUserId: otherUserId },
+      ],
+      select: { blockerUserId: true, blockedUserId: true },
+    });
+
+    return {
+      theyBlockedMe: rows.some((row) => row.blockerUserId === otherUserId),
+      iBlockedThem: rows.some((row) => row.blockerUserId === userId),
+    };
+  }
+
+  /**
+   * Record a block.
+   *
+   * @param tx - The caller's transaction.
+   * @param blockerUserId - Who is blocking.
+   * @param blockedUserId - Who is being blocked.
+   * @param at - When.
+   * @returns Nothing. Blocking somebody already blocked is the state already
+   *   holding, so a repeat is ignored rather than refused.
+   */
+  async block(
+    tx: Transaction,
+    blockerUserId: string,
+    blockedUserId: string,
+    at: Date,
+  ): Promise<void> {
+    await tx
+      .createQueryBuilder()
+      .insert()
+      .into(UserBlock)
+      .values({ blockerUserId, blockedUserId, createdAt: at })
+      .orIgnore()
+      .execute();
+  }
+
+  /**
+   * Remove a block.
+   *
+   * @param tx - The caller's transaction.
+   * @param blockerUserId - Who blocked.
+   * @param blockedUserId - Who was blocked.
+   * @returns Nothing. What the block severed stays severed: unblocking removes
+   *   the boundary and restores no relationship (`social-graph.md:315`).
+   */
+  async unblock(
+    tx: Transaction,
+    blockerUserId: string,
+    blockedUserId: string,
+  ): Promise<void> {
+    await tx.delete(UserBlock, { blockerUserId, blockedUserId });
+  }
+
+  /**
+   * Settle any pending request between two people, whichever way it runs.
+   *
+   * @param tx - The caller's transaction.
+   * @param userId - One of them.
+   * @param otherUserId - The other.
+   * @param at - When.
+   * @returns Nothing. Recorded as cancelled rather than declined: a block is
+   *   not an answer to the question the request asked, and calling it one would
+   *   put a refusal in the record that nobody actually gave.
+   */
+  async cancelRequestsBetween(
+    tx: Transaction,
+    userId: string,
+    otherUserId: string,
+    at: Date,
+  ): Promise<void> {
+    await tx
+      .createQueryBuilder()
+      .update(FollowRequest)
+      .set({ status: "cancelled", resolvedAt: at })
+      .where("status = 'pending'")
+      .andWhere(
+        `((requester_user_id = :userId AND requested_user_id = :otherUserId)
+          OR (requester_user_id = :otherUserId AND requested_user_id = :userId))`,
+        { userId, otherUserId },
+      )
+      .execute();
+  }
+
+  /**
+   * Read a page of the people somebody has blocked.
+   *
+   * @param blockerUserId - Whose list. Always the caller.
+   * @param limit - How many at most.
+   * @param after - Where to continue from.
+   * @returns The people, most recently blocked first.
+   */
+  async listBlocked(
+    blockerUserId: string,
+    limit: number,
+    after?: FollowCursor,
+  ): Promise<{ user: PublicUser; createdAt: Date; otherUserId: string }[]> {
+    const query = this.dataSource
+      .getRepository(UserBlock)
+      .createQueryBuilder("block")
+      .innerJoinAndMapOne(
+        "block.other",
+        User,
+        "other",
+        "other.user_id = block.blocked_user_id",
+      )
+      .where("block.blocker_user_id = :blockerUserId", { blockerUserId })
+      .orderBy("block.created_at", "DESC")
+      .addOrderBy("block.blocked_user_id", "DESC")
+      .take(limit);
+
+    if (after !== undefined) {
+      query.andWhere("(block.created_at, block.blocked_user_id) < (:at, :otherUserId)", {
+        at: after.at,
+        otherUserId: after.otherUserId,
+      });
+    }
+
+    const rows = (await query.getMany()) as (UserBlock & { other: User })[];
+
+    return rows.map((row) => ({
+      user: toPublicUser(row.other),
+      createdAt: row.createdAt,
+      otherUserId: row.blockedUserId,
+    }));
   }
 }

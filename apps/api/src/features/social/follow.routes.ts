@@ -71,6 +71,45 @@ export function followRoutes(follows: FollowService) {
       },
     );
 
+    app.post(
+      "/users/:userId/block",
+      {
+        schema: { params: userParams, response: { 204: z.null() } },
+        preHandler: requireUser,
+      },
+      async (request, reply) => {
+        await follows.block(request.user.userId, request.params.userId);
+
+        return reply.status(204).send(null);
+      },
+    );
+
+    app.delete(
+      "/users/:userId/block",
+      {
+        schema: { params: userParams, response: { 204: z.null() } },
+        preHandler: requireUser,
+      },
+      async (request, reply) => {
+        await follows.unblock(request.user.userId, request.params.userId);
+
+        return reply.status(204).send(null);
+      },
+    );
+
+    // Only the direction the caller can act on. Who has blocked them is
+    // deliberately unreadable: the product must not tell anybody they have been
+    // blocked.
+    app.get(
+      "/blocks",
+      {
+        schema: { querystring: listFollowsRequestSchema, response: { 200: followListSchema } },
+        preHandler: requireUser,
+      },
+      async (request) =>
+        follows.listBlocked(request.user.userId, request.query.limit, request.query.cursor),
+    );
+
     // Following a context rather than a person. No approval: an Event is shared
     // history and a Location is shared reference data, so there is nobody to
     // ask. An interface may present either as "follow this timeline".

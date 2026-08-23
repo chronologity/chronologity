@@ -3015,3 +3015,55 @@ The indexes on `user_follows` were rebuilt to carry the tie-breaking column, in 
 There is no combined "everything I follow" list. Whether the two kinds share anything beyond the word is an open question, and one endpoint returning both would answer it.
 
 `RESTRICT` means an Event or Location that people still follow cannot be deleted. Nothing deletes either today, so this blocks nothing and obliges whatever eventually does to decide what happens to the followers first.
+
+# ADR-106 — Blocking Severs in One Transaction, and Reports Itself Asymmetrically
+
+**Status:** Accepted
+
+## Decision
+
+A Block is its own table keyed on the pair of people, not a flag on a Follow.
+
+Blocking is a single transaction that records the Block, removes the Follow in both directions, and settles any pending Follow Request in either direction as `cancelled`.
+
+A Follow refused because of a Block reports differently depending on who is asking. The blocked person is told the account does not exist. The blocker is told plainly that they blocked this person.
+
+Unblocking restores nothing.
+
+## Alternatives Considered
+
+A `blocked` status on `user_follows`, which would have avoided a table.
+
+Recording severed requests as `declined`, reusing the status the resolution flow already writes.
+
+Answering both directions identically, which is the simpler rule.
+
+Restoring the severed Follows when a Block is lifted, so that lifting it returns things to how they were.
+
+Suppressing the blocked person's view of the blocker's profile, which is one of the seven consequences `social-graph.md:246` requires.
+
+## Rationale
+
+**A Block is a relationship state, not an absent one.** `social-graph.md:257` says so directly, and the shape follows from what it has to do: a Block must hold when there is no Follow to hang it on, must survive the Follow being removed, and must be queryable in both directions before either person acts. A status on a row that may not exist cannot do any of that.
+
+**Severing has to be atomic, because a partial Block is worse than a failed one.** A Block that recorded itself and left the Follow standing would tell the blocker they were protected while the relationship it exists to end continued. One transaction makes the two states impossible to separate.
+
+**`cancelled`, not `declined`.** A Follow Request asks a question. Declining is an answer to it. A Block is not an answer — it removes the standing to ask — and recording it as a decline would put a refusal in the history that nobody gave, which matters because ADR-104 keeps every request precisely so that what was asked and refused survives.
+
+**The asymmetry is the specification's, and it is coherent.** `social-graph.md:289` forbids announcing a Block and permits inferring one from behaviour. So the blocked person gets the answer a handle nobody holds would give — verified by a test that compares the two responses rather than asserting a status code, since identical is the actual requirement. The blocker already knows; a silence there would only confuse somebody about their own setting.
+
+**Unblocking restores nothing** (`social-graph.md:315`). Either party may follow again from scratch, which for an approval-based account means asking again. Restoring would resurrect a relationship the blocked person may never have wanted back, and would make the Block's effect depend on state nobody can see.
+
+## Consequences
+
+**Blocking does not touch context following.** Following an Event or a Location is a relationship with shared history, not with a person, and there is nobody in it to block out. Severing it would punish somebody for what they are interested in. A test holds this.
+
+**Two of the seven required consequences are not reachable yet, for different reasons, and neither is quietly skipped.**
+
+Ordinary direct social discovery cannot be suppressed while `GET /users/:handle` carries no authentication guard: hiding a profile from a blocked account would be defeated by signing out. Building it now would be theatre. When a profile surface knows who is asking, this becomes real and is worth doing then.
+
+Relationship-dependent access has nothing to bite on. Every Moment is private to its author and a Follow grants nothing, which 5I-2 asserts. The requirement is satisfied vacuously, and 5I-4 must satisfy it deliberately when visibility widens — which is why blocking was built before visibility rather than after. Once Moments can be seen, the remedy must already exist.
+
+**The block list is one-directional by construction.** A caller sees whom they blocked and never who blocked them, because no direction of that list could exist without telling somebody they had been blocked.
+
+Six open questions in `social-graph.md` about what a Block does to comments, reactions, tags, search, shared Events, and public Moments remain open. Every one is about a surface that does not exist.

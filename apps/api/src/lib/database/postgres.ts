@@ -12,6 +12,7 @@ import {
 } from "../../features/authentication/session.model.js";
 import { AuthorizationAuditEvent, RoleAssignment } from "../../features/authorization/authorization.model.js";
 import { Location } from "../../features/locations/location.model.js";
+import { UserBlock } from "../../features/social/block.model.js";
 import {
   FollowRequest,
   LocationFollow,
@@ -87,6 +88,7 @@ const entities = [
   FollowRequest,
   RealWorldEventFollow,
   LocationFollow,
+  UserBlock,
   OutboxMessage,
   ProjectionProcessedEvent,
   SchemaMigration,

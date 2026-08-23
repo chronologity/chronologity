@@ -68,10 +68,20 @@ export class FollowService {
    * @throws {ValidationError} If somebody tries to follow themselves.
    */
   async follow(followerUserId: string, followedUserId: string): Promise<FollowOutcome> {
-    const rejection = checkFollow(followerUserId, followedUserId);
+    const rejection = checkFollow(
+      followerUserId,
+      followedUserId,
+      await this.follows.blocksBetween(followerUserId, followedUserId),
+    );
+
+    if (rejection === "blocked_by_them") {
+      // Reported exactly as an account that does not exist. Announcing a block
+      // is forbidden; inferring one from behaviour is not.
+      throw new NotFoundError(describeFollowRejection(rejection));
+    }
 
     if (rejection !== undefined) {
-      throw new ValidationError(describeFollowRejection(), { field: "userId" });
+      throw new ValidationError(describeFollowRejection(rejection), { field: "userId" });
     }
 
     const followed = await this.users.findPublic(followedUserId);
@@ -261,6 +271,88 @@ export class FollowService {
     }
 
     return request;
+  }
+
+  /**
+   * Block somebody.
+   *
+   * Stronger than unfollowing. One transaction records the block, ends the
+   * follow in both directions, and settles any request either way — a block
+   * that recorded itself without severing what it exists to sever would be
+   * worse than one that failed.
+   *
+   * Nothing notifies. `social-graph.md:289` is explicit that a block must not
+   * become a social notification.
+   *
+   * @param blockerUserId - Who is blocking.
+   * @param blockedUserId - Who is being blocked.
+   * @returns Nothing. Blocking somebody already blocked is the state already
+   *   holding rather than a conflict.
+   * @throws {NotFoundError} If there is no such account.
+   * @throws {ValidationError} If somebody tries to block themselves.
+   */
+  async block(blockerUserId: string, blockedUserId: string): Promise<void> {
+    if (blockerUserId === blockedUserId) {
+      throw new ValidationError("You cannot block yourself", { field: "userId" });
+    }
+
+    if ((await this.users.findPublic(blockedUserId)) === undefined) {
+      throw new NotFoundError("No such user");
+    }
+
+    const at = this.clock();
+
+    await withTransaction(this.dataSource, async (tx) => {
+      await this.follows.block(tx, blockerUserId, blockedUserId, at);
+      await this.follows.unfollow(tx, blockerUserId, blockedUserId);
+      await this.follows.unfollow(tx, blockedUserId, blockerUserId);
+      await this.follows.cancelRequestsBetween(tx, blockerUserId, blockedUserId, at);
+    });
+  }
+
+  /**
+   * Remove a block.
+   *
+   * @param blockerUserId - Who blocked.
+   * @param blockedUserId - Who was blocked.
+   * @returns Nothing. **Nothing is restored.** The follows the block severed
+   *   stay severed, and either party may follow again from scratch — which for
+   *   an account requiring approval means asking again
+   *   (`social-graph.md:315`).
+   */
+  async unblock(blockerUserId: string, blockedUserId: string): Promise<void> {
+    await withTransaction(this.dataSource, (tx) =>
+      this.follows.unblock(tx, blockerUserId, blockedUserId),
+    );
+  }
+
+  /**
+   * Read who the caller has blocked.
+   *
+   * Only your own, and only the direction you can act on. Who has blocked you
+   * is deliberately unreadable: the product must not tell anybody they have
+   * been blocked.
+   *
+   * @param blockerUserId - Whose list. Always the caller.
+   * @param limit - How many at most.
+   * @param cursor - Where to continue from.
+   * @returns The page.
+   * @throws {ValidationError} If the cursor is not one this service issued.
+   */
+  async listBlocked(
+    blockerUserId: string,
+    limit: number,
+    cursor?: string,
+  ): Promise<FollowList> {
+    const rows = await this.follows.listBlocked(blockerUserId, limit, decodeCursor(cursor));
+    const last = rows.length === limit ? rows[rows.length - 1] : undefined;
+
+    return {
+      users: rows.map((row) => row.user),
+      ...(last === undefined
+        ? {}
+        : { nextCursor: encodeCursor(last.createdAt, last.otherUserId) }),
+    };
   }
 
   /**

@@ -72,7 +72,9 @@ export type FollowOutcome = z.infer<typeof followOutcomeSchema>;
 /**
  * A page of people.
  *
- * Used for both followers and following. `nextCursor` is absent on the last
+ * Used for followers, following, and the caller's own block list, which are
+ * the same shape: people, in an order, with somewhere to continue from.
+ * `nextCursor` is absent on the last
  * page and opaque throughout: it encodes where the ordering continues from,
  * and a caller that takes it apart will break when the ordering changes.
  */

@@ -837,6 +837,14 @@ These were open questions. Implementation settled them, and they are requirement
 
 **A Follow grants no access on its own.** It is a relationship, not a permission. What a follower may see is decided by the visibility rules of individual Moments, which a Follow must never bypass.
 
+**Blocking is one indivisible act** (ADR-106). Recording a Block, removing the Follow in both directions, and settling any pending Request between the two people happen together or not at all. A Block that recorded itself while the relationship it exists to end continued would tell somebody they were protected when they were not.
+
+**A severed Follow Request is cancelled, not declined.** Declining answers the question a Request asked. A Block removes the standing to ask it, which is a different thing, and recording it as a decline would put a refusal in the history that nobody gave.
+
+**A refused Follow reports differently to each side.** The blocked person is told the account does not exist, which is what this document requires — a Block may be inferred from behaviour but never announced. The blocker is told plainly, because they already know and a silence would only confuse them about their own setting.
+
+**Blocking does not touch what either person follows in the world.** Following an Event or a Location is a relationship with shared history rather than with a person, and there is nobody in it to block out.
+
 **Every Follow Request is kept.** Asking again after a refusal creates a second request rather than reusing the first, so what was asked and refused survives. That is what makes a cooldown implementable when its policy is decided; the policy itself remains open.
 
 ## Open Product Questions
@@ -858,7 +866,8 @@ The following questions require deliberate resolution:
 - What happens to pending Follow Requests when an account changes from open to approval-based?
 - If a User changes privacy mode, do existing Followers remain?
 - Can a User bulk-remove Followers?
-- What exact content becomes inaccessible immediately after a Block?
+- What exact content becomes inaccessible immediately after a Block? Nothing yet, because every Moment is private to its author and a Follow grants no access. This must be answered deliberately when visibility widens rather than inherited from whatever the code then happens to do.
+- Should a Block hide the blocker's profile from the blocked person? Unresolvable while profiles may be read without signing in, since hiding one would be defeated by signing out. Worth deciding when a profile surface knows who is asking.
 - How should blocking behave when both Users are associated with the same real-world Event?
 - How should blocking affect existing comments and reactions between the Users?
 - How should blocking affect tags and identity associations?

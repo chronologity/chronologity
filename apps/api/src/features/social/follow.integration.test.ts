@@ -955,4 +955,239 @@ describe("following", () => {
       assert.deepEqual([...seen].sort(), [...followed].sort());
     });
   });
+
+  describe("blocking", () => {
+    const block = async (accessToken: string, userId: string) =>
+      app.inject({ method: "POST", url: `/users/${userId}/block`, headers: authed(accessToken) });
+
+    const unblock = async (accessToken: string, userId: string) =>
+      app.inject({
+        method: "DELETE",
+        url: `/users/${userId}/block`,
+        headers: authed(accessToken),
+      });
+
+    const followingOf = async (accessToken: string) =>
+      (await app.inject({ method: "GET", url: "/following", headers: authed(accessToken) }))
+        .json().users;
+
+    it("ends the follow in both directions at once", async () => {
+      const blocker = await onboard();
+      const blocked = await onboard();
+      await follow(blocker.accessToken, blocked.userId);
+      await follow(blocked.accessToken, blocker.userId);
+
+      const response = await block(blocker.accessToken, blocked.userId);
+
+      assert.equal(response.statusCode, 204, response.body);
+      // A block is stronger than unfollowing: it severs the relationship
+      // whichever way it ran.
+      assert.deepEqual(await followingOf(blocker.accessToken), []);
+      assert.deepEqual(await followingOf(blocked.accessToken), []);
+    });
+
+    it("settles a pending request in either direction", async () => {
+      const blocker = await onboard();
+      const asker = await onboard();
+      await requireApproval(blocker.userId);
+      await follow(asker.accessToken, blocker.userId);
+
+      await block(blocker.accessToken, asker.userId);
+
+      assert.deepEqual(await pendingFor(blocker.accessToken), []);
+
+      const rows: { status: string }[] = await database.dataSource.query(
+        `SELECT status FROM follow_requests WHERE requester_user_id = $1`,
+        [asker.userId],
+      );
+      // Cancelled rather than declined. A block is not an answer to the
+      // question the request asked, and recording it as one would put a refusal
+      // in the history that nobody gave.
+      assert.deepEqual(rows.map((row) => row.status), ["cancelled"]);
+    });
+
+    it("hides the blocker exactly as an account that does not exist", async () => {
+      const blocker = await onboard();
+      const blocked = await onboard();
+      await block(blocker.accessToken, blocked.userId);
+
+      const asBlocked = await follow(blocked.accessToken, blocker.userId);
+      const asMissing = await follow(blocked.accessToken, randomUUID());
+
+      // Announcing a block is forbidden; inferring one from behaviour is not.
+      // So the two answers must be indistinguishable.
+      assert.equal(asBlocked.statusCode, 404, asBlocked.body);
+      assert.equal(asMissing.statusCode, 404, asMissing.body);
+      assert.equal(asBlocked.json().message, asMissing.json().message);
+    });
+
+    it("tells the blocker plainly when they try to follow whom they blocked", async () => {
+      const blocker = await onboard();
+      const blocked = await onboard();
+      await block(blocker.accessToken, blocked.userId);
+
+      const response = await follow(blocker.accessToken, blocked.userId);
+
+      // They did the blocking and already know. A silence here would only
+      // confuse.
+      assert.equal(response.statusCode, 400, response.body);
+      assert.match(response.json().message, /blocked/i);
+    });
+
+    it("stops a blocked person opening a request", async () => {
+      const blocker = await onboard();
+      const blocked = await onboard();
+      await requireApproval(blocker.userId);
+      await block(blocker.accessToken, blocked.userId);
+
+      const response = await follow(blocked.accessToken, blocker.userId);
+
+      assert.equal(response.statusCode, 404, response.body);
+      assert.deepEqual(await pendingFor(blocker.accessToken), []);
+    });
+
+    it("restores nothing when the block is lifted", async () => {
+      const blocker = await onboard();
+      const blocked = await onboard();
+      await follow(blocker.accessToken, blocked.userId);
+      await follow(blocked.accessToken, blocker.userId);
+
+      await block(blocker.accessToken, blocked.userId);
+      const lifted = await unblock(blocker.accessToken, blocked.userId);
+
+      assert.equal(lifted.statusCode, 204, lifted.body);
+      // Unblocking removes the boundary. What it severed stays severed.
+      assert.deepEqual(await followingOf(blocker.accessToken), []);
+      assert.deepEqual(await followingOf(blocked.accessToken), []);
+    });
+
+    it("lets following work again from scratch after unblocking", async () => {
+      const blocker = await onboard();
+      const blocked = await onboard();
+      await block(blocker.accessToken, blocked.userId);
+      await unblock(blocker.accessToken, blocked.userId);
+
+      const response = await follow(blocked.accessToken, blocker.userId);
+
+      assert.equal(response.statusCode, 200, response.body);
+      assert.equal(response.json().outcome, "following");
+    });
+
+    it("treats blocking twice as the state already holding", async () => {
+      const blocker = await onboard();
+      const blocked = await onboard();
+
+      await block(blocker.accessToken, blocked.userId);
+      const again = await block(blocker.accessToken, blocked.userId);
+
+      assert.equal(again.statusCode, 204, again.body);
+
+      const listed = await app.inject({
+        method: "GET",
+        url: "/blocks",
+        headers: authed(blocker.accessToken),
+      });
+      assert.equal(listed.json().users.length, 1);
+    });
+
+    it("refuses blocking yourself", async () => {
+      const person = await onboard();
+
+      const response = await block(person.accessToken, person.userId);
+
+      assert.equal(response.statusCode, 400, response.body);
+    });
+
+    it("refuses blocking somebody who does not exist", async () => {
+      const person = await onboard();
+
+      const response = await block(person.accessToken, randomUUID());
+
+      assert.equal(response.statusCode, 404, response.body);
+    });
+
+    it("shows only who you blocked, never who blocked you", async () => {
+      const blocker = await onboard();
+      const blocked = await onboard();
+      await block(blocker.accessToken, blocked.userId);
+
+      const theirs = await app.inject({
+        method: "GET",
+        url: "/blocks",
+        headers: authed(blocked.accessToken),
+      });
+
+      // There is no direction of this list that would tell somebody they have
+      // been blocked, because there must not be.
+      assert.deepEqual(theirs.json().users, []);
+    });
+
+    it("leaves what either person follows in the world alone", async () => {
+      const blocker = await onboard();
+      const blocked = await onboard();
+      const realWorldEventId = await createRealWorldEvent(database.dataSource, blocker.userId);
+
+      await app.inject({
+        method: "POST",
+        url: `/real-world-events/${realWorldEventId}/follow`,
+        headers: authed(blocked.accessToken),
+      });
+
+      await block(blocker.accessToken, blocked.userId);
+
+      const followed = await app.inject({
+        method: "GET",
+        url: "/following/real-world-events",
+        headers: authed(blocked.accessToken),
+      });
+
+      // Blocking is about a person, not about what they are interested in.
+      // Severing this would punish somebody for caring about shared history.
+      assert.equal(followed.json().realWorldEvents.length, 1);
+    });
+
+    it("pages the block list without skipping a tie", async () => {
+      const blocker = await onboard();
+      const blocked: string[] = [];
+
+      for (let index = 0; index < 5; index += 1) {
+        const other = await onboard();
+        blocked.push(other.userId);
+        await block(blocker.accessToken, other.userId);
+      }
+
+      // Blocking several people in one sitting is exactly how this ties.
+      await database.dataSource.query(
+        `UPDATE user_blocks SET created_at = '2026-01-01T00:00:00Z' WHERE blocker_user_id = $1`,
+        [blocker.userId],
+      );
+
+      const seen: string[] = [];
+      let cursor: string | undefined;
+
+      do {
+        const response = await app.inject({
+          method: "GET",
+          url: `/blocks?limit=2${cursor === undefined ? "" : `&cursor=${cursor}`}`,
+          headers: authed(blocker.accessToken),
+        });
+
+        assert.ok(response.json().users.length <= 2, "the limit was not honoured");
+        seen.push(...response.json().users.map((user: { userId: string }) => user.userId));
+        cursor = response.json().nextCursor;
+      } while (cursor !== undefined);
+
+      assert.equal(seen.length, 5, "a row was skipped or repeated");
+      assert.deepEqual([...seen].sort(), [...blocked].sort());
+    });
+
+    it("refuses blocking without a caller", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: `/users/${randomUUID()}/block`,
+      });
+
+      assert.equal(response.statusCode, 401, response.body);
+    });
+  });
 });
