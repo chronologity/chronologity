@@ -844,6 +844,14 @@ These were open questions. Implementation settled them, and they are requirement
 
 **Phone numbers will be supported.** They are not implemented, and what remains undecided is everything about how: whether a number authenticates or is only a contact detail, whether it can stand alone or must accompany an address, how a number is verified, and how numbers that change hands between people are handled. The intent is settled so that nothing is built which would have to be unpicked to admit them — an Identity already resolves through a separate table rather than through a column on the account, so a second kind of contact fits the shape that exists.
 
+**Signing in with Google or Apple will be supported, and is deferred.** Neither is implemented. The obstacle is not design but access: both require registered applications and provider credentials that do not exist yet, and Apple's additionally requires a paid developer account. Building against credentials nobody holds would produce a path nobody could sign in through.
+
+What is settled is that a provider identity resolves to the same Identity as everything else, rather than creating a parallel kind of account. An Identity already resolves through a separate table rather than through a column, so a provider subject identifier fits the shape that exists — the same reason phone numbers will fit.
+
+What remains undecided is the substance: whether a provider address that is already registered joins the existing Identity or is refused, what happens when a provider stops asserting an address it previously asserted (Apple's private relay makes this ordinary rather than exotic), whether a provider identity alone can hold an account with no password and no verified address of its own, and whether unlinking a provider is permitted when it is the only way in.
+
+One obligation is inherited rather than open. ADR-081 requires that no authentication surface disclose whether an address is registered, and a provider path must not become the exception that undoes it everywhere else.
+
 **Registering does not prove an address; redeeming a link sent to it does.** Password sign-in is refused until the address is verified, because anyone can type an address that is not theirs. Magic-link sign-in proves the address by definition.
 
 **A handle is required, globally unique, and may be changed.** Uniqueness is decided by the database on the normalised form, so two people claiming one name at the same moment cannot both succeed. A released handle is reserved for a cooldown period and may be reclaimed by its previous holder within it. A User holds one current handle at a time, enforced by a partial unique index rather than by application code.
@@ -859,6 +867,10 @@ These were open questions. Implementation settled them, and they are requirement
 The following questions require deliberate resolution:
 
 - Should a phone number authenticate an Identity, or only serve as a contact detail?
+- Does signing in with a provider whose address is already registered join that Identity, or is it refused?
+- What happens when a provider stops asserting an address it previously asserted, as Apple's private relay allows?
+- May an Identity exist with only a provider, holding no password and no address of its own?
+- Can a provider be unlinked when it is the only way into an account?
 - Can a phone number stand alone, or must an Identity always carry an email address?
 - How is a phone number verified?
 - How should a number reassigned to a different person be handled?
