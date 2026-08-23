@@ -859,6 +859,16 @@ Chronologity should therefore avoid storing one pre-rendered Location string as 
 
 Privacy-aware geographic presentation may be viewer-relative.
 
+**This is settled** (ADR-109). A Moment's author chooses, per Moment, how much of its place everybody else is told: **exact**, **neighbourhood**, **city**, or **hidden**. The author always receives the exact place. New Moments disclose exactly unless their author says otherwise.
+
+The tier is chosen by the author rather than derived from the relationship. The example above keys the middle tier on a "close connection", and no such concept is defined; inferring one would settle a social-graph question by implication.
+
+**A reduced place carries no Location identifier and no coordinates** — only the geographic context, at the granularity disclosed. This is what makes reduction meaningful rather than decorative: a Location is shared reference data that any signed-in Viewer may read in full, so a reduced place that carried its identifier could simply be looked up. A reduced place is a coarser statement about where, not a reference to a Location.
+
+**Disclosure is not precision.** Precision says how well anybody knows where something happened and is the same for everybody. Disclosure says how much of that a given Viewer receives. A place known exactly may be disclosed as a city; a place known only vaguely reports `broad` to its author too.
+
+**Delivered media carries no metadata.** Previews, still frames, and repackaged video are produced with every tag discarded, so a recording's embedded position cannot leak around the disclosure the Moment sets. The stored original keeps everything.
+
 ## Location Privacy Is Derived-Data Privacy
 
 Reducing Location visibility must apply to all derived surfaces.
@@ -1302,9 +1312,7 @@ These were open questions. Implementation settled them, and they are requirement
 The following questions require deliberate resolution:
 
 - Is Location optional for every Moment?
-- What Location precision options should Users see explicitly?
-- Should the product use labels such as exact, approximate, city-level, and hidden?
-- If so, how is free-form historical text later reconciled with stable Location identity?
+- If so, how should free-form historical text be reconciled with stable Location identity?
 - Can individual media items expose different supporting Location metadata within one Moment?
 - Should Users be able to inspect per-media metadata without turning it into separate Moment chronology?
 - Should device-derived Location require explicit confirmation before becoming historical metadata?

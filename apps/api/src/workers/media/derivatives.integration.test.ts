@@ -206,6 +206,41 @@ describe("producing derivatives", () => {
     );
   });
 
+  it("carries no coordinates into a delivered video", async () => {
+    // The fixture genuinely holds one, and this asserts that before asserting
+    // its absence. A test that only checked the derivative would pass just as
+    // well against a fixture that never had a location to lose.
+    // `loci` is the MP4 box that carries where a recording was made. The
+    // coordinates inside it are fixed-point binary rather than text, so the box
+    // marker is what can be looked for in the bytes.
+    const original = await readFile(fixture("video-with-location.mp4"));
+
+    assert.ok(original.includes(Buffer.from("loci")), "the fixture should carry a location box");
+
+    const { uploadId, ownerUserId } = await runThrough("video-with-location.mp4", "video");
+    const delivered = await fetchObject(derivativeKey(ownerUserId, uploadId, "faststart"));
+
+    // `-c copy` preserves container metadata unless told otherwise, so a phone's
+    // recording would otherwise hand its coordinates to everybody who watched
+    // it — whatever the Moment's place disclosure said (`locations.md:868`).
+    assert.equal(
+      delivered.includes(Buffer.from("loci")),
+      false,
+      "the delivered video still carries where it was taken",
+    );
+  });
+
+  it("keeps the coordinates in the original, which nobody is served", async () => {
+    const { uploadId, ownerUserId } = await runThrough("video-with-location.mp4", "video");
+
+    const stored = await fetchObject(`${uploadPrefix(ownerUserId, uploadId)}/original`);
+
+    // Stripping the original would destroy what place suggestions are read
+    // from, and what private storage retains is a separate question
+    // (`locations.md:1313`).
+    assert.ok(stored.includes(Buffer.from("loci")));
+  });
+
   it("keeps the original untouched", async () => {
     // Derivatives are for showing media. Losing or altering what someone
     // actually uploaded would be unrecoverable.

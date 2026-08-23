@@ -3177,3 +3177,55 @@ Keeping one `get` and adding a flag to say whether the caller intended to edit.
 **Viewer-relative Location precision is now unblocked, and still deferred.** `moments.md:585` deferred it because "there is no second viewer to reduce precision for", a premise this ends. The new reason is different: any signed-in Viewer can already read any Location's full coordinates directly, because a Location is shared reference data (ADR-098). Reducing precision inside a Moment response while another endpoint serves the same coordinates in full would protect nothing. Doing it properly means making the Location read viewer-aware.
 
 What this does disclose is the **association** — that this person was at this place at this time — which is what making a Moment public means.
+
+# ADR-109 — Disclose a Place Per Viewer, and Carry No Identifier When Reduced
+
+**Status:** Accepted
+
+## Decision
+
+A Moment's author chooses, per Moment, how much of its place everybody else is told: `exact`, `neighbourhood`, `city`, or `hidden`. The author always receives the exact place. `exact` is the default.
+
+Below `exact`, the response carries no Location identifier and no coordinates — only the geographic context, at the granularity disclosed.
+
+Disclosure is a separate field from a Location's `precision` and must not be conflated with it.
+
+Derivatives are produced with `-map_metadata -1`, so a delivered file carries none of the original's metadata. The original keeps all of it.
+
+## Alternatives Considered
+
+Deriving the tier from the relationship, as `locations.md:844` illustrates: creator sees the venue, a "close connection" sees the neighbourhood, a public viewer sees the city.
+
+Reducing the Location in place — keeping the identifier, blanking the coordinates, replacing the name with the city.
+
+Reusing `precision` for both, since the vocabulary nearly matches.
+
+Defaulting to `city`, which is the conservative choice.
+
+Stripping metadata from the original as well.
+
+## Rationale
+
+**The author chooses, because "close connection" is not a settled concept.** `social-graph.md` defines following, requests, and blocking; it does not define closeness. Deriving a precision tier from the graph would settle that question by implication, in a Locations phase, rather than deliberately. Author-set disclosure also answers `locations.md:1305` — "What Location precision options should Users see explicitly?" — by making them explicit rather than inferred. A relationship tier can be layered on later without changing what is stored.
+
+**A reduced place carries no identifier, and this is what makes the whole thing work.** ADR-108 deferred this work on the grounds that any signed-in Viewer can read any Location in full through `GET /locations/:locationId`, because a Location is shared reference data (ADR-098). Reducing the place inside a Moment while leaving its identifier attached would be exactly that theatre: the Viewer would simply look it up. So a reduced place is not a reference to a Location at all — it is a coarser statement about where something happened, with nothing to dereference. This is `locations.md:855` applied directly: "avoid storing one pre-rendered Location string as the sole authoritative representation." The Location stays whole in the database and what a Viewer receives is derived per request.
+
+**Precision and disclosure are different questions.** Precision says how well anybody knows where something happened; it is a fact about history and it is the same for everybody, including the author. Disclosure says how much of that a given Viewer receives; it is a privacy choice. A place known exactly may be disclosed as a city, and a place known only vaguely reports `broad` to its author too. Collapsing them would make it impossible to say "I know exactly where this was, and I am not telling you" — which is the entire feature.
+
+**`exact` by default keeps sharing working.** A Moment recorded at a landmark shows the landmark without anybody having to go and permit it. This is a product decision rather than one inherited from the schema.
+
+**The risk this accepts.** With Moments public by default (ADR-108) and places exact by default, a Moment recorded at home publishes an address until its author narrows it — the combination `locations.md:798` warns about. The mitigation is that the control exists, is per Moment, and can be set while recording. Whether some categories of place should reduce themselves automatically (`locations.md:1317`) stays open, and is where this would be revisited.
+
+## Consequences
+
+**The repository can no longer produce a `Moment`.** It returns an `UndisclosedMoment`, which carries the place whole plus the author's chosen disclosure, and only `disclosePlace` turns that into something sendable. This is deliberate: a read path that forgot to reduce would leak an exact position silently, and the type makes it a compile error instead.
+
+That guarantee paid for itself immediately. The compiler found five read paths, and one of them — `listForViewer` — was written disclosing to the *author* rather than to the Viewer, which would have handed every stranger the exact place of everything they could see. A test now covers each path separately.
+
+**`momentSchema.location` became `momentSchema.place`,** a differently shaped thing: a disclosure, an optional whole Location, and an optional area. Safe to rename because no client consumes it yet. A Moment with no place is `null`; a Moment whose place is withheld is a `hidden` disclosure, because "nobody said where" and "you are not being told where" are different facts and a client should be able to tell them apart.
+
+**Delivered video was carrying its coordinates.** ffmpeg defaults to `-map_metadata 0`, and `faststart` runs `-c copy`, so a recording's `loci` box — where a phone writes the position — passed straight into the file that would be played. This was verified by reproducing it, not inferred: the box is present in the output before the fix and absent after. It was latent rather than live, because nothing serves media bytes to a Viewer yet; that is precisely why it was worth fixing now, while the fix is one argument and nothing depends on the old behaviour.
+
+The image derivatives were already clean, because the JPEG encoder does not write EXIF. They get the flag anyway — that was the encoder's behaviour rather than an instruction, and a property worth having is worth stating.
+
+**The original keeps its metadata.** It is what `GET /uploads/:uploadId/places` reads to offer place suggestions, and what private storage should retain is deliberately open (`locations.md:1313`).

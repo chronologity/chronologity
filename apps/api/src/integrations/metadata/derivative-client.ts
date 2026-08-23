@@ -68,6 +68,27 @@ export interface DerivativeClient {
 }
 
 const DEFAULT_TIMEOUT_MS = 120_000;
+
+/**
+ * Carry none of the original's metadata into a derivative.
+ *
+ * ffmpeg's default is `-map_metadata 0`, which copies container metadata from
+ * input to output. That matters most for `faststart`, which uses `-c copy`: a
+ * phone's video carries where it was taken as a container tag, and without this
+ * the file delivered for playback carries it too. `locations.md:868` requires
+ * that a withheld place not leak through derived surfaces, and the file itself
+ * is the most obvious of them.
+ *
+ * Applied to the image derivatives as well. They happen to be clean already,
+ * because the JPEG encoder does not write EXIF — but that is the encoder's
+ * behaviour rather than an instruction, and a property worth having is worth
+ * stating.
+ *
+ * The original keeps everything. It is what place suggestions are read from,
+ * and what private storage should retain is a separate question
+ * (`locations.md:1313`).
+ */
+const DISCARD_METADATA = ["-map_metadata", "-1"];
 const DEFAULT_THUMBNAIL_WIDTH = 480;
 const DEFAULT_POSTER_WIDTH = 1_280;
 
@@ -132,6 +153,7 @@ export function createDerivativeClient(
         "error",
         "-i",
         url,
+        ...DISCARD_METADATA,
         // Width fixed, height following the original's shape. `-2` keeps the
         // height even, which some encoders require.
         "-vf",
@@ -147,6 +169,7 @@ export function createDerivativeClient(
         "error",
         "-i",
         url,
+        ...DISCARD_METADATA,
         // The first frame. Choosing a more representative one means decoding
         // further into the file for a judgement nobody has defined; the first
         // frame is honest and cheap.
@@ -163,6 +186,7 @@ export function createDerivativeClient(
         "error",
         "-i",
         url,
+        ...DISCARD_METADATA,
         // No re-encoding. The video is repackaged so its playback information
         // sits at the front, which is what lets a player begin before the file
         // has finished downloading. Re-encoding would cost quality and time

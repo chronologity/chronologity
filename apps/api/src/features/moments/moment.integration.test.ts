@@ -697,8 +697,8 @@ describe("moments", () => {
 
       // Whole, not by identifier: a client showing a Moment should not need
       // three more round trips to say where it was.
-      assert.equal(response.json().location.locationId, locationId);
-      assert.ok(response.json().location.name.length > 0);
+      assert.equal(response.json().place.location.locationId, locationId);
+      assert.ok(response.json().place.location.name.length > 0);
       assert.deepEqual(
         response.json().realWorldEvents.map((event: { name: string }) => event.name),
         ["A family reunion", "A wedding"],
@@ -715,8 +715,9 @@ describe("moments", () => {
         uploadIds: [uploadId],
       });
 
-      // Null rather than absent: "not known" is a fact about the history.
-      assert.equal(response.json().location, null);
+      // Null rather than absent: "not known" is a fact about the history, and
+      // distinct from a place that exists but is being withheld.
+      assert.equal(response.json().place, null);
       assert.deepEqual(response.json().realWorldEvents, []);
     });
 
@@ -745,7 +746,7 @@ describe("moments", () => {
       assert.equal(response.statusCode, 200, response.body);
       // A Moment has one place. Saying where twice is a correction, not a
       // second claim.
-      assert.equal(response.json().location.locationId, corrected);
+      assert.equal(response.json().place.location.locationId, corrected);
     });
 
     it("lets a place be taken back, leaving the moment intact", async () => {
@@ -769,7 +770,7 @@ describe("moments", () => {
       });
 
       assert.equal(response.statusCode, 200, response.body);
-      assert.equal(response.json().location, null);
+      assert.equal(response.json().place, null);
       // The Moment survives losing its place. Removing context is not removing
       // history.
       assert.equal(response.json().momentId, moment.momentId);
@@ -795,7 +796,7 @@ describe("moments", () => {
 
       // The caller asked for a state that already holds, which is not an error.
       assert.equal(response.statusCode, 200, response.body);
-      assert.equal(response.json().location, null);
+      assert.equal(response.json().place, null);
     });
 
     it("associates and dissociates an occurrence", async () => {
@@ -875,7 +876,7 @@ describe("moments", () => {
       // Neither is owned. A Location is shared reference data and an Event is
       // shared history — pointing at one somebody else recorded is the point.
       assert.equal(response.statusCode, 201, response.body);
-      assert.equal(response.json().location.locationId, locationId);
+      assert.equal(response.json().place.location.locationId, locationId);
     });
   });
 
@@ -2022,6 +2023,293 @@ describe("moments", () => {
       const history = await app.inject({ method: "GET", url: `/users/${author.userId}/moments` });
 
       assert.equal(history.statusCode, 401, history.body);
+    });
+  });
+
+  describe("how much of a place other people are told", () => {
+    /** Record a public Moment somewhere, at a chosen disclosure. */
+    const recordSomewhere = async (
+      author: { accessToken: string; userId: string },
+      disclosure?: string,
+    ): Promise<string> => {
+      const uploadId = await createReadyUpload(database.dataSource, author.userId);
+      const locationId = await createLocation(database.dataSource, author.userId);
+      const created = await record(author.accessToken, {
+        caption: "Something that happened",
+        occurrence: summer,
+        occurrenceOffsetMinutes: NEW_YORK,
+        uploadIds: [uploadId],
+        locationId,
+        ...(disclosure === undefined ? {} : { locationDisclosure: disclosure }),
+      });
+
+      assert.equal(created.statusCode, 201, created.body);
+
+      return created.json().momentId as string;
+    };
+
+    const placeSeenBy = async (accessToken: string, momentId: string) => {
+      const read = await app.inject({
+        method: "GET",
+        url: `/moments/${momentId}`,
+        headers: authed(accessToken),
+      });
+
+      assert.equal(read.statusCode, 200, read.body);
+
+      return read.json().place;
+    };
+
+    const narrow = async (accessToken: string, momentId: string, disclosure: string) =>
+      app.inject({
+        method: "PUT",
+        url: `/moments/${momentId}/location/disclosure`,
+        headers: authed(accessToken),
+        payload: { disclosure },
+      });
+
+    it("gives the author the exact place whatever they chose for others", async () => {
+      const author = await onboard();
+
+      for (const disclosure of ["exact", "neighbourhood", "city", "hidden"]) {
+        const momentId = await recordSomewhere(author, disclosure);
+        const place = await placeSeenBy(author.accessToken, momentId);
+
+        assert.equal(place.disclosure, "exact", disclosure);
+        assert.notEqual(place.location, null, disclosure);
+      }
+    });
+
+    it("gives a stranger the exact place when nobody said otherwise", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+      const momentId = await recordSomewhere(author);
+
+      const place = await placeSeenBy(stranger.accessToken, momentId);
+
+      assert.equal(place.disclosure, "exact");
+      assert.notEqual(place.location, null);
+    });
+
+    it("gives a stranger a neighbourhood and no place", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+      const momentId = await recordSomewhere(author, "neighbourhood");
+
+      const place = await placeSeenBy(stranger.accessToken, momentId);
+
+      assert.equal(place.disclosure, "neighbourhood");
+      assert.equal(place.location, null);
+      assert.equal(place.area.neighbourhood, "Midtown");
+      assert.equal(place.area.city, "New York City");
+    });
+
+    it("withholds the neighbourhood at city level", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+      const momentId = await recordSomewhere(author, "city");
+
+      const place = await placeSeenBy(stranger.accessToken, momentId);
+
+      assert.equal(place.disclosure, "city");
+      assert.equal(place.area.neighbourhood, null);
+      assert.equal(place.area.city, "New York City");
+      assert.equal(place.area.country, "United States");
+    });
+
+    it("still shows the Moment when its place is hidden", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+      const momentId = await recordSomewhere(author, "hidden");
+
+      const place = await placeSeenBy(stranger.accessToken, momentId);
+
+      // Hiding where is not hiding what. `locations.md:830`: "Can view Moment ≠
+      // Can view exact Location".
+      assert.equal(place.disclosure, "hidden");
+      assert.equal(place.location, null);
+      assert.equal(place.area, null);
+    });
+
+    it("hands out no identifier below exact, so nothing can be looked up", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+      const exact = await placeSeenBy(
+        author.accessToken,
+        await recordSomewhere(author, "exact"),
+      );
+
+      for (const disclosure of ["neighbourhood", "city", "hidden"]) {
+        const momentId = await recordSomewhere(author, disclosure);
+        const place = await placeSeenBy(stranger.accessToken, momentId);
+
+        // The whole reason a reduced place is safe. An identifier would let
+        // anybody read the exact place straight back through
+        // `GET /locations/:locationId`, which serves any signed-in caller.
+        assert.equal(
+          JSON.stringify(place).includes("locationId"),
+          false,
+          `${disclosure} carried an identifier`,
+        );
+      }
+
+      assert.ok(JSON.stringify(exact).includes("locationId"), "exact should carry one");
+    });
+
+    it("hands out no coordinates below exact", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+
+      for (const disclosure of ["neighbourhood", "city", "hidden"]) {
+        const momentId = await recordSomewhere(author, disclosure);
+        const place = await placeSeenBy(stranger.accessToken, momentId);
+
+        assert.equal(JSON.stringify(place).includes("40.75"), false, disclosure);
+      }
+    });
+
+    it("takes effect on the next read when narrowed", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+      const momentId = await recordSomewhere(author);
+      assert.equal((await placeSeenBy(stranger.accessToken, momentId)).disclosure, "exact");
+
+      const narrowed = await narrow(author.accessToken, momentId, "city");
+
+      assert.equal(narrowed.statusCode, 200, narrowed.body);
+      assert.equal((await placeSeenBy(stranger.accessToken, momentId)).disclosure, "city");
+    });
+
+    it("survives the Moment being moved to a different place", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+      const momentId = await recordSomewhere(author, "city");
+      const elsewhere = await createLocation(database.dataSource, author.userId);
+
+      await app.inject({
+        method: "PUT",
+        url: `/moments/${momentId}/location`,
+        headers: authed(author.accessToken),
+        payload: { locationId: elsewhere },
+      });
+
+      // Moving a Moment to a different venue is not a decision to publish it.
+      assert.equal((await placeSeenBy(stranger.accessToken, momentId)).disclosure, "city");
+    });
+
+    it("says no place at all when the Moment has none", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+      const uploadId = await createReadyUpload(database.dataSource, author.userId);
+      const created = await record(author.accessToken, {
+        caption: "Somewhere unrecorded",
+        occurrence: summer,
+        occurrenceOffsetMinutes: NEW_YORK,
+        uploadIds: [uploadId],
+        locationDisclosure: "hidden",
+      });
+
+      const place = await placeSeenBy(stranger.accessToken, created.json().momentId);
+
+      // Null, not a hidden disclosure. "Nobody said where" and "you are not
+      // being told where" are different facts.
+      assert.equal(place, null);
+    });
+
+    it("reduces the same way when reading somebody's whole history", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+      await recordSomewhere(author, "city");
+
+      const history = await app.inject({
+        method: "GET",
+        url: `/users/${author.userId}/moments`,
+        headers: authed(stranger.accessToken),
+      });
+
+      // The path most easily missed: reducing one Moment and forgetting the
+      // list would leak every place a person ever recorded.
+      const [only] = history.json().moments;
+      assert.equal(only.place.disclosure, "city");
+      assert.equal(only.place.location, null);
+    });
+
+    it("gives the author their own history exactly, through the same route", async () => {
+      const author = await onboard();
+      await recordSomewhere(author, "hidden");
+
+      const history = await app.inject({
+        method: "GET",
+        url: `/users/${author.userId}/moments`,
+        headers: authed(author.accessToken),
+      });
+
+      const [only] = history.json().moments;
+      assert.equal(only.place.disclosure, "exact");
+    });
+
+    it("gives the author their own list exactly", async () => {
+      const author = await onboard();
+      await recordSomewhere(author, "hidden");
+
+      const listed = await app.inject({
+        method: "GET",
+        url: "/moments",
+        headers: authed(author.accessToken),
+      });
+
+      const [only] = listed.json().moments;
+      assert.equal(only.place.disclosure, "exact");
+    });
+
+    it("refuses a Viewer changing somebody else's disclosure", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+      const momentId = await recordSomewhere(author, "exact");
+
+      const attempt = await narrow(stranger.accessToken, momentId, "hidden");
+
+      assert.equal(attempt.statusCode, 404, attempt.body);
+      assert.equal((await placeSeenBy(author.accessToken, momentId)).disclosure, "exact");
+    });
+
+    it("refuses a disclosure that is not one of the four", async () => {
+      const author = await onboard();
+      const momentId = await recordSomewhere(author);
+
+      const attempt = await narrow(author.accessToken, momentId, "vaguely");
+
+      assert.equal(attempt.statusCode, 400, attempt.body);
+    });
+
+    it("keeps precision and disclosure independent", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+      const momentId = await recordSomewhere(author, "exact");
+      // Broad rather than exact: somewhere known only as a wide area, which the
+      // position constraint permits so long as it still has a position.
+      await database.dataSource.query(
+        `UPDATE locations SET precision = 'broad' WHERE recorded_by_user_id = $1`,
+        [author.userId],
+      );
+
+      const place = await placeSeenBy(stranger.accessToken, momentId);
+
+      // Precision says how well anybody knows where this happened; disclosure
+      // says how much of that a Viewer receives. A place known only vaguely,
+      // disclosed fully, still reports that it is known only vaguely.
+      assert.equal(place.disclosure, "exact");
+      assert.equal(place.location.precision, "broad");
+    });
+
+    it("refuses changing a disclosure without a caller", async () => {
+      const response = await app.inject({
+        method: "PUT",
+        url: `/moments/${randomUUID()}/location/disclosure`,
+        payload: { disclosure: "hidden" },
+      });
+
+      assert.equal(response.statusCode, 401, response.body);
     });
   });
 });

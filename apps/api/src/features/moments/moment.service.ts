@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type {
   CreateMomentRequest,
+  LocationDisclosure,
   Moment,
   MomentAudience,
   MomentPage,
@@ -30,6 +31,8 @@ import {
   positionMedia,
 } from "./moment.policy.js";
 import type { MomentRepository } from "./moment.repository.js";
+import type { UndisclosedMoment } from "./moment.types.js";
+import { disclosePlace } from "./moment.disclosure-policy.js";
 import { checkVisibility } from "./moment.visibility-policy.js";
 import { decodeCursor, encodeCursor } from "../../lib/pagination/cursor.js";
 
@@ -119,6 +122,7 @@ export class MomentService {
         occurrenceOffsetMinutes: request.occurrenceOffsetMinutes,
         media: positionMedia(request.uploadIds),
         visibility: request.visibility,
+        locationDisclosure: request.locationDisclosure,
         createdAt: this.clock(),
       }),
     );
@@ -131,7 +135,7 @@ export class MomentService {
       throw new Error("A Moment was not found immediately after being recorded");
     }
 
-    return recorded;
+    return this.disclose(recorded, authorUserId);
   }
 
   /**
@@ -596,7 +600,7 @@ export class MomentService {
       throw new NotFoundError("No such moment");
     }
 
-    return moment;
+    return this.disclose(moment, authorUserId);
   }
 
   /**
@@ -634,7 +638,7 @@ export class MomentService {
       throw new NotFoundError("No such moment");
     }
 
-    return moment;
+    return this.disclose(moment, viewerUserId);
   }
 
   /**
@@ -682,10 +686,31 @@ export class MomentService {
     const last = moments.length === limit ? moments[moments.length - 1] : undefined;
 
     return {
-      moments,
+      moments: moments.map((moment) => this.disclose(moment, viewerUserId)),
       ...(last === undefined
         ? {}
         : { nextCursor: encodeCursor(new Date(last.occurrence.start), last.momentId) }),
+    };
+  }
+
+  /**
+   * Reduce a Moment's place to what one Viewer may be told.
+   *
+   * Every read goes through here. The repository deliberately cannot produce a
+   * `Moment` at all — it returns an `UndisclosedMoment` carrying the place
+   * whole — so a read path that forgot this would fail to compile rather than
+   * quietly hand somebody an exact position.
+   *
+   * @param moment - As stored, with its place not yet reduced.
+   * @param viewerUserId - Who is asking.
+   * @returns The Moment as that Viewer may receive it.
+   */
+  private disclose(moment: UndisclosedMoment, viewerUserId: string): Moment {
+    const { location, locationDisclosure, ...rest } = moment;
+
+    return {
+      ...rest,
+      place: disclosePlace(viewerUserId, moment.authorUserId, locationDisclosure, location),
     };
   }
 
@@ -742,6 +767,30 @@ export class MomentService {
   }
 
   /**
+   * Set how much of a Moment's place other people are told.
+   *
+   * @param momentId - Which Moment.
+   * @param authorUserId - Who is asking. Only its author may.
+   * @param disclosure - How much to tell everybody else.
+   * @returns The Moment as it now stands, which for its author always carries
+   *   the exact place whatever they just chose for other people.
+   * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
+   */
+  async setLocationDisclosure(
+    momentId: string,
+    authorUserId: string,
+    disclosure: LocationDisclosure,
+  ): Promise<Moment> {
+    await this.getForAuthor(momentId, authorUserId);
+
+    await withTransaction(this.dataSource, (tx) =>
+      this.moments.setLocationDisclosure(tx, momentId, disclosure, this.clock()),
+    );
+
+    return this.getForAuthor(momentId, authorUserId);
+  }
+
+  /**
    * Read who may see a restricted Moment.
    *
    * @param momentId - Which Moment.
@@ -781,7 +830,7 @@ export class MomentService {
     const last = moments.length === limit ? moments[moments.length - 1] : undefined;
 
     return {
-      moments,
+      moments: moments.map((moment) => this.disclose(moment, authorUserId)),
       ...(last === undefined ? {} : { nextCursor: encodeCursor(new Date(last.occurrence.start), last.momentId) }),
     };
   }

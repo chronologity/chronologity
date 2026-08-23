@@ -9,6 +9,7 @@ import {
   momentAudienceSchema,
   momentPageSchema,
   momentSchema,
+  setLocationDisclosureRequestSchema,
   setMomentVisibilityRequestSchema,
 } from "@chronologity/contracts";
 import type { FastifyInstance } from "fastify";
@@ -254,6 +255,26 @@ export function momentRoutes(moments: MomentService) {
       },
       async (request) =>
         moments.setVisibility(request.params.momentId, request.user.userId, request.body),
+    );
+
+    // Its own operation, and not folded into setting the place. Moving a Moment
+    // to a different venue is not a decision to publish it.
+    app.put(
+      "/moments/:momentId/location/disclosure",
+      {
+        schema: {
+          params: z.object({ momentId: identifierSchema }),
+          body: setLocationDisclosureRequestSchema,
+          response: { 200: momentSchema },
+        },
+        preHandler: requireUser,
+      },
+      async (request) =>
+        moments.setLocationDisclosure(
+          request.params.momentId,
+          request.user.userId,
+          request.body.disclosure,
+        ),
     );
 
     // The author's own. A list of the people somebody trusted with something is

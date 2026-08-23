@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { identifierSchema } from "./identifiers.js";
-import { locationSchema } from "./locations.js";
+import { geographicContextSchema, locationSchema } from "./locations.js";
 import { realWorldEventSchema } from "./real-world-events.js";
 import { occurrenceSchema, timestampSchema } from "./time.js";
 import { uploadSchema } from "./uploads.js";
@@ -58,6 +58,52 @@ export const momentVisibilitySchema = z.enum(["private", "restricted", "public"]
 
 export type MomentVisibility = z.infer<typeof momentVisibilitySchema>;
 
+/**
+ * How much of a Moment's place other people are told.
+ *
+ * A different axis from a Location's own `precision`, and the two must not be
+ * conflated. Precision says how well anybody knows where something happened —
+ * it is a fact about history, and it is the same for everybody. Disclosure says
+ * how much of that a given Viewer receives, and is the author's privacy choice.
+ *
+ * A place known exactly may still be disclosed as a city; a place known only to
+ * the city reports `broad` precision to its author too.
+ *
+ * The author always receives the exact place. This governs everybody else.
+ */
+export const locationDisclosureSchema = z.enum([
+  /** The place in full: its name, its coordinates, and its identity. */
+  "exact",
+  /** The neighbourhood it sits in, and the wider areas around that. */
+  "neighbourhood",
+  /** The city and wider, with the neighbourhood withheld. */
+  "city",
+  /** Nothing about where. The Moment itself is still readable. */
+  "hidden",
+]);
+
+export type LocationDisclosure = z.infer<typeof locationDisclosureSchema>;
+
+/**
+ * A Moment's place, as one Viewer receives it.
+ *
+ * Two fields rather than one because they carry different things, and a client
+ * has to know which it was given. At `exact` the whole Location is here, its
+ * identifier included. Below that there is no identifier at all — a reduced
+ * place is not a reference to a Location but a coarser statement about where,
+ * and an identifier would let anybody look up what was just withheld
+ * (`locations.md:855`).
+ */
+export const momentPlaceSchema = z.object({
+  disclosure: locationDisclosureSchema,
+  /** The place in full. Present only at `exact`. */
+  location: locationSchema.nullable(),
+  /** The area, at the granularity disclosed. Present at `neighbourhood` and `city`. */
+  area: geographicContextSchema.nullable(),
+});
+
+export type MomentPlace = z.infer<typeof momentPlaceSchema>;
+
 /** What someone supplies to record a Moment. */
 export const createMomentRequestSchema = z.object({
   caption: captionSchema,
@@ -83,6 +129,14 @@ export const createMomentRequestSchema = z.object({
   uploadIds: z.array(identifierSchema).min(1).max(100),
   /** Where it happened, if anybody knows. */
   locationId: identifierSchema.optional(),
+  /**
+   * How much of that place other people are told.
+   *
+   * Chosen while recording rather than only afterwards, so that somebody who
+   * does not want a place published never has to publish it first and narrow it
+   * after.
+   */
+  locationDisclosure: locationDisclosureSchema.default("exact"),
   /** The larger occurrences it was part of, if any. */
   realWorldEventIds: z.array(identifierSchema).max(20).optional(),
   /**
@@ -117,16 +171,19 @@ export const momentSchema = z.object({
   /** The media in presentation order, whole rather than by identifier. */
   media: z.array(uploadSchema),
   /**
-   * Where the experience happened, or null when nobody said.
+   * Where the experience happened, as this Viewer may receive it, or null when
+   * nobody said.
    *
    * One place, not several: `locations.md:433` asks that the Moment-level
    * Location represent the experience as a whole, and media pointing at
    * several distinct places usually means several Moments.
    *
    * Null rather than absent, because "not known" is a fact about the history
-   * and a missing key would only mean "not loaded".
+   * and a missing key would only mean "not loaded". A Moment whose place is
+   * withheld is not null here — it carries a `hidden` disclosure, because
+   * "nobody said where" and "you are not being told where" are different facts.
    */
-  location: locationSchema.nullable(),
+  place: momentPlaceSchema.nullable(),
   /**
    * The larger occurrences it was part of.
    *
@@ -198,6 +255,13 @@ export type SetMomentVisibilityRequest = z.infer<typeof setMomentVisibilityReque
 export const momentAudienceSchema = z.object({ users: z.array(publicUserSchema) });
 
 export type MomentAudience = z.infer<typeof momentAudienceSchema>;
+
+/** Changing how much of a Moment's place other people are told. */
+export const setLocationDisclosureRequestSchema = z.object({
+  disclosure: locationDisclosureSchema,
+});
+
+export type SetLocationDisclosureRequest = z.infer<typeof setLocationDisclosureRequestSchema>;
 
 /** Correcting what a Moment says happened. */
 export const updateCaptionRequestSchema = z.object({ caption: captionSchema });

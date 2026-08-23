@@ -1,7 +1,7 @@
 import type { Cursor } from "../../lib/pagination/cursor.js";
 import { randomUUID } from "node:crypto";
 import type {
-  Moment as MomentContract,
+  LocationDisclosure,
   MomentVisibility,
   PublicUser,
   Occurrence,
@@ -24,7 +24,7 @@ import {
   MomentMedium,
   MomentRealWorldEvent,
 } from "./moment.model.js";
-import type { MomentEditKind, NewMoment } from "./moment.types.js";
+import type { MomentEditKind, NewMoment, UndisclosedMoment } from "./moment.types.js";
 
 /**
  * Where Moments are stored.
@@ -45,7 +45,7 @@ import type { MomentEditKind, NewMoment } from "./moment.types.js";
  * @param row - As read from `moments`, with media and their uploads loaded.
  * @returns The Moment as a caller receives it, media in presentation order.
  */
-function toMoment(row: MomentRow): MomentContract {
+function toMoment(row: MomentRow): UndisclosedMoment {
   const media = [...(row.media ?? [])]
     .sort((one, other) => one.position - other.position)
     .map((medium) => medium.upload)
@@ -65,7 +65,10 @@ function toMoment(row: MomentRow): MomentContract {
     media,
     // Where it happened, whole. Null rather than absent when nobody said: a
     // missing key would mean "not loaded", and this means "not known".
-    location: row.place?.location === undefined ? null : toLocation(row.place.location),
+    // Whole, and not yet reduced for anybody. Only `disclosePlace` decides how
+    // much of it a given Viewer receives.
+    location: row.place?.location === undefined ? undefined : toLocation(row.place.location),
+    locationDisclosure: row.locationDisclosure as LocationDisclosure,
     // The larger occurrences it was part of, whole. Ordered by name so a caller
     // sees the same list twice running; the database has no opinion.
     realWorldEvents: (row.realWorldEvents ?? [])
@@ -105,6 +108,7 @@ export class MomentRepository {
       occurrencePrecision: moment.occurrence.precision,
       occurrenceOffsetMinutes: moment.occurrenceOffsetMinutes,
       visibility: moment.visibility,
+      locationDisclosure: moment.locationDisclosure,
       createdAt: moment.createdAt,
       updatedAt: moment.createdAt,
       deletedAt: null,
@@ -129,7 +133,7 @@ export class MomentRepository {
    *   such record or it has been deleted. Deleted reads as absent: a tombstone
    *   is not something a caller should be able to tell apart from nothing.
    */
-  async findById(momentId: string): Promise<MomentContract | undefined> {
+  async findById(momentId: string): Promise<UndisclosedMoment | undefined> {
     const row = await this.dataSource.getRepository(MomentRow).findOne({
       where: { momentId, deletedAt: IsNull() },
       relations: {
@@ -157,7 +161,7 @@ export class MomentRepository {
     authorUserId: string,
     limit: number,
     cursor?: Cursor,
-  ): Promise<MomentContract[]> {
+  ): Promise<UndisclosedMoment[]> {
     const query = this.dataSource
       .getRepository(MomentRow)
       .createQueryBuilder("moment")
@@ -211,7 +215,7 @@ export class MomentRepository {
     viewerUserId: string,
     limit: number,
     cursor?: Cursor,
-  ): Promise<MomentContract[]> {
+  ): Promise<UndisclosedMoment[]> {
     const query = this.dataSource
       .getRepository(MomentRow)
       .createQueryBuilder("moment")
@@ -334,6 +338,28 @@ export class MomentRepository {
         audience.map((userId) => ({ momentId, userId, addedAt: at })),
       );
     }
+  }
+
+  /**
+   * Set how much of a Moment's place other people are told.
+   *
+   * Independent of which place it is. Somebody who moves a Moment to a
+   * different venue has not thereby decided to publish it, so this is its own
+   * column and its own operation.
+   *
+   * @param tx - The caller's transaction.
+   * @param momentId - Which Moment.
+   * @param disclosure - How much to tell everybody but the author.
+   * @param at - When.
+   * @returns Nothing.
+   */
+  async setLocationDisclosure(
+    tx: Transaction,
+    momentId: string,
+    disclosure: LocationDisclosure,
+    at: Date,
+  ): Promise<void> {
+    await tx.update(MomentRow, { momentId }, { locationDisclosure: disclosure, updatedAt: at });
   }
 
   /**

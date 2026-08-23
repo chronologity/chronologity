@@ -82,6 +82,17 @@ export class Moment {
   @Column("text", { default: "public" })
   visibility!: string;
 
+  /**
+   * How much of this Moment's place other people are told.
+   *
+   * Not the same as the Location's own `precision`. That says how well anybody
+   * knows where this happened and is a fact about history; this says how much
+   * of it a Viewer receives and is the author's privacy choice
+   * (`locations.md:830`). The author always receives the exact place.
+   */
+  @Column("text", { name: "location_disclosure", default: "exact" })
+  locationDisclosure!: string;
+
   @Column("timestamptz", { name: "created_at" })
   createdAt!: Date;
 

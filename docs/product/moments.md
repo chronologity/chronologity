@@ -586,7 +586,9 @@ This has a consequence `moments.md` anticipated: because the last media asset ca
 
 Every read requires a Viewer, public Moments included. That is what lets a Block take effect: a blocked person must not be able to route around it by signing out. Reading and editing are separately gated, so seeing a Moment is never enough to change one.
 
-**Location precision still follows the Moment.** The reason has changed: there is a second viewer now, but any signed-in Viewer can already read a Location's full coordinates directly, because a Location is shared reference data. Reducing precision inside a Moment while another surface serves the same coordinates in full would protect nothing. That `locations.md` requires the two to diverge remains true and remains to be built, and it needs the Location read to become viewer-aware first.
+**A Moment's author chooses how much of its place other people are told** (ADR-109) — exact, the neighbourhood, the city, or nothing. The author always sees the exact place. New Moments disclose exactly unless their author says otherwise, and the choice can be made while recording.
+
+Below exact, the response carries no Location identifier and no coordinates, which is what stops the reduction being undone by looking the place up. Disclosure is a separate thing from a Location's precision: precision says how well the place is known and is the same for everybody, disclosure says how much of that a Viewer receives.
 
 **Media must be checked before it can represent a Moment.** An upload reaches
 `ready` only once a decoder has opened it and found it to be what it claimed

@@ -150,7 +150,9 @@ export async function createPendingUpload(
  * @param dataSource - The database under test.
  * @param recordedByUserId - Who first recorded it. Provenance, not ownership:
  *   anybody's Moment may point at it (ADR-098).
- * @returns The new place's identifier.
+ * @returns The new place's identifier. It carries a full geographic context,
+ *   because that is what a reduced disclosure is built from, and a place
+ *   without one would make those tests pass for the wrong reason.
  */
 export async function createLocation(
   dataSource: DataSource,
@@ -161,8 +163,11 @@ export async function createLocation(
   await dataSource.query(
     `INSERT INTO locations (
        location_id, recorded_by_user_id, name, latitude, longitude,
-       precision, source, created_at, updated_at
-     ) VALUES ($1, $2, $3, 40.7505, -73.9934, 'exact', 'explicit-selection', now(), now())`,
+       precision, source, neighbourhood, city, region, country, country_code,
+       created_at, updated_at
+     ) VALUES ($1, $2, $3, 40.7505, -73.9934, 'exact', 'explicit-selection',
+               'Midtown', 'New York City', 'New York', 'United States', 'US',
+               now(), now())`,
     [locationId, recordedByUserId, `Somewhere ${locationId.slice(0, 8)}`],
   );
 
