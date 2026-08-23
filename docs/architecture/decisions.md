@@ -3067,3 +3067,53 @@ Relationship-dependent access has nothing to bite on. Every Moment is private to
 **The block list is one-directional by construction.** A caller sees whom they blocked and never who blocked them, because no direction of that list could exist without telling somebody they had been blocked.
 
 Six open questions in `social-graph.md` about what a Block does to comments, reactions, tags, search, shared Events, and public Moments remain open. Every one is about a surface that does not exist.
+
+# ADR-107 — One Cursor, a Swept Outbox, and a Testable Command
+
+**Status:** Accepted
+
+## Decision
+
+Keyset cursors are encoded and decoded in one module, `lib/pagination/cursor.ts`, which every paged list uses. The two features that had written their own now import it, and `GET /uploads` — which had no cursor at all — is paged the same way.
+
+Published outbox messages are swept after a configurable window. Unpublished and abandoned messages are never swept.
+
+The role-granting command's decisions moved into a function the entry point calls, so they can be tested.
+
+## Alternatives Considered
+
+A fourth copy of the cursor encoding, written out in the uploads feature beside the three that already existed.
+
+Deleting an outbox row the moment it is published, which needs no window and no configuration.
+
+Sweeping from a scheduled job or a database trigger rather than from the publisher.
+
+Testing the command by running the built script as a subprocess, which would prove the argument parsing too.
+
+## Rationale
+
+**The cursor duplication had already caused a defect.** 5I-1 shipped cursors encoding a timestamp alone while `GET /moments` encoded a pair, and nothing failed because nothing exercised a tie (ADR-105). Writing the encoding a fourth time invites the fourth version of that bug. One module, with its own tests, is where a rule this easy to get subtly wrong belongs.
+
+**Extracting it found a second defect in the rule itself.** Both existing copies split the cursor on its last colon — but an ISO timestamp is full of colons, so a bare timestamp decoded as a well-formed pair: `2026-08-22T10:30` and `00.000Z`, paging from a moment fifteen seconds adrift instead of refusing. The seam is now the timestamp's trailing `Z`, which appears nowhere else in it, and a test asserts that the near miss is refused.
+
+**The outbox is a queue, not a record.** Published rows are read by nothing, and keeping them forever grows a table without bound while holding payloads describing people indefinitely — which the privacy rules do not permit merely because nobody got round to deleting them.
+
+**A window rather than deleting on publish**, because the row is the evidence that an event was emitted at all. When a consumer says it never received something, that is the thing worth looking at, and it is only worth looking at soon after. Seventy-two hours by default, and configurable because the right number is operational rather than architectural.
+
+**Two kinds of row are never swept, for different reasons.** An unpublished message is still owed to the broker. An abandoned one is the only record that something could not be delivered, and removing it would destroy the evidence before anybody had looked at why. Both have their own test.
+
+**Swept by the publisher, while idle.** It is the process that already owns the table, already runs continuously, and already knows when there is nothing to publish. Delivery is owed to somebody and housekeeping is not, so a sweep never delays a batch. Concurrent publishers take disjoint rows through `FOR UPDATE SKIP LOCKED`, the same mechanism that lets several of them publish.
+
+**The command was untestable because it was a script.** Its decisions — an unknown role, a handle nobody holds, a handle whose claim was released, granting what is already held — are exactly the ones that need negative-path tests, and this is how the first administrator is created. The entry point now parses arguments and picks an exit code; everything else is a function tested against the real database.
+
+## Consequences
+
+**`GET /uploads` was previously uncontinuable.** It returned at most fifty uploads with no way to ask for the next, so somebody with more than fifty could not reach the rest through the API at all. It now bounds and pages like every other list, and its index carries the tie-breaking column.
+
+**Counting a sweep required counting in the database.** A `DELETE ... RETURNING` run through TypeORM's `query()` yields the rows and the row count together, so the result's length is two whatever happened. The first version of the sweep reported two removals every time, and one test passed for that wrong reason before the count moved into SQL.
+
+**`start:publisher` pointed at a worker that no longer exists.** The outbox publisher replaced the event publisher, and the script outlived it. Removed.
+
+**Retention is a new required-with-a-default environment variable**, recorded in `.env.example`. Zero is permitted and means sweep as soon as a message is published, which is what the test suites use.
+
+**Three cursor call sites now share a failure mode.** A change to the encoding breaks every paged list at once rather than one of them quietly. That is the intent — the alternative was a change breaking one list silently — and the module's own tests are the guard.

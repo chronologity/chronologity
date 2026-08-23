@@ -15,7 +15,6 @@
     "lint:fix": "eslint . --fix",
     "migrate": "node dist/cli/migrate.js",
     "start": "node dist/main.js",
-    "start:publisher": "node dist/workers/event-publisher/index.js",
     "start:outbox-publisher": "node dist/workers/outbox-publisher/index.js",
     "start:media": "node dist/workers/media/index.js",
     "test": "vitest run",
