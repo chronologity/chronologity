@@ -34,6 +34,14 @@ export const envSchema = z.object({
    * an archive of payloads describing people. Zero is permitted and means
    * sweep as soon as a message is published.
    */
+  /**
+   * How many requests one client may make in a minute, across every endpoint.
+   *
+   * The global ceiling, not the tighter per-endpoint limits that protect
+   * authentication. It depends on where the process runs and how many replicas
+   * share the load, so it is configuration rather than a constant.
+   */
+  API_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(300),
   OUTBOX_RETENTION_HOURS: z.coerce.number().int().min(0).max(8_760).default(72),
 
   // No default for the signing secret: a development fallback would eventually

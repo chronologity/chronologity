@@ -18,6 +18,8 @@ import {
   createReadyUpload,
   createRealWorldEvent,
 } from "../../testing/fixtures.js";
+import { FollowRepository } from "../social/follow.repository.js";
+import { FollowService } from "../social/follow.service.js";
 import { MomentRepository } from "./moment.repository.js";
 import { withTransaction } from "../../lib/database/transaction.js";
 import { MomentService } from "./moment.service.js";
@@ -44,6 +46,10 @@ const config: AppConfig = {
   logLevel: "fatal",
   host: "127.0.0.1",
   port: 0,
+  // Raised well above the production ceiling: this suite drives one process
+  // through hundreds of requests in a minute, which is not the traffic the
+  // limiter defends against.
+  rateLimit: { maxPerMinute: 100_000 },
   database: {
     host: process.env.POSTGRES_HOST ?? "localhost",
     port: Number(process.env.POSTGRES_PORT ?? "5432"),
@@ -116,12 +122,24 @@ describe("moments", () => {
       users: new UserService(database.dataSource, new UserRepository(database.dataSource), {
         minimumAgeYears: config.minimumAgeYears,
       }),
+      // Mounted because a Block is part of what decides visibility, and a test
+      // that inserted the row by hand would prove the query rather than the
+      // rule.
+      follows: new FollowService(
+        database.dataSource,
+        new FollowRepository(database.dataSource),
+        new UserRepository(database.dataSource),
+        new RealWorldEventRepository(database.dataSource),
+        new LocationRepository(database.dataSource),
+      ),
       moments: new MomentService(
         database.dataSource,
         new MomentRepository(database.dataSource),
         new UploadRepository(database.dataSource),
         new LocationRepository(database.dataSource),
         new RealWorldEventRepository(database.dataSource),
+        new FollowRepository(database.dataSource),
+        new UserRepository(database.dataSource),
       ),
     });
   });
@@ -229,7 +247,6 @@ describe("moments", () => {
       // offset survives a timestamptz column that would otherwise discard it.
       assert.deepEqual(response.json().occurrence, summer);
       assert.equal(response.json().occurrenceOffsetMinutes, NEW_YORK);
-      assert.equal(response.json().visibility, "private");
     });
 
     it("places a moment where it happened, not when it was recorded", async () => {
@@ -436,6 +453,7 @@ describe("moments", () => {
           occurrence: summer,
           occurrenceOffsetMinutes: 0,
           uploadIds: [theirs.uploadId],
+          visibility: "private",
         })
       ).json();
 
@@ -450,8 +468,9 @@ describe("moments", () => {
         headers: authed(mine.accessToken),
       });
 
-      // Every Moment is private to its author. Saying "this exists but is not
-      // yours" would itself disclose that somebody recorded something.
+      // Saying "this exists but is not yours" would itself disclose that
+      // somebody recorded something, so a Moment somebody may not see reads
+      // exactly as one that was never recorded.
       assert.equal(asTheirs.statusCode, 404, asTheirs.body);
       assert.equal(asMissing.statusCode, 404, asMissing.body);
       assert.equal(asTheirs.json().message, asMissing.json().message);
@@ -1431,6 +1450,578 @@ describe("moments", () => {
       });
 
       assert.equal(response.statusCode, 401, response.body);
+    });
+  });
+
+  describe("visibility", () => {
+    /** Record a Moment at a chosen visibility and hand back its identifier. */
+    const recordAt = async (
+      person: { accessToken: string; userId: string },
+      visibility: string,
+      audience: string[] = [],
+    ): Promise<string> => {
+      const uploadId = await createReadyUpload(database.dataSource, person.userId);
+      const created = await record(person.accessToken, {
+        caption: "Something that happened",
+        occurrence: summer,
+        occurrenceOffsetMinutes: NEW_YORK,
+        uploadIds: [uploadId],
+        visibility: visibility === "restricted" ? "private" : visibility,
+      });
+
+      assert.equal(created.statusCode, 201, created.body);
+      const momentId = created.json().momentId as string;
+
+      if (visibility === "restricted") {
+        const set = await app.inject({
+          method: "PUT",
+          url: `/moments/${momentId}/visibility`,
+          headers: authed(person.accessToken),
+          payload: { visibility: "restricted", audience },
+        });
+        assert.equal(set.statusCode, 200, set.body);
+      }
+
+      return momentId;
+    };
+
+    const readAs = async (accessToken: string, momentId: string) =>
+      app.inject({ method: "GET", url: `/moments/${momentId}`, headers: authed(accessToken) });
+
+    const historyOf = async (accessToken: string, authorUserId: string) =>
+      app.inject({
+        method: "GET",
+        url: `/users/${authorUserId}/moments`,
+        headers: authed(accessToken),
+      });
+
+    const block = async (accessToken: string, userId: string) =>
+      app.inject({ method: "POST", url: `/users/${userId}/block`, headers: authed(accessToken) });
+
+    it("lets a stranger read a public Moment", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+      const momentId = await recordAt(author, "public");
+
+      const read = await readAs(stranger.accessToken, momentId);
+
+      assert.equal(read.statusCode, 200, read.body);
+      assert.equal(read.json().visibility, "public");
+    });
+
+    it("hides a private Moment exactly as one that does not exist", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+      const momentId = await recordAt(author, "private");
+
+      const hidden = await readAs(stranger.accessToken, momentId);
+      const missing = await readAs(stranger.accessToken, randomUUID());
+
+      // That a Moment exists is itself a disclosure. The two answers must be
+      // indistinguishable, not merely both refusals.
+      assert.equal(hidden.statusCode, 404, hidden.body);
+      assert.equal(missing.statusCode, 404, missing.body);
+      assert.equal(hidden.json().message, missing.json().message);
+    });
+
+    it("lets somebody named on a restricted Moment read it", async () => {
+      const author = await onboard();
+      const guest = await onboard();
+      const momentId = await recordAt(author, "restricted", [guest.userId]);
+
+      const read = await readAs(guest.accessToken, momentId);
+
+      assert.equal(read.statusCode, 200, read.body);
+      assert.equal(read.json().visibility, "restricted");
+    });
+
+    it("refuses somebody left off a restricted Moment", async () => {
+      const author = await onboard();
+      const guest = await onboard();
+      const stranger = await onboard();
+      const momentId = await recordAt(author, "restricted", [guest.userId]);
+
+      const read = await readAs(stranger.accessToken, momentId);
+
+      assert.equal(read.statusCode, 404, read.body);
+    });
+
+    it("lets the author read their own whatever its visibility", async () => {
+      const author = await onboard();
+
+      for (const visibility of ["private", "restricted", "public"]) {
+        const momentId = await recordAt(author, visibility);
+        const read = await readAs(author.accessToken, momentId);
+
+        assert.equal(read.statusCode, 200, `${visibility}: ${read.body}`);
+      }
+    });
+
+    it("records a Moment as public when nobody says otherwise", async () => {
+      const author = await onboard();
+      const uploadId = await createReadyUpload(database.dataSource, author.userId);
+
+      const created = await record(author.accessToken, {
+        caption: "Something that happened",
+        occurrence: summer,
+        occurrenceOffsetMinutes: NEW_YORK,
+        uploadIds: [uploadId],
+      });
+
+      assert.equal(created.json().visibility, "public");
+    });
+
+    it("records a Moment as private when its author says so while recording", async () => {
+      const author = await onboard();
+      const momentId = await recordAt(author, "private");
+
+      const read = await readAs(author.accessToken, momentId);
+
+      // Publishing first and correcting after is not good enough when the
+      // default is public.
+      assert.equal(read.json().visibility, "private");
+    });
+
+    it("leaves a Moment recorded before this shipped private", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+      const momentId = await recordAt(author, "public");
+
+      // What the column held for every Moment recorded under the old promise.
+      await database.dataSource.query(
+        `UPDATE moments SET visibility = 'private' WHERE moment_id = $1`,
+        [momentId],
+      );
+
+      const read = await readAs(stranger.accessToken, momentId);
+
+      assert.equal(read.statusCode, 404, read.body);
+    });
+
+    it("keeps a blocked person out of a public Moment", async () => {
+      const author = await onboard();
+      const blocked = await onboard();
+      const momentId = await recordAt(author, "public");
+      await block(author.accessToken, blocked.userId);
+
+      const read = await readAs(blocked.accessToken, momentId);
+
+      // The requirement 5I-3 could only satisfy vacuously, there being no
+      // access to survive a block at the time.
+      assert.equal(read.statusCode, 404, read.body);
+    });
+
+    it("keeps the blocker out of the blocked person's public Moment too", async () => {
+      const blocker = await onboard();
+      const blocked = await onboard();
+      const momentId = await recordAt(blocked, "public");
+      await block(blocker.accessToken, blocked.userId);
+
+      const read = await readAs(blocker.accessToken, momentId);
+
+      // Both ways. An asymmetric rule would leave the blocker still reading the
+      // history of somebody they wanted nothing to do with, and would let the
+      // blocked person infer the block from access continuing one way only.
+      assert.equal(read.statusCode, 404, read.body);
+    });
+
+    it("outlives an invitation issued before the block", async () => {
+      const author = await onboard();
+      const guest = await onboard();
+      const momentId = await recordAt(author, "restricted", [guest.userId]);
+
+      await block(author.accessToken, guest.userId);
+
+      const read = await readAs(guest.accessToken, momentId);
+
+      assert.equal(read.statusCode, 404, read.body);
+    });
+
+    it("still lets the author read their own after blocking somebody", async () => {
+      const author = await onboard();
+      const blocked = await onboard();
+      const momentId = await recordAt(author, "private");
+      await block(author.accessToken, blocked.userId);
+
+      const read = await readAs(author.accessToken, momentId);
+
+      // A block must never hide somebody's own history from them.
+      assert.equal(read.statusCode, 200, read.body);
+    });
+
+    it("takes a Moment back out of sight the moment it is narrowed", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+      const momentId = await recordAt(author, "public");
+      assert.equal((await readAs(stranger.accessToken, momentId)).statusCode, 200);
+
+      await app.inject({
+        method: "PUT",
+        url: `/moments/${momentId}/visibility`,
+        headers: authed(author.accessToken),
+        payload: { visibility: "private" },
+      });
+
+      assert.equal((await readAs(stranger.accessToken, momentId)).statusCode, 404);
+    });
+
+    it("does not move a Moment through history when it is published", async () => {
+      const author = await onboard();
+      const momentId = await recordAt(author, "private");
+      const before = (await readAs(author.accessToken, momentId)).json();
+
+      await app.inject({
+        method: "PUT",
+        url: `/moments/${momentId}/visibility`,
+        headers: authed(author.accessToken),
+        payload: { visibility: "public" },
+      });
+
+      const after = (await readAs(author.accessToken, momentId)).json();
+
+      // `privacy.md:102`: visibility must not affect historical position.
+      assert.deepEqual(after.occurrence, before.occurrence);
+      assert.equal(after.createdAt, before.createdAt);
+    });
+
+    it("clears the audience when a Moment stops being restricted", async () => {
+      const author = await onboard();
+      const guest = await onboard();
+      const momentId = await recordAt(author, "restricted", [guest.userId]);
+
+      await app.inject({
+        method: "PUT",
+        url: `/moments/${momentId}/visibility`,
+        headers: authed(author.accessToken),
+        payload: { visibility: "private" },
+      });
+
+      const audience = await app.inject({
+        method: "GET",
+        url: `/moments/${momentId}/audience`,
+        headers: authed(author.accessToken),
+      });
+
+      // Leaving names behind would let a later change back to restricted
+      // silently readmit people nobody had reconsidered.
+      assert.deepEqual(audience.json().users, []);
+    });
+
+    it("refuses an audience on a Moment that is not restricted", async () => {
+      const author = await onboard();
+      const guest = await onboard();
+      const momentId = await recordAt(author, "public");
+
+      const set = await app.inject({
+        method: "PUT",
+        url: `/moments/${momentId}/visibility`,
+        headers: authed(author.accessToken),
+        payload: { visibility: "public", audience: [guest.userId] },
+      });
+
+      // Refused rather than ignored: it means the caller believes something
+      // about the result that would not be true.
+      assert.equal(set.statusCode, 400, set.body);
+    });
+
+    it("refuses an audience naming somebody who does not exist", async () => {
+      const author = await onboard();
+      const momentId = await recordAt(author, "public");
+
+      const set = await app.inject({
+        method: "PUT",
+        url: `/moments/${momentId}/visibility`,
+        headers: authed(author.accessToken),
+        payload: { visibility: "restricted", audience: [randomUUID()] },
+      });
+
+      assert.equal(set.statusCode, 400, set.body);
+    });
+
+    it("refuses an author naming themselves in their own audience", async () => {
+      const author = await onboard();
+      const momentId = await recordAt(author, "public");
+
+      const set = await app.inject({
+        method: "PUT",
+        url: `/moments/${momentId}/visibility`,
+        headers: authed(author.accessToken),
+        payload: { visibility: "restricted", audience: [author.userId] },
+      });
+
+      // Their own history is already theirs. Accepting it would put a row in
+      // the list that no rule consults, and suggest their access depended on it.
+      assert.equal(set.statusCode, 400, set.body);
+    });
+
+    it("ignores the same person named twice", async () => {
+      const author = await onboard();
+      const guest = await onboard();
+      const momentId = await recordAt(author, "public");
+
+      await app.inject({
+        method: "PUT",
+        url: `/moments/${momentId}/visibility`,
+        headers: authed(author.accessToken),
+        payload: { visibility: "restricted", audience: [guest.userId, guest.userId] },
+      });
+
+      const audience = await app.inject({
+        method: "GET",
+        url: `/moments/${momentId}/audience`,
+        headers: authed(author.accessToken),
+      });
+
+      assert.equal(audience.json().users.length, 1);
+    });
+
+    it("refuses an audience larger than the bound", async () => {
+      const author = await onboard();
+      const momentId = await recordAt(author, "public");
+
+      const set = await app.inject({
+        method: "PUT",
+        url: `/moments/${momentId}/visibility`,
+        headers: authed(author.accessToken),
+        payload: {
+          visibility: "restricted",
+          audience: Array.from({ length: 101 }, () => randomUUID()),
+        },
+      });
+
+      assert.equal(set.statusCode, 400, set.body);
+    });
+
+    it("refuses a Viewer setting somebody else's visibility", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+      const momentId = await recordAt(author, "public");
+
+      const set = await app.inject({
+        method: "PUT",
+        url: `/moments/${momentId}/visibility`,
+        headers: authed(stranger.accessToken),
+        payload: { visibility: "private" },
+      });
+
+      assert.equal(set.statusCode, 404, set.body);
+    });
+
+    it("refuses a Viewer reading somebody else's audience", async () => {
+      const author = await onboard();
+      const guest = await onboard();
+      const momentId = await recordAt(author, "restricted", [guest.userId]);
+
+      const read = await app.inject({
+        method: "GET",
+        url: `/moments/${momentId}/audience`,
+        headers: authed(guest.accessToken),
+      });
+
+      // Being on a list does not entitle somebody to read it. Who else was
+      // trusted is the author's business.
+      assert.equal(read.statusCode, 404, read.body);
+    });
+
+    it("shows a stranger only the public part of somebody's history", async () => {
+      const author = await onboard();
+      const guest = await onboard();
+      const stranger = await onboard();
+      await recordAt(author, "public");
+      await recordAt(author, "private");
+      await recordAt(author, "restricted", [guest.userId]);
+
+      const asStranger = await historyOf(stranger.accessToken, author.userId);
+      const asGuest = await historyOf(guest.accessToken, author.userId);
+      const asAuthor = await historyOf(author.accessToken, author.userId);
+
+      assert.equal(asStranger.json().moments.length, 1);
+      assert.equal(asGuest.json().moments.length, 2);
+      assert.equal(asAuthor.json().moments.length, 3);
+    });
+
+    it("agrees with the single read for every combination", async () => {
+      const author = await onboard();
+      const guest = await onboard();
+      const viewers = [author, guest, await onboard()];
+      const recorded: string[] = [];
+
+      for (const visibility of ["private", "restricted", "public"]) {
+        recorded.push(await recordAt(author, visibility, [guest.userId]));
+      }
+
+      // The list filters in SQL and the single read applies the policy in
+      // TypeScript. They state the same rule twice, so they are held against
+      // each other rather than trusted separately.
+      for (const viewer of viewers) {
+        const listed = new Set<string>(
+          (await historyOf(viewer.accessToken, author.userId))
+            .json()
+            .moments.map((moment: { momentId: string }) => moment.momentId),
+        );
+
+        for (const momentId of recorded) {
+          const readable = (await readAs(viewer.accessToken, momentId)).statusCode === 200;
+
+          assert.equal(
+            listed.has(momentId),
+            readable,
+            `${momentId} listed=${listed.has(momentId)} readable=${readable}`,
+          );
+        }
+      }
+    });
+
+    it("hides a blocked person's history entirely", async () => {
+      const author = await onboard();
+      const blocked = await onboard();
+      await recordAt(author, "public");
+      await block(author.accessToken, blocked.userId);
+
+      const history = await historyOf(blocked.accessToken, author.userId);
+
+      assert.deepEqual(history.json().moments, []);
+    });
+
+    it("pages somebody else's history without skipping a tie", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+      const recorded: string[] = [];
+
+      for (let index = 0; index < 5; index += 1) {
+        recorded.push(await recordAt(author, "public"));
+      }
+
+      // Every Moment at one instant, which is ordinary for a day somebody
+      // backfills.
+      await database.dataSource.query(
+        `UPDATE moments SET occurrence_start = '1998-06-01T00:00:00Z' WHERE author_user_id = $1`,
+        [author.userId],
+      );
+
+      const seen: string[] = [];
+      let cursor: string | undefined;
+
+      do {
+        const response = await app.inject({
+          method: "GET",
+          url: `/users/${author.userId}/moments?limit=2${
+            cursor === undefined ? "" : `&cursor=${cursor}`
+          }`,
+          headers: authed(stranger.accessToken),
+        });
+
+        assert.ok(response.json().moments.length <= 2, "the limit was not honoured");
+        seen.push(...response.json().moments.map((moment: { momentId: string }) => moment.momentId));
+        cursor = response.json().nextCursor;
+      } while (cursor !== undefined);
+
+      assert.equal(seen.length, 5, "a Moment was skipped or repeated");
+      assert.deepEqual([...seen].sort(), [...recorded].sort());
+    });
+
+    it("returns full pages rather than pages thinned after the fact", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+      await recordAt(author, "private");
+      await recordAt(author, "public");
+      await recordAt(author, "private");
+      await recordAt(author, "public");
+
+      const page = await app.inject({
+        method: "GET",
+        url: `/users/${author.userId}/moments?limit=2`,
+        headers: authed(stranger.accessToken),
+      });
+
+      // Filtering after the query would have returned one or two here by luck
+      // of the ordering, and stepped the cursor over what it dropped.
+      assert.equal(page.json().moments.length, 2);
+    });
+
+    it("lets a Viewer change nothing about a Moment they can see", async () => {
+      const author = await onboard();
+      const viewer = await onboard();
+      const momentId = await recordAt(author, "public");
+      const uploadId = await createReadyUpload(database.dataSource, viewer.userId);
+      const locationId = await createLocation(database.dataSource, author.userId);
+      const realWorldEventId = await createRealWorldEvent(database.dataSource, author.userId);
+
+      // Every way a Moment can be changed. Seeing something must never be
+      // enough to rewrite it, and the single check that proves authorship is
+      // deliberately not the one that decides who may look.
+      const changes: {
+        method: "PATCH" | "PUT" | "POST" | "DELETE";
+        url: string;
+        payload?: object;
+      }[] = [
+        { method: "PATCH", url: `/moments/${momentId}`, payload: { caption: "Rewritten" } },
+        {
+          method: "PUT",
+          url: `/moments/${momentId}/occurrence`,
+          payload: { occurrence: summer, occurrenceOffsetMinutes: 0 },
+        },
+        { method: "POST", url: `/moments/${momentId}/media`, payload: { uploadIds: [uploadId] } },
+        {
+          method: "PUT",
+          url: `/moments/${momentId}/media/order`,
+          payload: { uploadIds: [uploadId] },
+        },
+        { method: "DELETE", url: `/moments/${momentId}/media/${uploadId}` },
+        { method: "PUT", url: `/moments/${momentId}/location`, payload: { locationId } },
+        { method: "DELETE", url: `/moments/${momentId}/location` },
+        {
+          method: "POST",
+          url: `/moments/${momentId}/real-world-events`,
+          payload: { realWorldEventId },
+        },
+        { method: "DELETE", url: `/moments/${momentId}/real-world-events/${realWorldEventId}` },
+        {
+          method: "PUT",
+          url: `/moments/${momentId}/visibility`,
+          payload: { visibility: "private" },
+        },
+        { method: "DELETE", url: `/moments/${momentId}` },
+      ];
+
+      for (const change of changes) {
+        const response = await app.inject({
+          method: change.method,
+          url: change.url,
+          headers: authed(viewer.accessToken),
+          ...(change.payload === undefined ? {} : { payload: change.payload }),
+        });
+
+        assert.equal(
+          response.statusCode,
+          404,
+          `${change.method} ${change.url} answered ${response.statusCode}`,
+        );
+      }
+
+      // And the Moment is exactly as its author left it.
+      const after = await readAs(author.accessToken, momentId);
+      assert.equal(after.json().caption, "Something that happened");
+      assert.equal(after.json().visibility, "public");
+    });
+
+    it("refuses reading a Moment without a caller", async () => {
+      const author = await onboard();
+      const momentId = await recordAt(author, "public");
+
+      const read = await app.inject({ method: "GET", url: `/moments/${momentId}` });
+
+      // Public means public to a Viewer, not to the world. It is what lets a
+      // block bite: signing out must not route around it.
+      assert.equal(read.statusCode, 401, read.body);
+    });
+
+    it("refuses reading somebody's history without a caller", async () => {
+      const author = await onboard();
+
+      const history = await app.inject({ method: "GET", url: `/users/${author.userId}/moments` });
+
+      assert.equal(history.statusCode, 401, history.body);
     });
   });
 });

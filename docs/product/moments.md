@@ -582,7 +582,11 @@ This has a consequence `moments.md` anticipated: because the last media asset ca
 
 **Media within a Moment carries an explicit position**, set from the order supplied at creation and changeable afterwards. Position is presentation only: it orders media inside the depth view and never affects where the Moment sits in chronology, which is determined by occurrence time alone.
 
-**Every Moment is private in the initial product**, visible to its author and to nobody else. No audience or sharing model exists until the social graph does, and Location precision follows the Moment rather than being controlled separately — while the author is the only viewer, there is no second viewer to reduce precision for. That `locations.md` requires the two to diverge eventually is not in doubt; it cannot be built against viewers who do not exist.
+**A Moment is private, restricted to people its author named, or public** (ADR-108) — the three models `privacy.md` describes, and no more. A Moment is public unless its author says otherwise, which they may do while recording rather than only afterwards. Nothing recorded before that default existed was changed by it.
+
+Every read requires a Viewer, public Moments included. That is what lets a Block take effect: a blocked person must not be able to route around it by signing out. Reading and editing are separately gated, so seeing a Moment is never enough to change one.
+
+**Location precision still follows the Moment.** The reason has changed: there is a second viewer now, but any signed-in Viewer can already read a Location's full coordinates directly, because a Location is shared reference data. Reducing precision inside a Moment while another surface serves the same coordinates in full would protect nothing. That `locations.md` requires the two to diverge remains true and remains to be built, and it needs the Location read to become viewer-aware first.
 
 **Media must be checked before it can represent a Moment.** An upload reaches
 `ready` only once a decoder has opened it and found it to be what it claimed

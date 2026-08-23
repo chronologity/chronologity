@@ -19,6 +19,7 @@ import {
   RealWorldEventFollow,
   UserFollow,
 } from "../../features/social/follow.model.js";
+import { MomentAudience } from "../../features/moments/moment-audience.model.js";
 import {
   Moment,
   MomentEdit,
@@ -81,6 +82,7 @@ const entities = [
   MomentLocation,
   MomentRealWorldEvent,
   MomentEdit,
+  MomentAudience,
   RealWorldEvent,
   RealWorldEventAlias,
   RealWorldEventLocation,

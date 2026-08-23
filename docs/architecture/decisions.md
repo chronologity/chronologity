@@ -3117,3 +3117,63 @@ Testing the command by running the built script as a subprocess, which would pro
 **Retention is a new required-with-a-default environment variable**, recorded in `.env.example`. Zero is permitted and means sweep as soon as a message is published, which is what the test suites use.
 
 **Three cursor call sites now share a failure mode.** A change to the encoding breaks every paged list at once rather than one of them quietly. That is the intent — the alternative was a change breaking one list silently — and the module's own tests are the guard.
+
+# ADR-108 — A Moment Has an Audience, and Reading Is Not Editing
+
+**Status:** Accepted
+
+## Decision
+
+A Moment is `private`, `restricted`, or `public`. A restricted Moment carries its own list of people.
+
+A Moment is public unless its author says otherwise, and the creation endpoint accepts a visibility so they can say so while recording.
+
+Every Moment read requires a Viewer, public ones included. A Block hides two people from each other in both directions.
+
+Reading and editing are gated by two different checks. `MomentService.get` admits anybody a Moment is visible to; `getForAuthor` admits only its author, and every change goes through that one.
+
+An inaccessible Moment is reported as one that does not exist.
+
+## Alternatives Considered
+
+A fourth value meaning "my followers", which is what most social products would have.
+
+Reusable named groups — "family", "climbing club" — pointed at by many Moments.
+
+Defaulting to private, which is what every Moment recorded so far already is.
+
+Letting anybody read a public Moment without signing in, as a public web page would.
+
+Filtering inaccessible Moments out of a page after the query returned them.
+
+Keeping one `get` and adding a flag to say whether the caller intended to edit.
+
+## Rationale
+
+**Three values, because `privacy.md:92` names three** and asks that the vocabulary stay "as simple as possible" while warning against "a complicated matrix of social-network privacy controls". There is no `followers` value because `social-graph.md:490` says a Follow does not override privacy: following states what somebody wants to hear about, never what they are entitled to see. A `followers` audience would quietly make the two the same thing.
+
+**Per-Moment lists over reusable groups**, for the same reason, and one more: editing a group would silently change the audience of every Moment already pointing at it, which is a way to publish something to somebody without ever having decided to. Groups can be added later without changing what a Moment stores.
+
+**Public by default is a decision, not a drift.** `privacy.md:80` says the default "must be decided explicitly before launch" and "should not emerge accidentally from implementation convenience". A platform for shared history whose every Moment is private by default is a platform nobody can use, and the creation endpoint takes a visibility so that choosing privacy does not mean publishing first and correcting after.
+
+**Nothing already recorded changed audience.** Every existing row stores `private` explicitly, so moving the column default touched none of them. Those Moments were recorded under a documented promise (`moments.md:585`) that they were private, and a changed default is not consent.
+
+**Public means public to a Viewer.** Requiring a caller is what lets a Block bite: a blocked person cannot route around it by signing out. That turns the consequence 5I-3 could only satisfy vacuously — "relationship-dependent access must not survive a Block" — into a real one, and it follows the standing rule that deep links never permanently confer access. Public web sharing remains possible later as a deliberately designed surface rather than as a side effect of an unauthenticated route.
+
+**A Block hides both people from each other.** An asymmetric rule would leave the blocker still reading the history of somebody they said they wanted nothing to do with, and would let the blocked person infer the Block from access that continued in one direction only.
+
+**Filtering happens in SQL.** A page that fetched twenty rows and dropped the inaccessible ones would return short pages while its cursor claimed there was more, and would step the cursor over Moments the Viewer was entitled to see. Correct keyset pagination requires the predicate to be in the query.
+
+## Consequences
+
+**The rule is now stated twice** — once in `checkVisibility`, once in the `WHERE` clause — because a set query cannot call a per-row function without breaking pagination. That is a real duplication and it is guarded rather than tolerated: a test records a Moment at each visibility and asserts, for every Viewer, that the list and the single read agree. Breaking either side fails it, which was verified both ways.
+
+**Reading and editing had to be separated first.** `MomentService.get` was the authorization gate for all eleven ways a Moment can be changed. Widening it to admit Viewers would have handed editing to everybody who could see a Moment. A test walks every mutating endpoint with a Viewer who can see the Moment and asserts each refuses; collapsing the two checks back together makes it fail with `PATCH answered 200`.
+
+**The global rate-limit ceiling became configuration.** A suite that drives one process through hundreds of requests in a minute is not the traffic the limiter defends against, and the number depends on where the process runs and how many replicas share the load. The tighter per-endpoint limits protecting authentication are untouched and still asserted.
+
+**The public-user projection was written three times.** Adding a third copy for audience lists would have repeated the mistake ADR-107 records about cursors, and this one is a privacy projection — a field added to `User` and updated in two of three places leaks from the third. It now lives in the module that owns `User`.
+
+**Viewer-relative Location precision is now unblocked, and still deferred.** `moments.md:585` deferred it because "there is no second viewer to reduce precision for", a premise this ends. The new reason is different: any signed-in Viewer can already read any Location's full coordinates directly, because a Location is shared reference data (ADR-098). Reducing precision inside a Moment response while another endpoint serves the same coordinates in full would protect nothing. Doing it properly means making the Location read viewer-aware.
+
+What this does disclose is the **association** — that this person was at this place at this time — which is what making a Moment public means.

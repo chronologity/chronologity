@@ -114,7 +114,7 @@ export async function buildApp({
     }),
   );
 
-  await registerPlugins(app, authentication);
+  await registerPlugins(app, authentication, { max: config.rateLimit.maxPerMinute });
   await registerRoutes(
     app,
     authentication,

@@ -35,6 +35,10 @@ const config: AppConfig = {
   logLevel: "fatal",
   host: "127.0.0.1",
   port: 0,
+  // Raised well above the production ceiling: this suite drives one process
+  // through hundreds of requests in a minute, which is not the traffic the
+  // limiter defends against.
+  rateLimit: { maxPerMinute: 100_000 },
   database: {
     host: process.env.POSTGRES_HOST ?? "localhost",
     port: Number(process.env.POSTGRES_PORT ?? "5432"),

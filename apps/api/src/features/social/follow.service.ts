@@ -29,11 +29,11 @@ import {
  * about wanting to hear from them, not an agreement between two people
  * (`social-graph.md:56`).
  *
- * **Following grants nothing yet.** Every Moment is private to its author, so a
- * follower can see no more after following than before. That is not an
- * omission: `social-graph.md:167` requires that a Follow "must never bypass the
- * visibility rules of individual Moments", and what a follower may see is
- * decided when those rules gain a second value to hold.
+ * **Following grants nothing.** `social-graph.md:167` requires that a Follow
+ * "must never bypass the visibility rules of individual Moments", and it does
+ * not: what somebody may see is decided by each Moment's own audience, and
+ * there is deliberately no visibility meaning "my followers" for a Follow to
+ * unlock (ADR-108).
  */
 export class FollowService {
   /**

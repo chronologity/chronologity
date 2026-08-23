@@ -77,7 +77,9 @@ A technically private resource can still create privacy problems if Chronologity
 
 Chronologity should use conservative defaults where disclosure could expose personal history unexpectedly.
 
-The exact default visibility for Moments must be decided explicitly before launch. It should not emerge accidentally from implementation convenience.
+**A Moment is public unless its author says otherwise** (ADR-108). This was decided rather than inherited from whatever the schema happened to hold, and the recording flow accepts a visibility so that choosing privacy does not mean publishing first and correcting after.
+
+Nothing recorded before that default existed was changed by it. Those Moments were recorded under a promise that they were private, and a changed default is not consent.
 
 Whatever default is chosen, the creation experience should make the resulting audience understandable.
 
@@ -94,6 +96,12 @@ Potential visibility models may include:
 - broadly visible or public.
 
 The final vocabulary and access model should remain as simple as possible.
+
+**The vocabulary is settled**: `private`, `restricted`, and `public`. A restricted Moment carries its own list of people rather than pointing at a reusable group, because editing a shared group would silently change the audience of every Moment already using it.
+
+There is deliberately no value meaning "my followers". `social-graph.md` requires that a Follow never override privacy, and a followers audience would quietly make following and being entitled to see the same thing.
+
+A Block hides two people from each other in both directions, including from each other's public Moments.
 
 Chronologity should not reproduce a complicated matrix of social-network privacy controls unless actual user needs justify it.
 
@@ -798,8 +806,8 @@ Any future advertising model would require separate scrutiny regarding whether i
 
 Before Chronologity launches, the product and architecture must have explicit answers for at least the following:
 
-- the default Moment visibility;
-- the initial visibility modes;
+- the default Moment visibility — public unless its author says otherwise (ADR-108);
+- the initial visibility modes — `private`, `restricted`, and `public`;
 - authorization for Timeline reads;
 - authorization for horizontal contextual groupings;
 - privacy behavior at every day-one temporal zoom level;
@@ -823,9 +831,7 @@ These are launch requirements, not post-launch hardening tasks.
 
 The following questions should be resolved deliberately:
 
-- What is the default visibility of a newly created Moment?
-- What visibility modes should exist on day one?
-- Should visibility be configurable per Moment only, or can users establish defaults?
+- Should visibility be configurable per Moment only, or can users establish defaults? A per-account default would change what happens when somebody says nothing, which is exactly the decision the public default settles for everybody. Worth deciding on evidence about how people actually record rather than in advance.
 - Can media, description, location, and other Moment dimensions have different visibility?
 - If so, which dimensions justify that complexity initially?
 - What location precision options should users have?

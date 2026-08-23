@@ -1,4 +1,4 @@
-import type { Occurrence } from "@chronologity/contracts";
+import type { MomentVisibility, Occurrence } from "@chronologity/contracts";
 
 /** Feature-local types for Moments. */
 
@@ -11,6 +11,8 @@ export interface NewMoment {
   readonly occurrenceOffsetMinutes: number;
   /** Already checked and positioned by the policy. */
   readonly media: readonly { uploadId: string; position: number }[];
+  /** Who may see it, as the author asked at the time of recording. */
+  readonly visibility: MomentVisibility;
   readonly createdAt: Date;
 }
 

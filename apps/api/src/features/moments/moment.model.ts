@@ -32,8 +32,10 @@ export class Moment {
   momentId!: string;
 
   /**
-   * Who recorded it — authorship, and for now also audience, since every
-   * Moment is private to its author until the social graph exists.
+   * Who recorded it.
+   *
+   * Authorship alone. Who may see it is `visibility`, and the two stopped
+   * coinciding when Moments gained an audience.
    */
   @Column("uuid", { name: "author_user_id" })
   authorUserId!: string;
@@ -70,8 +72,14 @@ export class Moment {
   @Column("int", { name: "occurrence_offset_minutes" })
   occurrenceOffsetMinutes!: number;
 
-  /** `private` is the only value. Widened when audiences exist. */
-  @Column("text", { default: "private" })
+  /**
+   * Who may see it: `private`, `restricted`, or `public`.
+   *
+   * Public unless its author said otherwise (ADR-108). The column default says
+   * so, and the constraint the migrations own is what keeps the three values
+   * honest.
+   */
+  @Column("text", { default: "public" })
   visibility!: string;
 
   @Column("timestamptz", { name: "created_at" })

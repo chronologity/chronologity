@@ -25,7 +25,7 @@ import type { UserAccountView, UserState } from "./user.types.js";
  * @returns The public view. Deliberately narrow: it carries nothing about
  *   authentication and nothing a person has not chosen to present.
  */
-function toPublicUser(row: User): PublicUser {
+export function toPublicUser(row: User): PublicUser {
   return {
     userId: row.userId,
     handle: row.handle,

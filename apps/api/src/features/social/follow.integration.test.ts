@@ -30,9 +30,9 @@ import { FollowService } from "./follow.service.js";
  * request. The rules that decide anything are pure and covered exhaustively
  * next door.
  *
- * One property is asserted throughout and is the point of the sub-phase
- * arriving before visibility: **a Follow grants nothing**. Every Moment is
- * private to its author, and following somebody must not quietly change that.
+ * One property is asserted throughout: **a Follow grants nothing**. The Moments
+ * those tests use are private on purpose, so that what they prove is the rule
+ * rather than whatever the default visibility happens to be.
  *
  * Requires `pnpm infra:up`.
  */
@@ -44,6 +44,10 @@ const config: AppConfig = {
   logLevel: "fatal",
   host: "127.0.0.1",
   port: 0,
+  // Raised well above the production ceiling: this suite drives one process
+  // through hundreds of requests in a minute, which is not the traffic the
+  // limiter defends against.
+  rateLimit: { maxPerMinute: 100_000 },
   database: {
     host: process.env.POSTGRES_HOST ?? "localhost",
     port: Number(process.env.POSTGRES_PORT ?? "5432"),
@@ -134,6 +138,8 @@ describe("following", () => {
         new UploadRepository(database.dataSource),
         new LocationRepository(database.dataSource),
         new RealWorldEventRepository(database.dataSource),
+        new FollowRepository(database.dataSource),
+        new UserRepository(database.dataSource),
       ),
     });
   });
@@ -610,7 +616,11 @@ describe("following", () => {
           url: "/moments",
           headers: authed(credentials.accessToken),
           payload: {
-            caption: "Mine alone, for now",
+            // Private on purpose. Now that a Moment can be public, a test that
+            // took the default would be asserting the default rather than the
+            // property: that a Follow changes nothing about what may be seen.
+            visibility: "private",
+            caption: "Mine alone",
             occurrence: {
               start: "1998-06-01T00:00:00.000Z",
               end: "1998-08-31T23:59:59.000Z",
@@ -640,9 +650,8 @@ describe("following", () => {
 
       // The relationship exists and confers nothing. `social-graph.md:167`
       // requires that a Follow "must never bypass the visibility rules of
-      // individual Moments", and every Moment is currently private to its
-      // author. What a follower may see is decided in a later sub-phase, and
-      // must be decided rather than arrived at.
+      // individual Moments": what a follower may see is decided by the Moment's
+      // own audience, and following is not a way onto it.
       assert.equal(read.statusCode, 404, read.body);
     });
 
@@ -836,6 +845,9 @@ describe("following", () => {
           url: "/moments",
           headers: authed(author.accessToken),
           payload: {
+            // Private on purpose: the property is that following a shared
+            // context is not a way into a Moment the context happens to hold.
+            visibility: "private",
             caption: "I was there",
             occurrence: {
               start: "2026-11-20T00:00:00.000Z",

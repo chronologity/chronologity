@@ -4,6 +4,7 @@ import { locationSchema } from "./locations.js";
 import { realWorldEventSchema } from "./real-world-events.js";
 import { occurrenceSchema, timestampSchema } from "./time.js";
 import { uploadSchema } from "./uploads.js";
+import { publicUserSchema } from "./users.js";
 
 /**
  * Moment boundary contracts.
@@ -42,6 +43,21 @@ export const captionSchema = z.string().trim().min(1).max(2_000);
  */
 export const utcOffsetMinutesSchema = z.number().int().min(-720).max(840);
 
+/**
+ * Who may see a Moment.
+ *
+ * The three models `privacy.md:92` names, and no more. That document asks for a
+ * vocabulary "as simple as possible" and warns against reproducing a matrix of
+ * social-network privacy controls.
+ *
+ * There is deliberately no value meaning "my followers". `social-graph.md:490`
+ * says a Follow does not override privacy: following states what somebody wants
+ * to hear about, never what they are entitled to see.
+ */
+export const momentVisibilitySchema = z.enum(["private", "restricted", "public"]);
+
+export type MomentVisibility = z.infer<typeof momentVisibilitySchema>;
+
 /** What someone supplies to record a Moment. */
 export const createMomentRequestSchema = z.object({
   caption: captionSchema,
@@ -69,6 +85,18 @@ export const createMomentRequestSchema = z.object({
   locationId: identifierSchema.optional(),
   /** The larger occurrences it was part of, if any. */
   realWorldEventIds: z.array(identifierSchema).max(20).optional(),
+  /**
+   * Who may see it. Public unless the author says otherwise.
+   *
+   * Accepted at creation rather than only afterwards, because with a public
+   * default an author who wants privacy must be able to say so while recording
+   * instead of publishing first and correcting after.
+   *
+   * `restricted` is accepted here without a list, which is the same audience as
+   * `private` until one is set. Naming the audience is a separate call, so that
+   * recording a Moment does not have to carry it.
+   */
+  visibility: momentVisibilitySchema.default("public"),
 });
 
 export type CreateMomentRequest = z.infer<typeof createMomentRequestSchema>;
@@ -79,8 +107,8 @@ export const momentSchema = z.object({
   /**
    * Who recorded it.
    *
-   * Authorship, and for now also audience: every Moment is private to its
-   * author until the social graph exists.
+   * Authorship alone. Who may see it is `visibility`, and the two stopped
+   * coinciding when Moments gained an audience.
    */
   authorUserId: identifierSchema,
   caption: captionSchema,
@@ -106,8 +134,8 @@ export const momentSchema = z.object({
    * also part of a family reunion is genuinely both.
    */
   realWorldEvents: z.array(realWorldEventSchema),
-  /** Who may see it. One value for now, and stated rather than implied. */
-  visibility: z.literal("private"),
+  /** Who may see it. */
+  visibility: momentVisibilitySchema,
   /** When it was recorded, which is not when it happened. */
   createdAt: timestampSchema,
 });
@@ -135,6 +163,41 @@ export const listMomentsRequestSchema = z.object({
 });
 
 export type ListMomentsRequest = z.infer<typeof listMomentsRequestSchema>;
+
+/**
+ * Setting who may see a Moment.
+ *
+ * The audience travels with the visibility rather than in a call of its own, so
+ * a Moment is never restricted with a list from some earlier decision. Both
+ * land in one transaction.
+ *
+ * An audience is accepted only alongside `restricted`. Supplying one with
+ * `public` or `private` is refused rather than ignored: it means the caller
+ * believes something about the result that would not be true.
+ */
+export const setMomentVisibilityRequestSchema = z
+  .object({
+    visibility: momentVisibilitySchema,
+    /**
+     * Who may see it, replacing whoever was named before.
+     *
+     * Bounded. A Moment may hold unlimited media at the product level, but an
+     * audience is a request payload and a list somebody types, and every
+     * operation here stays bounded.
+     */
+    audience: z.array(identifierSchema).max(100).optional(),
+  })
+  .refine(
+    (body) => body.visibility === "restricted" || body.audience === undefined,
+    { message: "An audience may only be set on a restricted Moment", path: ["audience"] },
+  );
+
+export type SetMomentVisibilityRequest = z.infer<typeof setMomentVisibilityRequestSchema>;
+
+/** Who may see a restricted Moment, as its author sees the list. */
+export const momentAudienceSchema = z.object({ users: z.array(publicUserSchema) });
+
+export type MomentAudience = z.infer<typeof momentAudienceSchema>;
 
 /** Correcting what a Moment says happened. */
 export const updateCaptionRequestSchema = z.object({ caption: captionSchema });

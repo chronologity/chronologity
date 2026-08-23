@@ -12,6 +12,7 @@ import { toLocation } from "../locations/location.repository.js";
 import type { RealWorldEvent } from "../real-world-events/real-world-event.model.js";
 import { toRealWorldEvent } from "../real-world-events/real-world-event.repository.js";
 import { User } from "../users/user.model.js";
+import { toPublicUser } from "../users/user.repository.js";
 import { UserBlock } from "./block.model.js";
 import {
   FollowRequest,
@@ -28,24 +29,6 @@ import {
  * accepted without the Follow existing would be a person told yes by somebody
  * who is not, in fact, followed by them.
  */
-
-/**
- * Shape a stored account as the public view.
- *
- * @param row - As read from `users`.
- * @returns What anybody may see. Follower lists carry no more than this: who
- *   may see whose followers is four separate open questions, so nothing here
- *   discloses more than a profile already does.
- */
-function toPublicUser(row: User): PublicUser {
-  return {
-    userId: row.userId,
-    handle: row.handle,
-    displayName: row.displayName,
-    biography: row.biography,
-    createdAt: row.createdAt.toISOString(),
-  };
-}
 
 /** Reads and writes following. */
 export class FollowRepository {

@@ -2,12 +2,17 @@ import type { Cursor } from "../../lib/pagination/cursor.js";
 import { randomUUID } from "node:crypto";
 import type {
   Moment as MomentContract,
+  MomentVisibility,
+  PublicUser,
   Occurrence,
   TemporalPrecision,
 } from "@chronologity/contracts";
 import type { DataSource } from "typeorm";
 import { IsNull } from "typeorm";
 import type { Transaction } from "../../lib/database/transaction.js";
+import { User } from "../users/user.model.js";
+import { toPublicUser } from "../users/user.repository.js";
+import { MomentAudience } from "./moment-audience.model.js";
 import type { Upload as UploadRow } from "../uploads/upload.model.js";
 import { toUpload } from "../uploads/upload.repository.js";
 import { toLocation } from "../locations/location.repository.js";
@@ -68,7 +73,7 @@ function toMoment(row: MomentRow): MomentContract {
       .filter((event): event is NonNullable<typeof event> => event !== undefined)
       .map(toRealWorldEvent)
       .sort((one, other) => one.name.localeCompare(other.name)),
-    visibility: "private",
+    visibility: row.visibility as MomentVisibility,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -99,7 +104,7 @@ export class MomentRepository {
       occurrenceEnd: new Date(moment.occurrence.end),
       occurrencePrecision: moment.occurrence.precision,
       occurrenceOffsetMinutes: moment.occurrenceOffsetMinutes,
-      visibility: "private",
+      visibility: moment.visibility,
       createdAt: moment.createdAt,
       updatedAt: moment.createdAt,
       deletedAt: null,
@@ -183,6 +188,152 @@ export class MomentRepository {
       .getMany();
 
     return rows.map(toMoment);
+  }
+
+  /**
+   * Read a page of one person's Moments as somebody else may see them.
+   *
+   * The rule is applied in SQL rather than to the rows after they arrive.
+   * Filtering afterwards would return short pages while the cursor claimed
+   * there was more, and would step the cursor over Moments the Viewer was
+   * entitled to see. It is the same rule `checkVisibility` states, in the only
+   * form a set query can use, and a test holds the two in agreement.
+   *
+   * @param authorUserId - Whose Moments.
+   * @param viewerUserId - Who is asking. Their own Moments are always included,
+   *   whatever their visibility, so this is safe to call for oneself.
+   * @param limit - How many at most.
+   * @param cursor - Where to continue from, or undefined for the first page.
+   * @returns The page, in the same deterministic order as everywhere else.
+   */
+  async findForAuthorAsViewer(
+    authorUserId: string,
+    viewerUserId: string,
+    limit: number,
+    cursor?: Cursor,
+  ): Promise<MomentContract[]> {
+    const query = this.dataSource
+      .getRepository(MomentRow)
+      .createQueryBuilder("moment")
+      .leftJoinAndSelect("moment.media", "medium")
+      .leftJoinAndSelect("medium.upload", "upload")
+      .leftJoinAndSelect("moment.place", "place")
+      .leftJoinAndSelect("place.location", "location")
+      .leftJoinAndSelect("moment.realWorldEvents", "association")
+      .leftJoinAndSelect("association.realWorldEvent", "event")
+      .leftJoinAndSelect("event.aliases", "alias")
+      .leftJoinAndSelect("event.locations", "eventPlace")
+      .where("moment.author_user_id = :authorUserId", { authorUserId })
+      .andWhere("moment.deleted_at IS NULL")
+      .andWhere(
+        `(
+           moment.author_user_id = :viewerUserId
+           OR (
+             NOT EXISTS (
+               SELECT 1 FROM user_blocks b
+                WHERE (b.blocker_user_id = moment.author_user_id AND b.blocked_user_id = :viewerUserId)
+                   OR (b.blocker_user_id = :viewerUserId AND b.blocked_user_id = moment.author_user_id)
+             )
+             AND (
+               moment.visibility = 'public'
+               OR EXISTS (
+                 SELECT 1 FROM moment_audience a
+                  WHERE a.moment_id = moment.moment_id AND a.user_id = :viewerUserId
+               )
+             )
+           )
+         )`,
+        { viewerUserId },
+      );
+
+    if (cursor !== undefined) {
+      query.andWhere(
+        "(moment.occurrence_start, moment.moment_id) < (:occurrenceStart, :momentId)",
+        { occurrenceStart: cursor.at, momentId: cursor.id },
+      );
+    }
+
+    const rows = await query
+      .orderBy("moment.occurrence_start", "DESC")
+      .addOrderBy("moment.moment_id", "DESC")
+      .take(limit)
+      .getMany();
+
+    return rows.map(toMoment);
+  }
+
+  /**
+   * Whether somebody is named on a Moment's list.
+   *
+   * @param momentId - Which Moment.
+   * @param userId - Who is asking.
+   * @returns Whether they are on it. Says nothing about whether the Moment is
+   *   restricted: a list may outlive the visibility that consulted it, and only
+   *   the policy decides whether it matters.
+   */
+  async isInAudience(momentId: string, userId: string): Promise<boolean> {
+    return this.dataSource
+      .getRepository(MomentAudience)
+      .existsBy({ momentId, userId });
+  }
+
+  /**
+   * Read who may see a restricted Moment.
+   *
+   * @param momentId - Which Moment.
+   * @returns The people named, in the order they were added, each whole rather
+   *   than by identifier: a list of opaque identifiers would need a second call
+   *   to be of any use to whoever is looking at their own audience.
+   */
+  async findAudience(momentId: string): Promise<PublicUser[]> {
+    const rows = await this.dataSource
+      .getRepository(MomentAudience)
+      .createQueryBuilder("member")
+      .innerJoinAndMapOne("member.user", User, "user", "user.user_id = member.user_id")
+      .where("member.moment_id = :momentId", { momentId })
+      .orderBy("member.added_at", "ASC")
+      .addOrderBy("member.user_id", "ASC")
+      .getMany();
+
+    return rows
+      .map((row) => row.user)
+      .filter((user): user is NonNullable<typeof user> => user !== undefined)
+      .map(toPublicUser);
+  }
+
+  /**
+   * Set who may see a Moment, and who is named on it, together.
+   *
+   * One statement each, in the caller's transaction, so a Moment is never
+   * briefly restricted with a list from an earlier decision.
+   *
+   * @param tx - The caller's transaction.
+   * @param momentId - Which Moment.
+   * @param visibility - Who may see it.
+   * @param audience - Who is named, replacing whoever was named before. An
+   *   empty list clears it, which is what changing away from `restricted`
+   *   should do: leaving names behind would let a later change to `restricted`
+   *   silently readmit people nobody had reconsidered.
+   * @param at - When.
+   * @returns Nothing.
+   */
+  async setVisibility(
+    tx: Transaction,
+    momentId: string,
+    visibility: MomentVisibility,
+    audience: readonly string[],
+    at: Date,
+  ): Promise<void> {
+    await tx.update(MomentRow, { momentId }, { visibility, updatedAt: at });
+
+    await tx.delete(MomentAudience, { momentId });
+
+    if (audience.length > 0) {
+      await tx.insert(
+        MomentAudience,
+        audience.map((userId) => ({ momentId, userId, addedAt: at })),
+      );
+    }
   }
 
   /**

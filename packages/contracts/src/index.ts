@@ -156,8 +156,11 @@ export {
   reorderMediaRequestSchema,
   updateCaptionRequestSchema,
   listMomentsRequestSchema,
+  momentAudienceSchema,
   momentPageSchema,
   momentSchema,
+  momentVisibilitySchema,
+  setMomentVisibilityRequestSchema,
   utcOffsetMinutesSchema,
   type AddMediaRequest,
   type CorrectOccurrenceRequest,
@@ -165,8 +168,11 @@ export {
   type ListMomentsRequest,
   type ReorderMediaRequest,
   type UpdateCaptionRequest,
+  type SetMomentVisibilityRequest,
   type Moment,
+  type MomentAudience,
   type MomentPage,
+  type MomentVisibility,
 } from "./moments.js";
 export {
   createRealWorldEventRequestSchema,

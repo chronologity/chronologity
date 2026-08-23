@@ -6,8 +6,10 @@ import {
   updateCaptionRequestSchema,
   identifierSchema,
   listMomentsRequestSchema,
+  momentAudienceSchema,
   momentPageSchema,
   momentSchema,
+  setMomentVisibilityRequestSchema,
 } from "@chronologity/contracts";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
@@ -18,10 +20,9 @@ import type { MomentService } from "./moment.service.js";
 /**
  * Moment endpoints.
  *
- * Three, and every one of them is about the caller's own history. There is no
- * way to ask for somebody else's Moments, because there is nobody a Moment can
- * currently be shared with: every Moment is private to its author until the
- * social graph exists.
+ * Reading and writing are separated by who is allowed to do them, not by URL.
+ * Every change here is the author's alone; reads admit whoever the Moment is
+ * visible to, and refuse everybody else as though it did not exist.
  *
  * Listing is bounded and continues by cursor rather than by offset, so a Moment
  * recorded while somebody is paging cannot cause another to be skipped or
@@ -237,6 +238,58 @@ export function momentRoutes(moments: MomentService) {
         preHandler: requireUser,
       },
       async (request) => moments.get(request.params.momentId, request.user.userId),
+    );
+
+    // Visibility and audience together, so a Moment is never briefly restricted
+    // with a list left over from an earlier decision.
+    app.put(
+      "/moments/:momentId/visibility",
+      {
+        schema: {
+          params: z.object({ momentId: identifierSchema }),
+          body: setMomentVisibilityRequestSchema,
+          response: { 200: momentSchema },
+        },
+        preHandler: requireUser,
+      },
+      async (request) =>
+        moments.setVisibility(request.params.momentId, request.user.userId, request.body),
+    );
+
+    // The author's own. A list of the people somebody trusted with something is
+    // itself something to be trusted with, so there is no direction of this
+    // that a Viewer can read.
+    app.get(
+      "/moments/:momentId/audience",
+      {
+        schema: {
+          params: z.object({ momentId: identifierSchema }),
+          response: { 200: momentAudienceSchema },
+        },
+        preHandler: requireUser,
+      },
+      async (request) => moments.audience(request.params.momentId, request.user.userId),
+    );
+
+    // Somebody else's history, filtered to what this Viewer may see. Asking for
+    // your own returns everything, exactly as `GET /moments` does.
+    app.get(
+      "/users/:userId/moments",
+      {
+        schema: {
+          params: z.object({ userId: identifierSchema }),
+          querystring: listMomentsRequestSchema,
+          response: { 200: momentPageSchema },
+        },
+        preHandler: requireUser,
+      },
+      async (request) =>
+        moments.listForViewer(
+          request.params.userId,
+          request.user.userId,
+          request.query.limit,
+          request.query.cursor,
+        ),
     );
   };
 }

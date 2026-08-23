@@ -2,14 +2,18 @@ import { randomUUID } from "node:crypto";
 import type {
   CreateMomentRequest,
   Moment,
+  MomentAudience,
   MomentPage,
   Occurrence,
+  SetMomentVisibilityRequest,
 } from "@chronologity/contracts";
 import type { DataSource } from "typeorm";
 import { withTransaction } from "../../lib/database/transaction.js";
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
 import type { LocationRepository } from "../locations/location.repository.js";
+import type { FollowRepository } from "../social/follow.repository.js";
+import type { UserRepository } from "../users/user.repository.js";
 import type { RealWorldEventRepository } from "../real-world-events/real-world-event.repository.js";
 import type { UploadRepository } from "../uploads/upload.repository.js";
 import {
@@ -26,6 +30,7 @@ import {
   positionMedia,
 } from "./moment.policy.js";
 import type { MomentRepository } from "./moment.repository.js";
+import { checkVisibility } from "./moment.visibility-policy.js";
 import { decodeCursor, encodeCursor } from "../../lib/pagination/cursor.js";
 
 /**
@@ -36,12 +41,15 @@ import { decodeCursor, encodeCursor } from "../../lib/pagination/cursor.js";
  * was recorded: a Moment entered today for 2014 belongs in 2014, and nothing
  * that happens afterwards moves it.
  *
- * Every Moment is private to its author. That is not a placeholder for
- * authorization that has not been written — it is the whole audience model
- * until the social graph exists, and reads enforce it rather than assuming it.
+ * A Moment has an audience: private to its author, restricted to people they
+ * named, or public to any Viewer a Block does not separate them from. Reads
+ * enforce that rather than assuming it, and every refusal is reported as a
+ * Moment that does not exist.
  *
- * Nothing here changes a Moment after it is recorded. Corrections, adding and
- * removing media, reordering, and deletion are 5H-3.
+ * Reading and editing are gated separately on purpose. `get` admits anybody a
+ * Moment is visible to; `getForAuthor` admits only whoever wrote it, and every
+ * change goes through that one. Sharing a single gate would have meant everybody
+ * who could see a Moment could rewrite it.
  */
 export class MomentService {
   /**
@@ -55,6 +63,9 @@ export class MomentService {
    * @param realWorldEvents - Used to check that an occurrence named actually
    *   exists. Unlike media, neither has to belong to the author: a Location is
    *   shared reference data and an Event is shared history.
+   * @param follows - Used to ask whether a Block separates two people, which
+   *   refuses a read before visibility is even consulted.
+   * @param users - Used to check that everybody named in an audience exists.
    * @param clock - Injected so tests can move time without waiting.
    */
   constructor(
@@ -63,6 +74,8 @@ export class MomentService {
     private readonly uploads: UploadRepository,
     private readonly locations: LocationRepository,
     private readonly realWorldEvents: RealWorldEventRepository,
+    private readonly follows: FollowRepository,
+    private readonly users: UserRepository,
     private readonly clock: () => Date = () => new Date(),
   ) {}
 
@@ -105,6 +118,7 @@ export class MomentService {
         occurrence: request.occurrence,
         occurrenceOffsetMinutes: request.occurrenceOffsetMinutes,
         media: positionMedia(request.uploadIds),
+        visibility: request.visibility,
         createdAt: this.clock(),
       }),
     );
@@ -237,14 +251,14 @@ export class MomentService {
     viewerUserId: string,
     locationId: string,
   ): Promise<Moment> {
-    await this.get(momentId, viewerUserId);
+    await this.getForAuthor(momentId, viewerUserId);
     await this.checkContextExists(locationId, undefined);
 
     await withTransaction(this.dataSource, (tx) =>
       this.moments.setLocation(tx, momentId, locationId, this.clock()),
     );
 
-    return this.get(momentId, viewerUserId);
+    return this.getForAuthor(momentId, viewerUserId);
   }
 
   /**
@@ -257,11 +271,11 @@ export class MomentService {
    * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
    */
   async clearLocation(momentId: string, viewerUserId: string): Promise<Moment> {
-    await this.get(momentId, viewerUserId);
+    await this.getForAuthor(momentId, viewerUserId);
 
     await withTransaction(this.dataSource, (tx) => this.moments.clearLocation(tx, momentId));
 
-    return this.get(momentId, viewerUserId);
+    return this.getForAuthor(momentId, viewerUserId);
   }
 
   /**
@@ -280,14 +294,14 @@ export class MomentService {
     viewerUserId: string,
     realWorldEventId: string,
   ): Promise<Moment> {
-    await this.get(momentId, viewerUserId);
+    await this.getForAuthor(momentId, viewerUserId);
     await this.checkContextExists(undefined, [realWorldEventId]);
 
     await withTransaction(this.dataSource, (tx) =>
       this.moments.addRealWorldEvent(tx, momentId, realWorldEventId, this.clock()),
     );
 
-    return this.get(momentId, viewerUserId);
+    return this.getForAuthor(momentId, viewerUserId);
   }
 
   /**
@@ -304,13 +318,13 @@ export class MomentService {
     viewerUserId: string,
     realWorldEventId: string,
   ): Promise<Moment> {
-    await this.get(momentId, viewerUserId);
+    await this.getForAuthor(momentId, viewerUserId);
 
     await withTransaction(this.dataSource, (tx) =>
       this.moments.removeRealWorldEvent(tx, momentId, realWorldEventId),
     );
 
-    return this.get(momentId, viewerUserId);
+    return this.getForAuthor(momentId, viewerUserId);
   }
 
   /**
@@ -325,7 +339,7 @@ export class MomentService {
    * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
    */
   async updateCaption(momentId: string, viewerUserId: string, caption: string): Promise<Moment> {
-    const before = await this.get(momentId, viewerUserId);
+    const before = await this.getForAuthor(momentId, viewerUserId);
     const at = this.clock();
 
     await withTransaction(this.dataSource, async (tx) => {
@@ -339,7 +353,7 @@ export class MomentService {
       });
     });
 
-    return this.get(momentId, viewerUserId);
+    return this.getForAuthor(momentId, viewerUserId);
   }
 
   /**
@@ -364,7 +378,7 @@ export class MomentService {
     occurrence: Occurrence,
     offsetMinutes: number,
   ): Promise<Moment> {
-    const before = await this.get(momentId, viewerUserId);
+    const before = await this.getForAuthor(momentId, viewerUserId);
     const rejection = checkOccurrence(occurrence);
 
     if (rejection !== undefined) {
@@ -389,7 +403,7 @@ export class MomentService {
       });
     });
 
-    return this.get(momentId, viewerUserId);
+    return this.getForAuthor(momentId, viewerUserId);
   }
 
   /**
@@ -410,7 +424,7 @@ export class MomentService {
     viewerUserId: string,
     uploadIds: readonly string[],
   ): Promise<Moment> {
-    await this.get(momentId, viewerUserId);
+    await this.getForAuthor(momentId, viewerUserId);
 
     const present = await this.moments.findMediaOrder(momentId);
     const mediaRejection = checkMedia(uploadIds);
@@ -440,7 +454,7 @@ export class MomentService {
       });
     });
 
-    return this.get(momentId, viewerUserId);
+    return this.getForAuthor(momentId, viewerUserId);
   }
 
   /**
@@ -458,7 +472,7 @@ export class MomentService {
    *   created.
    */
   async removeMedium(momentId: string, viewerUserId: string, uploadId: string): Promise<Moment> {
-    await this.get(momentId, viewerUserId);
+    await this.getForAuthor(momentId, viewerUserId);
 
     const present = await this.moments.findMediaOrder(momentId);
     const rejection = checkRemoval(uploadId, present);
@@ -485,7 +499,7 @@ export class MomentService {
       });
     });
 
-    return this.get(momentId, viewerUserId);
+    return this.getForAuthor(momentId, viewerUserId);
   }
 
   /**
@@ -506,7 +520,7 @@ export class MomentService {
     viewerUserId: string,
     uploadIds: readonly string[],
   ): Promise<Moment> {
-    await this.get(momentId, viewerUserId);
+    await this.getForAuthor(momentId, viewerUserId);
 
     const present = await this.moments.findMediaOrder(momentId);
     const rejection = checkReorder(uploadIds, present);
@@ -528,7 +542,7 @@ export class MomentService {
       });
     });
 
-    return this.get(momentId, viewerUserId);
+    return this.getForAuthor(momentId, viewerUserId);
   }
 
   /**
@@ -545,7 +559,7 @@ export class MomentService {
    * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
    */
   async delete(momentId: string, viewerUserId: string): Promise<void> {
-    await this.get(momentId, viewerUserId);
+    await this.getForAuthor(momentId, viewerUserId);
 
     const at = this.clock();
 
@@ -562,23 +576,184 @@ export class MomentService {
   }
 
   /**
-   * Read one Moment.
+   * Read one Moment, proving the caller wrote it.
+   *
+   * The gate on every change. Kept separate from `get` deliberately: that one
+   * admits anybody a Moment is visible to, and if editing shared it, everybody
+   * who could see a Moment could rewrite it.
    *
    * @param momentId - Which Moment.
-   * @param viewerUserId - Who is asking.
+   * @param authorUserId - Who is asking. Only its author passes.
    * @returns The Moment.
    * @throws {NotFoundError} If there is no such Moment, or it belongs to
    *   somebody else. The two are deliberately indistinguishable: telling a
    *   stranger that a Moment exists but is not theirs is itself a disclosure.
    */
-  async get(momentId: string, viewerUserId: string): Promise<Moment> {
+  async getForAuthor(momentId: string, authorUserId: string): Promise<Moment> {
     const moment = await this.moments.findById(momentId);
 
-    if (moment === undefined || moment.authorUserId !== viewerUserId) {
+    if (moment === undefined || moment.authorUserId !== authorUserId) {
       throw new NotFoundError("No such moment");
     }
 
     return moment;
+  }
+
+  /**
+   * Read one Moment as whoever is asking.
+   *
+   * @param momentId - Which Moment.
+   * @param viewerUserId - Who is asking.
+   * @returns The Moment.
+   * @throws {NotFoundError} If there is no such Moment, or this Viewer may not
+   *   see it. Every refusal is reported this way, whatever the reason: that a
+   *   Moment exists, that it is private, that its author blocked you, and that
+   *   you were left off a list are all disclosures in their own right, and a
+   *   distinguishable refusal would leak whichever one applied.
+   */
+  async get(momentId: string, viewerUserId: string): Promise<Moment> {
+    const moment = await this.moments.findById(momentId);
+
+    if (moment === undefined) {
+      throw new NotFoundError("No such moment");
+    }
+
+    // Looked up only when the answer could depend on them. The author's own
+    // Moment is decided by the policy before either matters.
+    const facts =
+      moment.authorUserId === viewerUserId
+        ? { blockedEitherWay: false, inAudience: false }
+        : {
+            blockedEitherWay: await this.isBlocked(moment.authorUserId, viewerUserId),
+            inAudience:
+              moment.visibility === "restricted" &&
+              (await this.moments.isInAudience(momentId, viewerUserId)),
+          };
+
+    if (checkVisibility(viewerUserId, moment, facts) !== undefined) {
+      throw new NotFoundError("No such moment");
+    }
+
+    return moment;
+  }
+
+  /**
+   * Whether a Block separates two people, whichever of them set it.
+   *
+   * @param oneUserId - One of them.
+   * @param otherUserId - The other.
+   * @returns Whether either has blocked the other. Both directions count: an
+   *   asymmetric rule would leave the blocker still reading the history of
+   *   somebody they wanted nothing to do with, and would let the blocked person
+   *   infer the Block from access that continued only one way.
+   */
+  private async isBlocked(oneUserId: string, otherUserId: string): Promise<boolean> {
+    const blocks = await this.follows.blocksBetween(oneUserId, otherUserId);
+
+    return blocks.iBlockedThem || blocks.theyBlockedMe;
+  }
+
+  /**
+   * Read a page of one person's Moments as this Viewer may see them.
+   *
+   * @param authorUserId - Whose Moments.
+   * @param viewerUserId - Who is asking. Asking for your own returns everything,
+   *   the same as `list`.
+   * @param limit - How many at most.
+   * @param cursor - Where to continue from, or undefined for the first page.
+   * @returns The page, and where the next one continues from when there is
+   *   more. Pages are full rather than thinned: what a Viewer may not see is
+   *   excluded by the query, not removed from the result.
+   * @throws {ValidationError} If the cursor is not one this service issued.
+   */
+  async listForViewer(
+    authorUserId: string,
+    viewerUserId: string,
+    limit: number,
+    cursor?: string,
+  ): Promise<MomentPage> {
+    const moments = await this.moments.findForAuthorAsViewer(
+      authorUserId,
+      viewerUserId,
+      limit,
+      decodeCursor(cursor),
+    );
+
+    const last = moments.length === limit ? moments[moments.length - 1] : undefined;
+
+    return {
+      moments,
+      ...(last === undefined
+        ? {}
+        : { nextCursor: encodeCursor(new Date(last.occurrence.start), last.momentId) }),
+    };
+  }
+
+  /**
+   * Set who may see a Moment, and who is named on it.
+   *
+   * @param momentId - Which Moment.
+   * @param authorUserId - Who is asking. Only its author may.
+   * @param request - The visibility, and the audience when it is restricted.
+   * @returns The Moment as it now stands.
+   * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
+   * @throws {ValidationError} If the audience names somebody who does not
+   *   exist, or names its own author.
+   */
+  async setVisibility(
+    momentId: string,
+    authorUserId: string,
+    request: SetMomentVisibilityRequest,
+  ): Promise<Moment> {
+    await this.getForAuthor(momentId, authorUserId);
+
+    const audience: string[] = [...new Set(request.audience ?? [])];
+
+    if (audience.includes(authorUserId)) {
+      // Their own history is already theirs. Accepting it would put a row in
+      // the list that no rule ever consults, and suggest the author's access
+      // depended on it.
+      throw new ValidationError("You do not need to name yourself", { field: "audience" });
+    }
+
+    await this.checkEveryoneExists(audience);
+
+    await withTransaction(this.dataSource, (tx) =>
+      this.moments.setVisibility(tx, momentId, request.visibility, audience, this.clock()),
+    );
+
+    return this.getForAuthor(momentId, authorUserId);
+  }
+
+  /**
+   * Refuse an audience naming somebody who does not exist.
+   *
+   * @param userIds - Who was named.
+   * @returns Nothing.
+   * @throws {ValidationError} If any of them has no account, naming the first
+   *   such identifier so the caller can find it.
+   */
+  private async checkEveryoneExists(userIds: readonly string[]): Promise<void> {
+    for (const userId of userIds) {
+      if ((await this.users.findPublic(userId)) === undefined) {
+        throw new ValidationError(`No such user: ${userId}`, { field: "audience" });
+      }
+    }
+  }
+
+  /**
+   * Read who may see a restricted Moment.
+   *
+   * @param momentId - Which Moment.
+   * @param authorUserId - Who is asking. Only its author may: a list of the
+   *   people trusted with something is itself something to be trusted with.
+   * @returns The people named.
+   * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
+   */
+  async audience(momentId: string, authorUserId: string): Promise<MomentAudience> {
+    await this.getForAuthor(momentId, authorUserId);
+
+    return { users: await this.moments.findAudience(momentId) };
   }
 
   /**

@@ -129,6 +129,8 @@ async function main(): Promise<void> {
       uploadRepository,
       locationRepository,
       realWorldEventRepository,
+      new FollowRepository(database.dataSource),
+      accounts,
     ),
     realWorldEvents: new RealWorldEventService(
       database.dataSource,

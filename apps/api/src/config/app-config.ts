@@ -24,6 +24,8 @@ export interface AppConfig {
   readonly logLevel: Env["LOG_LEVEL"];
   readonly host: string;
   readonly port: number;
+  /** How many requests one client may make in a minute, across every endpoint. */
+  readonly rateLimit: { readonly maxPerMinute: number };
   readonly database: DatabaseConfig;
   readonly messaging: MessagingConfig;
   readonly outbox: OutboxConfig;
@@ -57,6 +59,7 @@ export function loadConfig(source: Record<string, string | undefined> = process.
     logLevel: env.LOG_LEVEL,
     host: env.API_HOST,
     port: env.API_PORT,
+    rateLimit: { maxPerMinute: env.API_RATE_LIMIT_PER_MINUTE },
     database: toDatabaseConfig(env),
     messaging: toMessagingConfig(env),
     outbox: toOutboxConfig(env),

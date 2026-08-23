@@ -12,11 +12,22 @@ import fp from "fastify-plugin";
  *
  * The response says only that too many requests were made, and never how many
  * remain, since that would tell an attacker exactly how hard to push.
+ *
+ * The ceiling is configuration rather than a constant. It is an operational
+ * number that depends on where the process runs and how many replicas share
+ * the load, and an integration suite driving one process through hundreds of
+ * requests is not the traffic this defends against. The tighter per-endpoint
+ * limits that actually protect authentication are unaffected by it.
  */
-export const rateLimitPlugin = fp(async (app) => {
+export interface RateLimitOptions {
+  /** How many requests one client may make within the window. */
+  readonly max: number;
+}
+
+export const rateLimitPlugin = fp(async (app, options: RateLimitOptions) => {
   await app.register(rateLimit, {
     global: true,
-    max: 300,
+    max: options.max,
     timeWindow: "1 minute",
     addHeadersOnExceeding: { "x-ratelimit-remaining": false },
     addHeaders: { "x-ratelimit-remaining": false, "retry-after": true },
