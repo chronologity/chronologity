@@ -138,7 +138,24 @@ export const uploadSchema = z.object({
 
 export type Upload = z.infer<typeof uploadSchema>;
 
-/** Someone's own uploads, newest first. */
-export const uploadListSchema = z.object({ uploads: z.array(uploadSchema) });
+/**
+ * A page of someone's own uploads, newest first.
+ *
+ * `nextCursor` is absent on the last page and opaque throughout: it encodes
+ * where the ordering continues from, and a caller that takes it apart will
+ * break when the ordering changes.
+ */
+export const uploadListSchema = z.object({
+  uploads: z.array(uploadSchema),
+  nextCursor: z.string().optional(),
+});
 
 export type UploadList = z.infer<typeof uploadListSchema>;
+
+/** What a caller may ask for when listing their own uploads. */
+export const listUploadsRequestSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  cursor: z.string().max(200).optional(),
+});
+
+export type ListUploadsRequest = z.infer<typeof listUploadsRequestSchema>;

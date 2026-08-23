@@ -1,3 +1,4 @@
+import { decodeCursor, encodeCursor } from "../../lib/pagination/cursor.js";
 import type {
   FollowList,
   FollowOutcome,
@@ -13,7 +14,7 @@ import { ValidationError } from "../../lib/errors/validation-error.js";
 import type { LocationRepository } from "../locations/location.repository.js";
 import type { RealWorldEventRepository } from "../real-world-events/real-world-event.repository.js";
 import type { UserRepository } from "../users/user.repository.js";
-import type { FollowCursor, FollowRepository } from "./follow.repository.js";
+import type { FollowRepository } from "./follow.repository.js";
 import {
   checkFollow,
   checkRequestResolution,
@@ -555,46 +556,3 @@ export class FollowService {
   }
 }
 
-/**
- * Encode where the next page continues from.
- *
- * A pair, not a moment. Two relationships made in the same millisecond are
- * ordinary — somebody following several people in quick succession produces
- * them — and a cursor over the moment alone would skip or repeat a row at the
- * page boundary. The identifier settles it, exactly as `GET /moments` does.
- *
- * Opaque so a caller does not come to depend on the ordering.
- *
- * @param at - The moment the last row on the page carries.
- * @param otherId - The identifier that settles ties at that moment.
- * @returns The cursor to hand back.
- */
-function encodeCursor(at: Date, otherId: string): string {
-  return Buffer.from(`${at.toISOString()}:${otherId}`, "utf8").toString("base64url");
-}
-
-/**
- * Decode where a page should continue from.
- *
- * @param cursor - What a caller sent back, or undefined for the first page.
- * @returns The moment and identifier to continue after, or undefined.
- * @throws {ValidationError} If it is not a cursor this module produced. Refused
- *   rather than ignored: silently starting again would repeat a page the caller
- *   believes it has read.
- */
-function decodeCursor(cursor?: string): FollowCursor | undefined {
-  if (cursor === undefined) {
-    return undefined;
-  }
-
-  const raw = Buffer.from(cursor, "base64url").toString("utf8");
-  const separator = raw.lastIndexOf(":");
-  const at = new Date(raw.slice(0, separator));
-  const otherUserId = raw.slice(separator + 1);
-
-  if (separator === -1 || Number.isNaN(at.getTime()) || otherUserId.length === 0) {
-    throw new ValidationError("Malformed cursor", { field: "cursor" });
-  }
-
-  return { at, otherUserId };
-}

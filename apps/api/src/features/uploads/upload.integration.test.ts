@@ -63,6 +63,7 @@ const config: AppConfig = {
     password: process.env.POSTGRES_PASSWORD ?? "chronologity",
   },
   messaging: { brokers: ["localhost:9092"], clientId: "uploads-integration" },
+  outbox: { retentionMs: 0 },
   auth: {
     jwtSecret: new TextEncoder().encode("integration-test-secret-long-enough-for-hs256"),
     issuer: "chronologity",
@@ -665,6 +666,97 @@ describe("uploads", () => {
       });
 
       assert.deepEqual(listed.json().uploads, []);
+    });
+
+    it("hands back a page and where to continue from", async () => {
+      const { credentials } = await onboard();
+      for (let index = 0; index < 3; index += 1) {
+        await register(credentials.accessToken);
+      }
+
+      const first = await app.inject({
+        method: "GET",
+        url: "/uploads?limit=2",
+        headers: authed(credentials.accessToken),
+      });
+
+      assert.equal(first.json().uploads.length, 2);
+      assert.notEqual(first.json().nextCursor, undefined);
+    });
+
+    it("says it has reached the end by offering nowhere to continue", async () => {
+      const { credentials } = await onboard();
+      await register(credentials.accessToken);
+
+      const listed = await app.inject({
+        method: "GET",
+        url: "/uploads?limit=2",
+        headers: authed(credentials.accessToken),
+      });
+
+      // A short page is the end. Absence is the signal, so a client knows to
+      // stop without a further request that would come back empty.
+      assert.equal(listed.json().uploads.length, 1);
+      assert.equal(listed.json().nextCursor, undefined);
+    });
+
+    it("pages the whole list without skipping a tie", async () => {
+      const { credentials, user } = await onboard();
+      const registered: string[] = [];
+
+      for (let index = 0; index < 5; index += 1) {
+        registered.push((await register(credentials.accessToken)).json().uploadId);
+      }
+
+      // A phone handing over a burst registers several in the same instant.
+      await database.dataSource.query(
+        `UPDATE uploads SET registered_at = '2026-01-01T00:00:00Z' WHERE owner_user_id = $1`,
+        [user.userId],
+      );
+
+      const seen: string[] = [];
+      let cursor: string | undefined;
+
+      do {
+        const response = await app.inject({
+          method: "GET",
+          url: `/uploads?limit=2${cursor === undefined ? "" : `&cursor=${cursor}`}`,
+          headers: authed(credentials.accessToken),
+        });
+
+        assert.ok(response.json().uploads.length <= 2, "the limit was not honoured");
+        seen.push(...response.json().uploads.map((upload: { uploadId: string }) => upload.uploadId));
+        cursor = response.json().nextCursor;
+      } while (cursor !== undefined);
+
+      assert.equal(seen.length, 5, "a row was skipped or repeated");
+      assert.deepEqual([...seen].sort(), [...registered].sort());
+    });
+
+    it("refuses a cursor it did not issue", async () => {
+      const { credentials } = await onboard();
+
+      const listed = await app.inject({
+        method: "GET",
+        url: "/uploads?cursor=not-a-cursor",
+        headers: authed(credentials.accessToken),
+      });
+
+      // Refused rather than ignored: starting again from the beginning would
+      // hand back a page the caller believes it has already read.
+      assert.equal(listed.statusCode, 400, listed.body);
+    });
+
+    it("refuses a page larger than the bound", async () => {
+      const { credentials } = await onboard();
+
+      const listed = await app.inject({
+        method: "GET",
+        url: "/uploads?limit=1000",
+        headers: authed(credentials.accessToken),
+      });
+
+      assert.equal(listed.statusCode, 400, listed.body);
     });
 
     it("requires an account, not merely authentication", async () => {

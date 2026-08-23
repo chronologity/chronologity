@@ -1,3 +1,4 @@
+import { decodeCursor, encodeCursor } from "../../lib/pagination/cursor.js";
 import { randomUUID } from "node:crypto";
 import {
   MEDIA_BOUNDARY,
@@ -7,6 +8,7 @@ import {
   type RegisterUploadRequest,
   type Upload,
   type UploadAuthorization,
+  type UploadList,
   type UploadReceivedPayload,
 } from "@chronologity/contracts";
 import type { DataSource } from "typeorm";
@@ -496,14 +498,31 @@ export class UploadService {
   }
 
   /**
-   * List somebody's uploads.
+   * Read a page of somebody's uploads.
    *
-   * @param ownerUserId - Whose uploads.
+   * @param ownerUserId - Whose uploads. Always the caller: there is no way to
+   *   ask for anybody else's.
    * @param limit - How many at most.
-   * @returns Their uploads, most recent first.
+   * @param cursor - Where to continue from, or undefined for the first page.
+   * @returns The page, and where the next one continues from when there is
+   *   more. The absence of a cursor is how a caller knows it has reached the
+   *   end.
+   * @throws {ValidationError} If the cursor is not one this service issued.
    */
-  async list(ownerUserId: string, limit: number): Promise<Upload[]> {
-    return this.uploads.findForOwner(ownerUserId, limit);
+  async list(ownerUserId: string, limit: number, cursor?: string): Promise<UploadList> {
+    const rows = await this.uploads.findForOwner(ownerUserId, limit, decodeCursor(cursor));
+
+    // A full page means there is probably more; a short one means there is not.
+    // Asking for one extra row to be certain would cost a row on every page to
+    // save one empty request at the end.
+    const last = rows.length === limit ? rows[rows.length - 1] : undefined;
+
+    return {
+      uploads: rows.map(({ upload }) => upload),
+      ...(last === undefined
+        ? {}
+        : { nextCursor: encodeCursor(last.registeredAt, last.upload.uploadId) }),
+    };
   }
 
   /**

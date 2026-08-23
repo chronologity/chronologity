@@ -177,6 +177,7 @@ export {
 } from "./real-world-events.js";
 export {
   derivativeKindSchema,
+  listUploadsRequestSchema,
   mediaKindSchema,
   registerUploadRequestSchema,
   uploadAuthorizationSchema,
@@ -184,6 +185,7 @@ export {
   uploadSchema,
   uploadStateSchema,
   type DerivativeKind,
+  type ListUploadsRequest,
   type MediaKind,
   type RegisterUploadRequest,
   type Upload,

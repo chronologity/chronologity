@@ -26,7 +26,7 @@ import {
   positionMedia,
 } from "./moment.policy.js";
 import type { MomentRepository } from "./moment.repository.js";
-import { decodeCursor, encodeCursor } from "./moment.cursor.js";
+import { decodeCursor, encodeCursor } from "../../lib/pagination/cursor.js";
 
 /**
  * Recording and reading Moments.
@@ -597,7 +597,7 @@ export class MomentService {
     const moments = await this.moments.findForAuthor(
       authorUserId,
       limit,
-      cursor === undefined ? undefined : decodeCursor(cursor),
+      decodeCursor(cursor),
     );
 
     // A full page means there is probably more; a short one means there is
@@ -607,7 +607,7 @@ export class MomentService {
 
     return {
       moments,
-      ...(last === undefined ? {} : { nextCursor: encodeCursor(last) }),
+      ...(last === undefined ? {} : { nextCursor: encodeCursor(new Date(last.occurrence.start), last.momentId) }),
     };
   }
 }

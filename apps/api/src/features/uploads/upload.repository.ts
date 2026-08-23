@@ -1,3 +1,4 @@
+import type { Cursor } from "../../lib/pagination/cursor.js";
 import type { DerivativeKind, MediaKind, Upload, UploadState } from "@chronologity/contracts";
 import type { UploadRecord, UploadStatus } from "./upload.types.js";
 import { In, Not, type DataSource } from "typeorm";
@@ -316,20 +317,40 @@ export class UploadRepository {
   }
 
   /**
-   * List somebody's uploads, most recent first.
+   * Read a page of somebody's uploads, most recent first.
    *
    * @param ownerUserId - Whose uploads.
    * @param limit - How many at most.
-   * @returns Their uploads. Deleted ones are excluded: their owner asked for
-   *   them to be gone.
+   * @param after - Where to continue from, or undefined for the first page.
+   * @returns Their uploads, each with what the next cursor is built from.
+   *   Deleted ones are excluded: their owner asked for them to be gone.
    */
-  async findForOwner(ownerUserId: string, limit: number): Promise<Upload[]> {
-    const rows = await this.dataSource.getRepository(UploadRow).find({
-      where: { ownerUserId, state: Not("deleted") },
-      order: { registeredAt: "DESC" },
-      take: limit,
-    });
+  async findForOwner(
+    ownerUserId: string,
+    limit: number,
+    after?: Cursor,
+  ): Promise<{ upload: Upload; registeredAt: Date }[]> {
+    const query = this.dataSource
+      .getRepository(UploadRow)
+      .createQueryBuilder("upload")
+      .where("upload.owner_user_id = :ownerUserId", { ownerUserId })
+      .andWhere("upload.state != 'deleted'")
+      .orderBy("upload.registered_at", "DESC")
+      .addOrderBy("upload.upload_id", "DESC")
+      .take(limit);
 
-    return rows.map(toUpload);
+    if (after !== undefined) {
+      // The pair compared as a tuple, so an upload sharing a registration
+      // moment with the last of the previous page is neither repeated nor
+      // skipped.
+      query.andWhere("(upload.registered_at, upload.upload_id) < (:at, :uploadId)", {
+        at: after.at,
+        uploadId: after.id,
+      });
+    }
+
+    const rows = await query.getMany();
+
+    return rows.map((row) => ({ upload: toUpload(row), registeredAt: row.registeredAt }));
   }
 }

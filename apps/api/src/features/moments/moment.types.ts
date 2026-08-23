@@ -15,18 +15,6 @@ export interface NewMoment {
 }
 
 /**
- * Where a page of Moments continues from.
- *
- * Both halves are needed: the occurrence orders the page, and the identifier
- * settles ties so that two Moments sharing a time cannot be skipped or repeated
- * across a page boundary.
- */
-export interface MomentCursor {
-  readonly occurrenceStart: Date;
-  readonly momentId: string;
-}
-
-/**
  * What kind of change somebody made.
  *
  * Recorded rather than inferred from what changed, because the product treats

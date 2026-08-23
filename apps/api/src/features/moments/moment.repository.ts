@@ -1,3 +1,4 @@
+import type { Cursor } from "../../lib/pagination/cursor.js";
 import { randomUUID } from "node:crypto";
 import type {
   Moment as MomentContract,
@@ -18,7 +19,7 @@ import {
   MomentMedium,
   MomentRealWorldEvent,
 } from "./moment.model.js";
-import type { MomentCursor, MomentEditKind, NewMoment } from "./moment.types.js";
+import type { MomentEditKind, NewMoment } from "./moment.types.js";
 
 /**
  * Where Moments are stored.
@@ -150,7 +151,7 @@ export class MomentRepository {
   async findForAuthor(
     authorUserId: string,
     limit: number,
-    cursor?: MomentCursor,
+    cursor?: Cursor,
   ): Promise<MomentContract[]> {
     const query = this.dataSource
       .getRepository(MomentRow)
@@ -171,7 +172,7 @@ export class MomentRepository {
       // the last of the previous page is neither repeated nor skipped.
       query.andWhere(
         "(moment.occurrence_start, moment.moment_id) < (:occurrenceStart, :momentId)",
-        { occurrenceStart: cursor.occurrenceStart, momentId: cursor.momentId },
+        { occurrenceStart: cursor.at, momentId: cursor.id },
       );
     }
 

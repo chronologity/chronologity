@@ -2,6 +2,7 @@ import {
   embeddedPlaceSuggestionsSchema,
   registerUploadRequestSchema,
   uploadAuthorizationSchema,
+  listUploadsRequestSchema,
   uploadListSchema,
   uploadSchema,
 } from "@chronologity/contracts";
@@ -16,7 +17,6 @@ import type { UploadService } from "./upload.service.js";
 const uploadParams = z.object({ uploadId: identifierSchema });
 
 /** How many uploads a listing returns. Bounded so a request cannot ask for everything. */
-const LIST_LIMIT = 50;
 
 /**
  * What to credit when no map data was used.
@@ -82,10 +82,12 @@ export function uploadRoutes(uploads: UploadService, locations?: LocationService
 
     app.get(
       "/uploads",
-      { schema: { response: { 200: uploadListSchema } }, preHandler: requireUser },
-      async (request) => ({
-        uploads: await uploads.list(request.user.userId, LIST_LIMIT),
-      }),
+      {
+        schema: { querystring: listUploadsRequestSchema, response: { 200: uploadListSchema } },
+        preHandler: requireUser,
+      },
+      async (request) =>
+        uploads.list(request.user.userId, request.query.limit, request.query.cursor),
     );
 
     app.get(

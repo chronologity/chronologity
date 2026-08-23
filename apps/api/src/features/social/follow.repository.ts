@@ -1,3 +1,4 @@
+import type { Cursor } from "../../lib/pagination/cursor.js";
 import { randomUUID } from "node:crypto";
 import type {
   Location as LocationContract,
@@ -44,18 +45,6 @@ function toPublicUser(row: User): PublicUser {
     biography: row.biography,
     createdAt: row.createdAt.toISOString(),
   };
-}
-
-/**
- * Where a page continues from.
- *
- * Both halves are needed. The moment orders the page and the identifier settles
- * ties, so two relationships made in the same millisecond cannot be skipped or
- * repeated across a boundary — the same reason `GET /moments` pages on a pair.
- */
-export interface FollowCursor {
-  readonly at: Date;
-  readonly otherUserId: string;
 }
 
 /** Reads and writes following. */
@@ -254,7 +243,7 @@ export class FollowRepository {
     userId: string,
     direction: "following" | "followers",
     limit: number,
-    after?: FollowCursor,
+    after?: Cursor,
   ): Promise<{ user: PublicUser; createdAt: Date; otherUserId: string }[]> {
     const mine = direction === "following" ? "follower_user_id" : "followed_user_id";
     const theirs = direction === "following" ? "followed_user_id" : "follower_user_id";
@@ -272,9 +261,9 @@ export class FollowRepository {
       // previous page is neither repeated nor skipped. A cursor over the
       // timestamp alone cannot do this, and two follows made in quick
       // succession share one readily.
-      query.andWhere(`(follow.created_at, follow.${theirs}) < (:at, :otherUserId)`, {
+      query.andWhere(`(follow.created_at, follow.${theirs}) < (:at, :otherId)`, {
         at: after.at,
-        otherUserId: after.otherUserId,
+        otherId: after.id,
       });
     }
 
@@ -382,7 +371,7 @@ export class FollowRepository {
   async listFollowedEvents(
     followerUserId: string,
     limit: number,
-    after?: FollowCursor,
+    after?: Cursor,
   ): Promise<{ event: RealWorldEventContract; createdAt: Date; otherId: string }[]> {
     const query = this.dataSource
       .getRepository(RealWorldEventFollow)
@@ -397,8 +386,8 @@ export class FollowRepository {
 
     if (after !== undefined) {
       query.andWhere(
-        "(follow.created_at, follow.real_world_event_id) < (:at, :otherUserId)",
-        { at: after.at, otherUserId: after.otherUserId },
+        "(follow.created_at, follow.real_world_event_id) < (:at, :otherId)",
+        { at: after.at, otherId: after.id },
       );
     }
 
@@ -426,7 +415,7 @@ export class FollowRepository {
   async listFollowedLocations(
     followerUserId: string,
     limit: number,
-    after?: FollowCursor,
+    after?: Cursor,
   ): Promise<{ location: LocationContract; createdAt: Date; otherId: string }[]> {
     const query = this.dataSource
       .getRepository(LocationFollow)
@@ -438,9 +427,9 @@ export class FollowRepository {
       .take(limit);
 
     if (after !== undefined) {
-      query.andWhere("(follow.created_at, follow.location_id) < (:at, :otherUserId)", {
+      query.andWhere("(follow.created_at, follow.location_id) < (:at, :otherId)", {
         at: after.at,
-        otherUserId: after.otherUserId,
+        otherId: after.id,
       });
     }
 
@@ -468,7 +457,7 @@ export class FollowRepository {
   async listPendingRequests(
     requestedUserId: string,
     limit: number,
-    after?: FollowCursor,
+    after?: Cursor,
   ): Promise<{ request: FollowRequest; requester: PublicUser }[]> {
     const query = this.dataSource
       .getRepository(FollowRequest)
@@ -486,9 +475,9 @@ export class FollowRepository {
       .take(limit);
 
     if (after !== undefined) {
-      query.andWhere("(request.requested_at, request.request_id) < (:at, :otherUserId)", {
+      query.andWhere("(request.requested_at, request.request_id) < (:at, :otherId)", {
         at: after.at,
-        otherUserId: after.otherUserId,
+        otherId: after.id,
       });
     }
 
@@ -607,7 +596,7 @@ export class FollowRepository {
   async listBlocked(
     blockerUserId: string,
     limit: number,
-    after?: FollowCursor,
+    after?: Cursor,
   ): Promise<{ user: PublicUser; createdAt: Date; otherUserId: string }[]> {
     const query = this.dataSource
       .getRepository(UserBlock)
@@ -624,9 +613,9 @@ export class FollowRepository {
       .take(limit);
 
     if (after !== undefined) {
-      query.andWhere("(block.created_at, block.blocked_user_id) < (:at, :otherUserId)", {
+      query.andWhere("(block.created_at, block.blocked_user_id) < (:at, :otherId)", {
         at: after.at,
-        otherUserId: after.otherUserId,
+        otherId: after.id,
       });
     }
 
