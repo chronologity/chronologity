@@ -240,3 +240,46 @@ describe("error handling", () => {
     assert.equal(response.json().traceId, "trace-abc");
   });
 });
+
+describe("the OpenAPI document", () => {
+  it("is published outside production", async () => {
+    const app = await buildApp({ config, dependencies: [] });
+    onTestFinished(() => app.close());
+    await app.ready();
+
+    const document = await app.inject({ method: "GET", url: "/docs/json" });
+
+    assert.equal(document.statusCode, 200, document.body);
+    assert.ok(Object.keys(document.json().paths).length > 0);
+  });
+
+  it("is absent in production, rather than protected there", async () => {
+    const app = await buildApp({
+      config: { ...config, nodeEnv: "production" },
+      dependencies: [],
+    });
+    onTestFinished(() => app.close());
+    await app.ready();
+
+    const document = await app.inject({ method: "GET", url: "/docs/json" });
+    const page = await app.inject({ method: "GET", url: "/docs" });
+
+    // A document naming every authentication surface is a map of the attack
+    // surface. Not registering it leaves nothing to guard, mis-guard, or
+    // forget — which is why this asserts absence rather than a 401.
+    assert.equal(document.statusCode, 404, document.body);
+    assert.equal(page.statusCode, 404, page.body);
+  });
+
+  it("describes a route it serves, with the tag its module carries", async () => {
+    const app = await buildApp({ config, dependencies: [] });
+    onTestFinished(() => app.close());
+    await app.ready();
+
+    const paths = app.swagger().paths as Record<string, Record<string, { tags?: string[]; summary?: string }>>;
+    const liveness = paths["/health/live"]?.get;
+
+    assert.deepEqual(liveness?.tags, ["Health"]);
+    assert.ok((liveness?.summary ?? "").length > 0);
+  });
+});

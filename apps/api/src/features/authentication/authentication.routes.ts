@@ -21,6 +21,7 @@ import {
 } from "@chronologity/contracts";
 import { z } from "zod";
 import { requireSession } from "../../plugins/auth.plugin.js";
+import { errors } from "../../server/error-responses.js";
 import { defaultAuthRateLimits } from "./authentication.rate-limits.js";
 import type { AuthenticationWiring } from "./authentication.types.js";
 
@@ -97,12 +98,21 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
     // makes body, params, and response types flow from them.
     const app = instance.withTypeProvider<ZodTypeProvider>();
 
+    // Every route this module registers, grouped under one heading in the
+    // published document. A hook rather than a line on each route: a route
+    // added later is grouped without anybody remembering to say so.
+    app.addHook("onRoute", (route) => {
+      route.schema = { ...route.schema, tags: ["Authentication"] };
+    });
+
     app.post(
       "/auth/magic-link",
       {
         schema: {
           body: magicLinkRequestSchema,
-          response: { 202: magicLinkResponseSchema },
+          summary: "Send a sign-in link",
+          description: "Answers identically whether or not an account exists. No authentication surface here discloses membership, because knowing that an address, handle, or number has an account is itself a fact about a person.",
+          response: { 202: magicLinkResponseSchema, ...errors(400) },
         },
         config: {
           // Tighter than the global limit. See authentication.rate-limits.ts.
@@ -122,7 +132,13 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
       app.post(
         "/auth/phone",
         {
-          schema: { body: phoneRequestSchema, response: { 202: magicLinkResponseSchema } },
+          schema: {
+            summary: "Claim a phone number",
+            description:
+              "Sends a code to prove the number is yours. Claiming replaces whatever number the account held before, and the replacement starts unverified.",
+            body: phoneRequestSchema,
+            response: { 202: magicLinkResponseSchema, ...errors(400, 401) },
+          },
           config: { rateLimit: { max: limits.phoneCodeRequestsPerWindow, timeWindow } },
           preHandler: requireSession,
         },
@@ -140,7 +156,13 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
       app.post(
         "/auth/phone/verify",
         {
-          schema: { body: confirmPhoneRequestSchema, response: { 204: z.null() } },
+          schema: {
+            summary: "Confirm a claimed number",
+            description:
+              "A wrong code, an expired one, one already used, and one guessed at too often are all the same refusal. Enough wrong guesses spend the code, whether or not the right one arrives afterwards.",
+            body: confirmPhoneRequestSchema,
+            response: { 204: z.null(), ...errors(400, 401) },
+          },
           config: { rateLimit: { max: limits.phoneCodeAttemptsPerWindow, timeWindow } },
           preHandler: requireSession,
         },
@@ -157,7 +179,15 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
 
       app.get(
         "/auth/phone",
-        { schema: { response: { 200: heldPhoneSchema } }, preHandler: requireSession },
+        {
+          schema: {
+            summary: "Read the number on your account",
+            description:
+              "`dormant` says the number has gone unused long enough to stop working for sign-in until confirmed again. You are told because you are the only person who can act on it.",
+            response: { 200: heldPhoneSchema, ...errors(401) },
+          },
+          preHandler: requireSession,
+        },
         async (request) => {
           const held = await phones.held(request.session.identityId);
 
@@ -169,7 +199,14 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
 
       app.delete(
         "/auth/phone",
-        { schema: { response: { 204: z.null() } }, preHandler: requireSession },
+        {
+          schema: {
+            summary: "Remove your phone number",
+            description: "Removing one you do not have is the state you asked for, not an error.",
+            response: { 204: z.null(), ...errors(401) },
+          },
+          preHandler: requireSession,
+        },
         async (request, reply) => {
           await phones.remove(request.session.identityId, request.requestContext);
 
@@ -183,7 +220,13 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
       app.post(
         "/auth/phone/codes",
         {
-          schema: { body: phoneRequestSchema, response: { 202: magicLinkResponseSchema } },
+          schema: {
+            summary: "Send a sign-in code by text",
+            description:
+              "Answers identically whether or not an account exists. No authentication surface here discloses membership, because knowing that an address, handle, or number has an account is itself a fact about a person. A number that has gone unused for a long period receives no code at all; the account's email address is told instead, because a number left unused is the one a carrier may have given to somebody else.",
+            body: phoneRequestSchema,
+            response: { 202: magicLinkResponseSchema, ...errors(400) },
+          },
           config: { rateLimit: { max: limits.phoneCodeRequestsPerWindow, timeWindow } },
         },
         async (request, reply) => {
@@ -196,7 +239,13 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
       app.post(
         "/auth/sessions/phone",
         {
-          schema: { body: phoneSignInRequestSchema, response: { 201: sessionCredentialsSchema } },
+          schema: {
+            summary: "Sign in with a number and code",
+            description:
+              "Succeeding emails the account, so its holder learns of it even if the number was taken from them.",
+            body: phoneSignInRequestSchema,
+            response: { 201: sessionCredentialsSchema, ...errors(400, 401) },
+          },
           config: { rateLimit: { max: limits.phoneCodeAttemptsPerWindow, timeWindow } },
         },
         async (request, reply) => {
@@ -216,8 +265,11 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
       "/auth/sessions",
       {
         schema: {
+          summary: "Redeem a sign-in link",
+          description:
+            "An expired link, an already-used one, one issued for another purpose, and one that never existed are all the same refusal. Redeeming proves control of the address, so a first-time address arrives already verified.",
           body: createSessionRequestSchema,
-          response: { 201: sessionCredentialsSchema },
+          response: { 201: sessionCredentialsSchema, ...errors(400, 401) },
         },
         config: { rateLimit: { max: limits.sessionCreationsPerWindow, timeWindow } },
       },
@@ -237,7 +289,10 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
       {
         schema: {
           body: refreshSessionBodySchema,
-          response: { 200: sessionCredentialsSchema },
+          summary: "Exchange a refresh token",
+          description:
+            "Refresh tokens rotate: the one sent is spent, and a new one comes back. Reusing a spent token ends the session, because reuse means it was copied.",
+          response: { 200: sessionCredentialsSchema, ...errors(400, 401) },
         },
       },
       async (request) =>
@@ -250,7 +305,14 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
 
     app.get(
       "/auth/sessions",
-      { schema: { response: { 200: sessionListSchema } }, preHandler: requireSession },
+      {
+        schema: {
+          summary: "List your open sessions",
+          description: "The session making the request is marked as such.",
+          response: { 200: sessionListSchema, ...errors(401) },
+        },
+        preHandler: requireSession,
+      },
       async (request) => ({
         sessions: await sessions.list(request.session.identityId, request.session.sessionId),
       }),
@@ -259,7 +321,12 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
     app.delete(
       "/auth/sessions/:sessionId",
       {
-        schema: { params: sessionParamsSchema, response: { 204: z.void() } },
+        schema: {
+          summary: "End one session",
+          description: "Takes effect on that session's next request rather than at its next expiry.",
+          params: sessionParamsSchema,
+          response: { 204: z.void(), ...errors(401, 404) },
+        },
         preHandler: requireSession,
       },
       async (request, reply) => {
@@ -278,8 +345,11 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
       "/auth/registrations",
       {
         schema: {
+          summary: "Register with a password",
+          description:
+            "Answers identically whether or not an account exists. Registering does not prove the address — redeeming the link sent to it does — and password sign-in is refused until it is proven.",
           body: registrationRequestSchema,
-          response: { 202: registrationResponseSchema },
+          response: { 202: registrationResponseSchema, ...errors(400) },
         },
         config: { rateLimit: { max: limits.registrationsPerWindow, timeWindow } },
       },
@@ -297,7 +367,13 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
     app.post(
       "/auth/email-verifications",
       {
-        schema: { body: verifyEmailRequestSchema, response: { 204: z.void() } },
+        schema: {
+          summary: "Prove an email address",
+          description:
+            "Proving an address grants no session. Proof of who somebody is and being signed in are deliberately separate.",
+          body: verifyEmailRequestSchema,
+          response: { 204: z.void(), ...errors(400) },
+        },
         config: { rateLimit: { max: limits.sessionCreationsPerWindow, timeWindow } },
       },
       async (request, reply) => {
@@ -311,8 +387,11 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
       "/auth/sessions/password",
       {
         schema: {
+          summary: "Sign in with a password",
+          description:
+            "Answers identically whether or not an account exists. No such account, a wrong password, and an unproven address are one refusal — and the work is done either way, so the time taken says nothing either.",
           body: passwordSignInRequestSchema,
-          response: { 201: sessionCredentialsSchema },
+          response: { 201: sessionCredentialsSchema, ...errors(400, 401) },
         },
         config: { rateLimit: { max: limits.passwordAttemptsPerWindow, timeWindow } },
       },
@@ -332,8 +411,10 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
       "/auth/password-resets",
       {
         schema: {
+          summary: "Ask for a password reset",
+          description: "Answers identically whether or not an account exists.",
           body: passwordResetRequestSchema,
-          response: { 202: registrationResponseSchema },
+          response: { 202: registrationResponseSchema, ...errors(400) },
         },
         config: { rateLimit: { max: limits.magicLinkRequestsPerWindow, timeWindow } },
       },
@@ -350,7 +431,13 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
     app.post(
       "/auth/password-resets/complete",
       {
-        schema: { body: passwordResetCompletionSchema, response: { 204: z.void() } },
+        schema: {
+          summary: "Set a new password with a reset link",
+          description:
+            "Every other session ends, because a reset usually means the old password was known to somebody else.",
+          body: passwordResetCompletionSchema,
+          response: { 204: z.void(), ...errors(400) },
+        },
         config: { rateLimit: { max: limits.passwordAttemptsPerWindow, timeWindow } },
       },
       async (request, reply) => {
@@ -369,7 +456,10 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
       {
         schema: {
           body: passwordChangeRequestSchema,
-          response: { 200: passwordChangeResponseSchema },
+          summary: "Change your password",
+          description:
+            "Requires the current one. Every other session ends; the one making the change continues.",
+          response: { 200: passwordChangeResponseSchema, ...errors(400, 401) },
         },
         preHandler: requireSession,
       },
@@ -389,7 +479,11 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
     app.delete(
       "/auth/sessions",
       {
-        schema: { response: { 200: revokeAllResponseSchema } },
+        schema: {
+          summary: "End every session",
+          description: "Including the one making the request.",
+          response: { 200: revokeAllResponseSchema, ...errors(401) },
+        },
         preHandler: requireSession,
       },
       async (request) => ({

@@ -2687,4 +2687,71 @@ describe("moments", () => {
       assert.equal(response.statusCode, 401, response.body);
     });
   });
+
+  describe("what an error looks like now that its shape is declared", () => {
+    // Declaring error responses changed serialisation, not only documentation:
+    // Fastify serialises through a response schema when one exists. If the
+    // declared envelope and what the error handler builds disagreed, fields
+    // would be silently stripped. These prove they do not.
+
+    it("keeps every part of a refusal", async () => {
+      const stranger = await onboard();
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/moments/${randomUUID()}`,
+        headers: authed(stranger.accessToken),
+      });
+
+      assert.equal(response.statusCode, 404);
+      assert.equal(response.json().code, "NOT_FOUND");
+      assert.ok(response.json().message.length > 0);
+      assert.match(response.json().traceId, /[0-9a-f-]{36}/);
+    });
+
+    it("keeps the details on a validation failure", async () => {
+      const author = await onboard();
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/moments",
+        headers: authed(author.accessToken),
+        payload: { caption: "" },
+      });
+
+      assert.equal(response.statusCode, 400);
+      assert.equal(response.json().code, "VALIDATION_FAILED");
+      // `details` is optional in the envelope, so a serialiser that dropped it
+      // would still produce a valid response and a much less useful one.
+      assert.notEqual(response.json().details, undefined);
+    });
+
+    it("keeps an unauthenticated refusal intact", async () => {
+      const response = await app.inject({ method: "GET", url: "/moments" });
+
+      assert.equal(response.statusCode, 401);
+      assert.equal(response.json().code, "AUTHENTICATION_FAILED");
+      assert.ok(response.json().traceId.length > 0);
+    });
+
+    it("leaves a successful read exactly as it was", async () => {
+      const author = await onboard();
+      const uploadId = await createReadyUpload(database.dataSource, author.userId);
+      const created = await record(author.accessToken, {
+        caption: "Something that happened",
+        occurrence: summer,
+        occurrenceOffsetMinutes: NEW_YORK,
+        uploadIds: [uploadId],
+      });
+
+      const read = await app.inject({
+        method: "GET",
+        url: `/moments/${created.json().momentId}`,
+        headers: authed(author.accessToken),
+      });
+
+      // The success schema was untouched, but both now sit in one response map.
+      assert.deepEqual(read.json(), created.json());
+    });
+  });
 });

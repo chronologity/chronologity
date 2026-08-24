@@ -10,6 +10,7 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { requireSession, requireUser } from "../../plugins/auth.plugin.js";
+import { errors } from "../../server/error-responses.js";
 import type { AuthenticationWiring } from "../authentication/authentication.types.js";
 import type { UserService } from "./user.service.js";
 
@@ -32,12 +33,22 @@ export function userRoutes(users: UserService, authentication: AuthenticationWir
   return async function register(instance: FastifyInstance): Promise<void> {
     const app = instance.withTypeProvider<ZodTypeProvider>();
 
+    // Every route this module registers, grouped under one heading in the
+    // published document. A hook rather than a line on each route: a route
+    // added later is grouped without anybody remembering to say so.
+    app.addHook("onRoute", (route) => {
+      route.schema = { ...route.schema, tags: ["Users"] };
+    });
+
     app.post(
       "/users",
       {
         schema: {
+          summary: "Finish creating an account",
+          description:
+            "Authenticating proves who somebody is; it does not give them an account. Until this succeeds a caller holds an Identity, and every route needing a User answers 403 with `ONBOARDING_REQUIRED`.",
           body: createUserRequestSchema,
-          response: { 201: currentUserSchema },
+          response: { 201: currentUserSchema, ...errors(400, 401, 403) },
         },
         preHandler: requireSession,
       },
@@ -50,14 +61,24 @@ export function userRoutes(users: UserService, authentication: AuthenticationWir
 
     app.get(
       "/users/me",
-      { schema: { response: { 200: currentUserSchema } }, preHandler: requireUser },
+      {
+        schema: {
+          summary: "Read your own account",
+          response: { 200: currentUserSchema, ...errors(401, 403) },
+        },
+        preHandler: requireUser,
+      },
       async (request) => users.getAccount(request.user.userId),
     );
 
     app.patch(
       "/users/me",
       {
-        schema: { body: updateProfileRequestSchema, response: { 200: currentUserSchema } },
+        schema: {
+          summary: "Change your display name or biography",
+          body: updateProfileRequestSchema,
+          response: { 200: currentUserSchema, ...errors(400, 401, 403) },
+        },
         preHandler: requireUser,
       },
       async (request) => {
@@ -70,7 +91,13 @@ export function userRoutes(users: UserService, authentication: AuthenticationWir
     app.put(
       "/users/me/handle",
       {
-        schema: { body: updateHandleRequestSchema, response: { 200: currentUserSchema } },
+        schema: {
+          summary: "Change your handle",
+          description:
+            "Handles are unique on their normalised form, so two people claiming one name at the same moment cannot both succeed. A released handle is reserved for a cooldown and may be reclaimed by its previous holder within it.",
+          body: updateHandleRequestSchema,
+          response: { 200: currentUserSchema, ...errors(400, 401, 403) },
+        },
         preHandler: requireUser,
       },
       async (request) => {
@@ -83,7 +110,11 @@ export function userRoutes(users: UserService, authentication: AuthenticationWir
     app.put(
       "/users/me/preferences",
       {
-        schema: { body: updatePreferencesRequestSchema, response: { 200: currentUserSchema } },
+        schema: {
+          summary: "Change your preferences",
+          body: updatePreferencesRequestSchema,
+          response: { 200: currentUserSchema, ...errors(400, 401, 403) },
+        },
         preHandler: requireUser,
       },
       async (request) => {
@@ -96,7 +127,15 @@ export function userRoutes(users: UserService, authentication: AuthenticationWir
     app.post(
       "/users/me/deactivate",
       {
-        schema: { response: { 200: z.object({ sessionsRevoked: z.number().int().min(0) }) } },
+        schema: {
+          summary: "Deactivate your account",
+          description:
+            "Ends every session and hides the account. Reversible by signing in again and reactivating; this is not deletion, and nothing recorded is removed.",
+          response: {
+            200: z.object({ sessionsRevoked: z.number().int().min(0) }),
+            ...errors(401, 403),
+          },
+        },
         preHandler: requireUser,
       },
       async (request) => {
@@ -116,7 +155,13 @@ export function userRoutes(users: UserService, authentication: AuthenticationWir
 
     app.post(
       "/users/me/reactivate",
-      { schema: { response: { 200: currentUserSchema } }, preHandler: requireUser },
+      {
+        schema: {
+          summary: "Reactivate your account",
+          response: { 200: currentUserSchema, ...errors(401, 403) },
+        },
+        preHandler: requireUser,
+      },
       async (request) => {
         await users.reactivate(request.user.userId);
 
@@ -128,8 +173,11 @@ export function userRoutes(users: UserService, authentication: AuthenticationWir
       "/users/:handle",
       {
         schema: {
+          summary: "Read somebody's public profile",
+          description:
+            "The only route here needing no caller. It carries nothing a person has not chosen to present.",
           params: z.object({ handle: z.string().min(1).max(30) }),
-          response: { 200: publicUserSchema },
+          response: { 200: publicUserSchema, ...errors(404) },
         },
       },
       async (request) => users.getByHandle(request.params.handle),

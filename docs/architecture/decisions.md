@@ -3341,3 +3341,55 @@ What remained was the one case time cannot settle: `A led_to B` alongside `B led
 **A relationship pointing somewhere inaccessible is omitted, not redacted.** `privacy.md:158` requires that Chronologity "never use a visible relationship to reveal an inaccessible Moment", and an identifier is itself the disclosure — returning the relationship with a blanked target would still say that something is there.
 
 **Only the claimant may withdraw a claim.** Owning one end does not make somebody else's reading of history yours to retract. Withdrawing leaves both Moments untouched, occurrence included, which `causality.md` invariants 14 and 15 require and a test asserts.
+
+# ADR-112 — Generate the OpenAPI Document From the Routes, and Publish It Nowhere Real
+
+**Status:** Accepted
+
+## Decision
+
+The API publishes an OpenAPI document generated from the Zod schemas the routes already declare, through `@fastify/swagger` and `fastify-type-provider-zod`'s `jsonSchemaTransform`.
+
+It is registered outside production only, and absent rather than protected there.
+
+The document is committed at `apps/api/openapi.json`, and CI fails when it is stale.
+
+Error responses are declared through one shared helper. Tags come from a hook per routes module. Every route carries a summary; descriptions are written where a consumer would otherwise be wrong.
+
+## Alternatives Considered
+
+Writing the document by hand, or maintaining it beside the code.
+
+Serving it in production behind authentication.
+
+Generating it on demand rather than committing it.
+
+Declaring error responses on each route, and writing `tags` on each of the eighty-one.
+
+Moving the existing implementation comments into `description` rather than writing new prose.
+
+## Rationale
+
+**It cannot drift, because it is not a second artifact.** ADR-070 chose Zod partly because Zod 4 emits JSON Schema directly, so Fastify already receives real JSON Schema rather than a runtime-only validator. The schema that validates a request, serialises its response, and appears in the document is one object. A hand-written document would be a promise nobody checks.
+
+**Absent in production, not protected there.** A document naming every authentication surface is a map of the attack surface, and ADR-081 goes to some trouble to avoid disclosing whether an account exists. Not registering it leaves nothing to guard, mis-guard, or forget — which is a different and stronger property than a route that returns 401.
+
+**Committed, because a contract change should look like one.** A diff in `openapi.json` on a pull request says "the boundary moved" in a way a changed line inside a route file does not. It is also what `packages/api-client` will generate from when Phase 10 arrives.
+
+**One helper for error responses, because the interesting sentence is shared.** Every error at every status is the same envelope, so only the description varies. That let the most important thing a client developer needs to know — *a 404 must not be read as proof of absence* — be written once and appear on the thirty-six routes that can refuse. Written per route it would have been thirty-six chances to phrase it differently, and thirty-six places to forget it.
+
+**Tags from a hook, for the same reason.** Nine hooks rather than eighty-one annotations, and a route added next year is grouped without anybody remembering to say so.
+
+**Comments stayed where they were.** The argument for moving them — that two copies drift — belongs to executable duplication, where drift produces a wrong answer; this project has twice paid for that with cursors and the visibility predicate. Prose is different. A comment serves whoever next opens the handler and a description serves somebody who will never read the source, and where they overlap they are not really duplicates: one says "we do it this way because X", the other says "expect Y".
+
+## Consequences
+
+**This changed serialisation, not only documentation.** Fastify serialises through a response schema when one exists, and error responses previously had none. Declaring them routes every error through the serialiser, so a disagreement between `errorResponseSchema` and what `toErrorResponse` builds would silently strip fields. Integration tests now assert that a real 404 keeps its code, message, and trace identifier, that a real 400 keeps its `details`, and that a successful read is byte-identical to what it was.
+
+**Composition had to be extracted first, and that is the load-bearing part.** Routes are registered conditionally on their services being present, so a generator wiring a subset would produce a document missing those routes — silently, and differently each time somebody added a service to only one of the two wirings. `composeApp` is now the single wiring, used by the process and by the generator, which is what makes "the document describes what the server serves" a fact rather than a hope. It is verified by counting: eighty-one operations in the document, eighty-one route declarations in the source.
+
+**Connecting moved after composition.** Nothing between the two queries anything — repositories hold an uninitialised DataSource without touching it — so this is safe, and it is what lets the document be generated with no database, broker, or storage running.
+
+**The generator reads `.env.example` rather than the environment.** Routes do not depend on anybody's credentials, so a document that required S3 keys to generate would be absurd, and a CI job could not produce one after a bare checkout. It has a useful side effect: generating the document now also proves `.env.example` still covers every variable the application requires, because a missing one fails there rather than on somebody's first run.
+
+**Sixty-two of eighty-one operations carry a description.** More than the fifteen to twenty first estimated, because once the error helper carried the general warning, the remaining prose was about things a consumer genuinely cannot infer: that asking for a state which already holds succeeds, that a reduced place carries no identifier, that a relationship whose far end is inaccessible is absent rather than redacted, and that authentication answers say nothing about whether an account exists.

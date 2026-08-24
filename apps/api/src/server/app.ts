@@ -118,7 +118,14 @@ export async function buildApp({
     }),
   );
 
-  await registerPlugins(app, authentication, { max: config.rateLimit.maxPerMinute });
+  await registerPlugins(
+    app,
+    authentication,
+    { max: config.rateLimit.maxPerMinute },
+    // Absent in production rather than protected there: a document naming every
+    // authentication surface is a map of the attack surface.
+    { enabled: config.nodeEnv !== "production" },
+  );
   await registerRoutes(
     app,
     authentication,

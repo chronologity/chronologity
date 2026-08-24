@@ -69,6 +69,12 @@ jobs:
       - name: Build
         run: pnpm build
 
+      # After the build, since it runs the compiled generator. Needs no
+      # infrastructure: the document describes routes, and routes do not depend
+      # on anybody's credentials.
+      - name: OpenAPI document is current
+        run: pnpm --filter @chronologity/api spec:check
+
       - name: Unit tests
         run: pnpm test
 
