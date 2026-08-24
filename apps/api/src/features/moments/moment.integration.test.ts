@@ -20,6 +20,8 @@ import {
 } from "../../testing/fixtures.js";
 import { FollowRepository } from "../social/follow.repository.js";
 import { FollowService } from "../social/follow.service.js";
+import { MomentReactionRepository } from "./moment-reaction.repository.js";
+import { MomentReactionService } from "./moment-reaction.service.js";
 import { MomentRelationshipRepository } from "./moment-relationship.repository.js";
 import { MomentRelationshipService } from "./moment-relationship.service.js";
 import { MomentRepository } from "./moment.repository.js";
@@ -145,12 +147,23 @@ describe("moments", () => {
         new UserRepository(database.dataSource),
         new RealWorldEventRepository(database.dataSource),
         new LocationRepository(database.dataSource),
+        undefined,
+        // Blocking severs reactions alongside follows and requests, which the
+        // suite asserts rather than assumes.
+        new MomentReactionRepository(database.dataSource),
       ),
       moments,
       momentRelationships: new MomentRelationshipService(
         database.dataSource,
         new MomentRelationshipRepository(database.dataSource),
         moments,
+      ),
+      momentReactions: new MomentReactionService(
+        database.dataSource,
+        new MomentReactionRepository(database.dataSource),
+        new MomentRepository(database.dataSource),
+        moments,
+        new FollowRepository(database.dataSource),
       ),
     });
   });
@@ -2752,6 +2765,307 @@ describe("moments", () => {
 
       // The success schema was untouched, but both now sit in one response map.
       assert.deepEqual(read.json(), created.json());
+    });
+  });
+
+  describe("responding to a moment", () => {
+    const publicMoment = async (author: { accessToken: string; userId: string }) => {
+      const uploadId = await createReadyUpload(database.dataSource, author.userId);
+      const created = await record(author.accessToken, {
+        caption: "Something that happened",
+        occurrence: summer,
+        occurrenceOffsetMinutes: NEW_YORK,
+        uploadIds: [uploadId],
+      });
+
+      assert.equal(created.statusCode, 201, created.body);
+
+      return created.json().momentId as string;
+    };
+
+    const react = async (accessToken: string, momentId: string, kind: string) =>
+      app.inject({
+        method: "PUT",
+        url: `/moments/${momentId}/reaction`,
+        headers: authed(accessToken),
+        payload: { kind },
+      });
+
+    const withdraw = async (accessToken: string, momentId: string) =>
+      app.inject({
+        method: "DELETE",
+        url: `/moments/${momentId}/reaction`,
+        headers: authed(accessToken),
+      });
+
+    const summaryFor = async (accessToken: string, momentId: string) =>
+      app.inject({
+        method: "GET",
+        url: `/moments/${momentId}/reactions`,
+        headers: authed(accessToken),
+      });
+
+    const setEnabled = async (accessToken: string, momentId: string, enabled: boolean) =>
+      app.inject({
+        method: "PUT",
+        url: `/moments/${momentId}/reactions/enabled`,
+        headers: authed(accessToken),
+        payload: { enabled },
+      });
+
+    it("records each of the four", async () => {
+      const author = await onboard();
+
+      for (const kind of ["loved", "amused", "astonished", "saddened"]) {
+        const momentId = await publicMoment(author);
+        const response = await react(author.accessToken, momentId, kind);
+
+        assert.equal(response.statusCode, 200, `${kind}: ${response.body}`);
+        assert.equal(response.json().counts[kind], 1);
+        assert.equal(response.json().yours, kind);
+        assert.equal(response.json().total, 1);
+      }
+    });
+
+    it("replaces rather than accumulating", async () => {
+      const author = await onboard();
+      const momentId = await publicMoment(author);
+
+      await react(author.accessToken, momentId, "loved");
+      const changed = await react(author.accessToken, momentId, "amused");
+
+      // One person holds at most one reaction, so the total counts them once
+      // however many times they change their mind.
+      assert.equal(changed.json().total, 1);
+      assert.equal(changed.json().counts.amused, 1);
+      assert.equal(changed.json().counts.loved, undefined);
+      assert.equal(changed.json().yours, "amused");
+    });
+
+    it("counts each person once across several people", async () => {
+      const author = await onboard();
+      const momentId = await publicMoment(author);
+      const others = [await onboard(), await onboard()];
+
+      await react(author.accessToken, momentId, "loved");
+      for (const other of others) {
+        await react(other.accessToken, momentId, "loved");
+      }
+
+      const summary = await summaryFor(author.accessToken, momentId);
+
+      assert.equal(summary.json().counts.loved, 3);
+      assert.equal(summary.json().total, 3);
+    });
+
+    it("takes a reaction back out of the counts", async () => {
+      const author = await onboard();
+      const momentId = await publicMoment(author);
+      await react(author.accessToken, momentId, "loved");
+
+      const withdrawn = await withdraw(author.accessToken, momentId);
+
+      assert.equal(withdrawn.statusCode, 200, withdrawn.body);
+      assert.equal(withdrawn.json().total, 0);
+      assert.equal(withdrawn.json().yours, null);
+    });
+
+    it("treats withdrawing one you never left as already done", async () => {
+      const author = await onboard();
+      const momentId = await publicMoment(author);
+
+      const response = await withdraw(author.accessToken, momentId);
+
+      assert.equal(response.statusCode, 200, response.body);
+    });
+
+    it("shows you your own and nobody else's", async () => {
+      const author = await onboard();
+      const other = await onboard();
+      const momentId = await publicMoment(author);
+      await react(author.accessToken, momentId, "loved");
+      await react(other.accessToken, momentId, "amused");
+
+      const asOther = await summaryFor(other.accessToken, momentId);
+
+      // Counts, never identities: the totals are shared, but the only reaction
+      // anybody is named for is their own.
+      assert.equal(asOther.json().yours, "amused");
+      assert.equal(asOther.json().total, 2);
+      assert.equal(JSON.stringify(asOther.json()).includes(author.userId), false);
+    });
+
+    it("refuses counts for a moment you cannot see, exactly as one that does not exist", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+      const uploadId = await createReadyUpload(database.dataSource, author.userId);
+      const hidden = (
+        await record(author.accessToken, {
+          caption: "Not yours",
+          occurrence: summer,
+          occurrenceOffsetMinutes: NEW_YORK,
+          uploadIds: [uploadId],
+          visibility: "private",
+        })
+      ).json().momentId;
+
+      const refused = await summaryFor(stranger.accessToken, hidden);
+      const missing = await summaryFor(stranger.accessToken, randomUUID());
+
+      // A reaction cannot be more visible than what it belongs to.
+      assert.equal(refused.statusCode, 404, refused.body);
+      assert.equal(missing.statusCode, 404, missing.body);
+      assert.equal(refused.json().message, missing.json().message);
+    });
+
+    it("stops a blocked person reacting, without saying why", async () => {
+      const author = await onboard();
+      const blocked = await onboard();
+      const momentId = await publicMoment(author);
+      await app.inject({
+        method: "POST",
+        url: `/users/${blocked.userId}/block`,
+        headers: authed(author.accessToken),
+      });
+
+      const attempt = await react(blocked.accessToken, momentId, "loved");
+
+      // The Moment is invisible to them now, so this refuses before reactions
+      // are even considered — which is itself the point: a block is answered
+      // first, and never named.
+      assert.equal(attempt.statusCode, 404, attempt.body);
+      assert.doesNotMatch(attempt.body, /block/i);
+    });
+
+    it("removes what two people left on each other once blocked", async () => {
+      const author = await onboard();
+      const other = await onboard();
+      const theirs = await publicMoment(author);
+      const mine = await publicMoment(other);
+      await react(other.accessToken, theirs, "loved");
+      await react(author.accessToken, mine, "amused");
+
+      await app.inject({
+        method: "POST",
+        url: `/users/${other.userId}/block`,
+        headers: authed(author.accessToken),
+      });
+
+      // Severed with the follows and requests, both ways. Leaving them would
+      // let a blocked person keep contributing to counts on history they can no
+      // longer see.
+      assert.equal((await summaryFor(author.accessToken, theirs)).json().total, 0);
+      assert.equal((await summaryFor(other.accessToken, mine)).json().total, 0);
+    });
+
+    it("hides the counts when the author turns reactions off", async () => {
+      const author = await onboard();
+      const other = await onboard();
+      const momentId = await publicMoment(author);
+      await react(other.accessToken, momentId, "loved");
+
+      const disabled = await setEnabled(author.accessToken, momentId, false);
+
+      assert.equal(disabled.statusCode, 200, disabled.body);
+      assert.equal(disabled.json().enabled, false);
+      assert.equal(disabled.json().total, 0);
+      assert.deepEqual(disabled.json().counts, {});
+    });
+
+    it("says reactions are off rather than reporting none", async () => {
+      const author = await onboard();
+      const momentId = await publicMoment(author);
+      await setEnabled(author.accessToken, momentId, false);
+
+      const summary = await summaryFor(author.accessToken, momentId);
+
+      // "Reactions are off" and "nobody has reacted" are different facts, and a
+      // client that cannot tell them apart will render the wrong thing.
+      assert.equal(summary.json().enabled, false);
+      assert.equal(summary.json().total, 0);
+    });
+
+    it("refuses a new reaction while they are off", async () => {
+      const author = await onboard();
+      const other = await onboard();
+      const momentId = await publicMoment(author);
+      await setEnabled(author.accessToken, momentId, false);
+
+      const attempt = await react(other.accessToken, momentId, "loved");
+
+      assert.equal(attempt.statusCode, 400, attempt.body);
+    });
+
+    it("brings the same counts back when they are turned on again", async () => {
+      const author = await onboard();
+      const other = await onboard();
+      const momentId = await publicMoment(author);
+      await react(other.accessToken, momentId, "loved");
+      await setEnabled(author.accessToken, momentId, false);
+
+      const reenabled = await setEnabled(author.accessToken, momentId, true);
+
+      // Nothing was deleted. Disabling closes a door; it does not unhear what
+      // people already said.
+      assert.equal(reenabled.json().enabled, true);
+      assert.equal(reenabled.json().counts.loved, 1);
+      assert.equal(reenabled.json().total, 1);
+    });
+
+    it("lets somebody withdraw even after reactions are turned off", async () => {
+      const author = await onboard();
+      const other = await onboard();
+      const momentId = await publicMoment(author);
+      await react(other.accessToken, momentId, "loved");
+      await setEnabled(author.accessToken, momentId, false);
+
+      const withdrawn = await withdraw(other.accessToken, momentId);
+      await setEnabled(author.accessToken, momentId, true);
+
+      assert.equal(withdrawn.statusCode, 200, withdrawn.body);
+      assert.equal((await summaryFor(author.accessToken, momentId)).json().total, 0);
+    });
+
+    it("lets only the author turn reactions off", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+      const momentId = await publicMoment(author);
+
+      const attempt = await setEnabled(stranger.accessToken, momentId, false);
+
+      assert.equal(attempt.statusCode, 404, attempt.body);
+      assert.equal((await summaryFor(author.accessToken, momentId)).json().enabled, true);
+    });
+
+    it("keeps a reaction on one moment off another", async () => {
+      const author = await onboard();
+      const first = await publicMoment(author);
+      const second = await publicMoment(author);
+      await react(author.accessToken, first, "loved");
+
+      const summary = await summaryFor(author.accessToken, second);
+
+      assert.equal(summary.json().total, 0);
+      assert.equal(summary.json().yours, null);
+    });
+
+    it("refuses a kind it does not recognise", async () => {
+      const author = await onboard();
+      const momentId = await publicMoment(author);
+
+      const attempt = await react(author.accessToken, momentId, "furious");
+
+      assert.equal(attempt.statusCode, 400, attempt.body);
+    });
+
+    it("refuses reacting without a caller", async () => {
+      const response = await app.inject({
+        method: "PUT",
+        url: `/moments/${randomUUID()}/reaction`,
+        payload: { kind: "loved" },
+      });
+
+      assert.equal(response.statusCode, 401, response.body);
     });
   });
 });

@@ -27,6 +27,8 @@ import { LocationService } from "../features/locations/location.service.js";
 import { FollowRepository } from "../features/social/follow.repository.js";
 import { FollowService } from "../features/social/follow.service.js";
 import { MomentRepository } from "../features/moments/moment.repository.js";
+import { MomentReactionRepository } from "../features/moments/moment-reaction.repository.js";
+import { MomentReactionService } from "../features/moments/moment-reaction.service.js";
 import { MomentRelationshipRepository } from "../features/moments/moment-relationship.repository.js";
 import { MomentRelationshipService } from "../features/moments/moment-relationship.service.js";
 import { MomentService } from "../features/moments/moment.service.js";
@@ -123,6 +125,8 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
     accounts,
   );
 
+  const momentReactionRepository = new MomentReactionRepository(database.dataSource);
+
   const app = await buildApp({
     config,
     dependencies,
@@ -175,12 +179,23 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
       accounts,
       realWorldEventRepository,
       locationRepository,
+      undefined,
+      // Blocking severs what two people left on each other's Moments, alongside
+      // the follows and requests it already severs.
+      momentReactionRepository,
     ),
     moments,
     momentRelationships: new MomentRelationshipService(
       database.dataSource,
       new MomentRelationshipRepository(database.dataSource),
       moments,
+    ),
+    momentReactions: new MomentReactionService(
+      database.dataSource,
+      momentReactionRepository,
+      new MomentRepository(database.dataSource),
+      moments,
+      new FollowRepository(database.dataSource),
     ),
     realWorldEvents: new RealWorldEventService(
       database.dataSource,

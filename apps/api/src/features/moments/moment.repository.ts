@@ -358,6 +358,22 @@ export class MomentRepository {
   }
 
   /**
+   * Whether a Moment is accepting reactions.
+   *
+   * @param momentId - Which Moment.
+   * @returns Whether it accepts them. A Moment that does not exist accepts
+   *   nothing, which the caller has already refused on other grounds by the
+   *   time this is asked.
+   */
+  async acceptsReactions(momentId: string): Promise<boolean> {
+    const row = await this.dataSource
+      .getRepository(MomentRow)
+      .findOne({ where: { momentId }, select: { reactionsEnabled: true } });
+
+    return row?.reactionsEnabled ?? false;
+  }
+
+  /**
    * Set how much of a Moment's place other people are told.
    *
    * Independent of which place it is. Somebody who moves a Moment to a

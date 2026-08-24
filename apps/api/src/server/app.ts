@@ -6,6 +6,7 @@ import { loggerOptions } from "../lib/logger/logger.js";
 import type { AuthenticationWiring } from "../features/authentication/authentication.types.js";
 import type { AuthorizationService } from "../features/authorization/authorization.service.js";
 import type { LocationService } from "../features/locations/location.service.js";
+import type { MomentReactionService } from "../features/moments/moment-reaction.service.js";
 import type { MomentRelationshipService } from "../features/moments/moment-relationship.service.js";
 import type { MomentService } from "../features/moments/moment.service.js";
 import type { FollowService } from "../features/social/follow.service.js";
@@ -54,6 +55,8 @@ export interface BuildAppOptions {
   moments?: MomentService | undefined;
   /** Claims connecting Moments. Mounted only alongside the Moment service. */
   momentRelationships?: MomentRelationshipService | undefined;
+  /** Responses to Moments. Mounted only alongside the Moment service. */
+  momentReactions?: MomentReactionService | undefined;
   /** The follow service. Mounted only alongside users. */
   follows?: FollowService | undefined;
 }
@@ -80,6 +83,7 @@ export async function buildApp({
   realWorldEvents,
   moments,
   momentRelationships,
+  momentReactions,
   follows,
 }: BuildAppOptions): Promise<FastifyInstance> {
   // Typed explicitly: Fastify's overloads otherwise resolve a broadly-typed
@@ -136,6 +140,7 @@ export async function buildApp({
     realWorldEvents,
     moments,
     momentRelationships,
+    momentReactions,
     follows,
   );
 

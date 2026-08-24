@@ -93,6 +93,16 @@ export class Moment {
   @Column("text", { name: "location_disclosure", default: "exact" })
   locationDisclosure!: string;
 
+  /**
+   * Whether this Moment accepts reactions.
+   *
+   * False hides the existing ones as well as refusing new ones, and nothing is
+   * deleted — re-enabling brings the same counts back. `reactions.md:280` makes
+   * creator control of interaction the recommended first step.
+   */
+  @Column("boolean", { name: "reactions_enabled", default: true })
+  reactionsEnabled!: boolean;
+
   @Column("timestamptz", { name: "created_at" })
   createdAt!: Date;
 

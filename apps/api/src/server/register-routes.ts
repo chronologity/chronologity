@@ -9,6 +9,7 @@ import type { LocationService } from "../features/locations/location.service.js"
 import { followRoutes } from "../features/social/follow.routes.js";
 import type { FollowService } from "../features/social/follow.service.js";
 import { momentRoutes } from "../features/moments/moment.routes.js";
+import type { MomentReactionService } from "../features/moments/moment-reaction.service.js";
 import type { MomentRelationshipService } from "../features/moments/moment-relationship.service.js";
 import type { MomentService } from "../features/moments/moment.service.js";
 import { realWorldEventRoutes } from "../features/real-world-events/real-world-event.routes.js";
@@ -41,6 +42,8 @@ import type { UserService } from "../features/users/user.service.js";
  * @param momentRelationships - Claims connecting Moments; mounted only
  *   alongside the Moment service, whose visibility check every relationship
  *   read depends on.
+ * @param momentReactions - Responses to Moments; mounted only alongside the
+ *   Moment service, whose visibility check every reaction read depends on.
  * @param follows - The follow service; mounted only alongside users, since
  *   following is a relationship between two accounts.
  * @returns Nothing.
@@ -55,6 +58,7 @@ export async function registerRoutes(
   realWorldEvents?: RealWorldEventService | undefined,
   moments?: MomentService | undefined,
   momentRelationships?: MomentRelationshipService | undefined,
+  momentReactions?: MomentReactionService | undefined,
   follows?: FollowService | undefined,
 ): Promise<void> {
   await app.register(healthRoutes);
@@ -85,7 +89,7 @@ export async function registerRoutes(
       }
 
       if (moments !== undefined) {
-        await app.register(momentRoutes(moments, momentRelationships));
+        await app.register(momentRoutes(moments, momentRelationships, momentReactions));
       }
 
       if (follows !== undefined) {

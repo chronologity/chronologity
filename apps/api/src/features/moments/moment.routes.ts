@@ -10,9 +10,12 @@ import {
   momentRelationshipListSchema,
   momentRelationshipSchema,
   momentSchema,
+  reactionSummarySchema,
   reorderMediaRequestSchema,
   setLocationDisclosureRequestSchema,
   setMomentVisibilityRequestSchema,
+  setReactionRequestSchema,
+  setReactionsEnabledRequestSchema,
   updateCaptionRequestSchema,
 } from "@chronologity/contracts";
 import type { FastifyInstance } from "fastify";
@@ -20,6 +23,7 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { requireUser } from "../../plugins/auth.plugin.js";
 import { errors } from "../../server/error-responses.js";
+import type { MomentReactionService } from "./moment-reaction.service.js";
 import type { MomentRelationshipService } from "./moment-relationship.service.js";
 import type { MomentService } from "./moment.service.js";
 
@@ -37,9 +41,15 @@ import type { MomentService } from "./moment.service.js";
  * @param moments - The service these routes delegate to.
  * @param relationships - Claims connecting Moments. Optional so an application
  *   can be built without them; the endpoints are absent rather than failing.
+ * @param reactions - Responses to Moments. Optional so an application can be
+ *   built without them; the endpoints are absent rather than failing.
  * @returns A Fastify plugin registering the Moment endpoints.
  */
-export function momentRoutes(moments: MomentService, relationships?: MomentRelationshipService) {
+export function momentRoutes(
+  moments: MomentService,
+  relationships?: MomentRelationshipService,
+  reactions?: MomentReactionService,
+) {
   return async function register(instance: FastifyInstance): Promise<void> {
     const app = instance.withTypeProvider<ZodTypeProvider>();
 
@@ -416,6 +426,77 @@ export function momentRoutes(moments: MomentService, relationships?: MomentRelat
 
           return reply.status(204).send(null);
         },
+      );
+    }
+
+    if (reactions !== undefined) {
+      // Singular: at most one reaction per person per Moment, so setting a
+      // second kind replaces the first rather than adding to it.
+      app.put(
+        "/moments/:momentId/reaction",
+        {
+          schema: {
+            summary: "Leave or change your reaction",
+            description:
+              "Replaces whatever you left before; you hold at most one reaction per Moment, so the total counts you once. A Moment not accepting reactions and an author who has blocked you answer the same way, because naming a block would tell somebody they had been blocked.",
+            params: z.object({ momentId: identifierSchema }),
+            body: setReactionRequestSchema,
+            response: { 200: reactionSummarySchema, ...errors(400, 401, 403, 404) },
+          },
+          preHandler: requireUser,
+        },
+        async (request) =>
+          reactions.react(request.params.momentId, request.user.userId, request.body.kind),
+      );
+
+      app.delete(
+        "/moments/:momentId/reaction",
+        {
+          schema: {
+            summary: "Take your reaction back",
+            description:
+              "Permitted even where reacting is not, so somebody blocked afterwards — or reacting before the author turned reactions off — can still withdraw. Withdrawing one you never left is the state you asked for, not an error.",
+            params: z.object({ momentId: identifierSchema }),
+            response: { 200: reactionSummarySchema, ...errors(401, 403, 404) },
+          },
+          preHandler: requireUser,
+        },
+        async (request) => reactions.withdraw(request.params.momentId, request.user.userId),
+      );
+
+      // Counts, never identities. A list of who reacted to a restricted Moment
+      // would reveal that Moment's audience to everybody on it
+      // (`reactions.md:307`).
+      app.get(
+        "/moments/:momentId/reactions",
+        {
+          schema: {
+            summary: "How a Moment has been responded to",
+            description:
+              "Counts by kind, the number of people, and your own. Never who else reacted. `enabled: false` means the author turned reactions off and the counts are withheld — which is a different fact from nobody having reacted, and worth rendering differently. Counts are derived and may lag; they are engagement, never historical importance.",
+            params: z.object({ momentId: identifierSchema }),
+            response: { 200: reactionSummarySchema, ...errors(401, 403, 404) },
+          },
+          preHandler: requireUser,
+        },
+        async (request) => reactions.summary(request.params.momentId, request.user.userId),
+      );
+
+      app.put(
+        "/moments/:momentId/reactions/enabled",
+        {
+          schema: {
+            summary: "Turn reactions on or off",
+            description:
+              "Turning them off hides the existing counts as well as refusing new ones. Nothing is deleted: turning them back on brings the same counts back.",
+            params: z.object({ momentId: identifierSchema }),
+            body: setReactionsEnabledRequestSchema,
+            response: { 200: reactionSummarySchema, ...errors(400, 401, 403, 404) },
+          },
+          preHandler: requireUser,
+        },
+        async (request) =>
+          reactions.setEnabled(request.params.momentId, request.user.userId, request.body),
       );
     }
 

@@ -347,6 +347,79 @@ export const momentRelationshipListSchema = z.object({
 
 export type MomentRelationshipList = z.infer<typeof momentRelationshipListSchema>;
 
+/**
+ * A lightweight response to a Moment.
+ *
+ * Four feelings, each describing the reader rather than the history. None of
+ * them amounts to confirming that a Moment occurred as represented, which
+ * `reactions.md:99` warns against: there is no verification capability behind
+ * such a claim, so no reaction may imply one.
+ *
+ * These are names, never glyphs. `reactions.md:101` requires that changing an
+ * icon must not silently transform the meaning of what is stored — so the
+ * artwork a client renders is free to change, and the meaning recorded against
+ * years of history is not.
+ */
+export const reactionKindSchema = z.enum([
+  /** Warmth, affection, being touched by it. */
+  "loved",
+  /** It was funny. */
+  "amused",
+  /** Wonder, or disbelief. */
+  "astonished",
+  /** Sorrow, sympathy, loss. */
+  "saddened",
+]);
+
+export type ReactionKind = z.infer<typeof reactionKindSchema>;
+
+/** Setting your own reaction to a Moment. */
+export const setReactionRequestSchema = z.object({ kind: reactionKindSchema });
+
+export type SetReactionRequest = z.infer<typeof setReactionRequestSchema>;
+
+/** Turning reactions on or off for a Moment. */
+export const setReactionsEnabledRequestSchema = z.object({ enabled: z.boolean() });
+
+export type SetReactionsEnabledRequest = z.infer<typeof setReactionsEnabledRequestSchema>;
+
+/**
+ * How a Moment has been responded to.
+ *
+ * Counts, never identities. `reactions.md:307` asks that displaying an
+ * aggregate and displaying exactly who reacted be distinguished deliberately,
+ * and a list of reactors on a restricted Moment would reveal that Moment's
+ * audience to everybody on it.
+ *
+ * Counts are derived and may lag at scale (`reactions.md:214`). They are not a
+ * measure of historical importance and must never be presented as one: a
+ * private family Moment with two may matter more than a public one with
+ * millions.
+ */
+export const reactionSummarySchema = z.object({
+  /**
+   * Whether this Moment accepts reactions.
+   *
+   * False hides the counts as well as refusing new ones. Told rather than
+   * implied, because "reactions are off" and "nobody has reacted" are different
+   * facts and a client that cannot tell them apart will render the wrong thing.
+   */
+  enabled: z.boolean(),
+  /** How many of each kind. A kind nobody chose is absent rather than zero. */
+  counts: z.partialRecord(reactionKindSchema, z.number().int().min(0)),
+  /** Everybody who reacted, counted once each. */
+  total: z.number().int().min(0),
+  /**
+   * Your own, or null.
+   *
+   * Yours is not an identity disclosure, and without it a client cannot show
+   * which one you chose.
+   */
+  yours: reactionKindSchema.nullable(),
+});
+
+export type ReactionSummary = z.infer<typeof reactionSummarySchema>;
+
 /** Correcting what a Moment says happened. */
 export const updateCaptionRequestSchema = z.object({ caption: captionSchema });
 

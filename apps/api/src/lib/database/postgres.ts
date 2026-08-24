@@ -20,6 +20,7 @@ import {
   UserFollow,
 } from "../../features/social/follow.model.js";
 import { MomentAudience } from "../../features/moments/moment-audience.model.js";
+import { MomentReaction } from "../../features/moments/moment-reaction.model.js";
 import { MomentRelationship } from "../../features/moments/moment-relationship.model.js";
 import { IdentityPhone, PhoneSignInCode } from "../../features/authentication/phone.model.js";
 import {
@@ -86,6 +87,7 @@ const entities = [
   MomentEdit,
   MomentAudience,
   MomentRelationship,
+  MomentReaction,
   IdentityPhone,
   PhoneSignInCode,
   RealWorldEvent,

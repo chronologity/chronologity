@@ -13,6 +13,7 @@ import { NotFoundError } from "../../lib/errors/not-found-error.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
 import type { LocationRepository } from "../locations/location.repository.js";
 import type { RealWorldEventRepository } from "../real-world-events/real-world-event.repository.js";
+import type { MomentReactionRepository } from "../moments/moment-reaction.repository.js";
 import type { UserRepository } from "../users/user.repository.js";
 import type { FollowRepository } from "./follow.repository.js";
 import {
@@ -46,6 +47,9 @@ export class FollowService {
    *   actually exists.
    * @param locations - Used to check that a place being followed exists.
    * @param clock - Injected so tests can move time without waiting.
+   * @param reactions - Optional. Blocking severs what two people left on each
+   *   other's Moments, and an application built without Moments has none to
+   *   sever.
    */
   constructor(
     private readonly dataSource: DataSource,
@@ -54,6 +58,7 @@ export class FollowService {
     private readonly realWorldEvents: RealWorldEventRepository,
     private readonly locations: LocationRepository,
     private readonly clock: () => Date = () => new Date(),
+    private readonly reactions?: MomentReactionRepository,
   ) {}
 
   /**
@@ -308,6 +313,10 @@ export class FollowService {
       await this.follows.unfollow(tx, blockerUserId, blockedUserId);
       await this.follows.unfollow(tx, blockedUserId, blockerUserId);
       await this.follows.cancelRequestsBetween(tx, blockerUserId, blockedUserId, at);
+      // Reactions go with the follows. `reactions.md:364` permits a Block to
+      // invalidate one, and leaving them would let a blocked person keep
+      // contributing to the counts on history they can no longer even see.
+      await this.reactions?.severBetween(tx, blockerUserId, blockedUserId);
     });
   }
 

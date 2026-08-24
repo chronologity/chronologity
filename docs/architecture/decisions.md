@@ -3393,3 +3393,65 @@ Moving the existing implementation comments into `description` rather than writi
 **The generator reads `.env.example` rather than the environment.** Routes do not depend on anybody's credentials, so a document that required S3 keys to generate would be absurd, and a CI job could not produce one after a bare checkout. It has a useful side effect: generating the document now also proves `.env.example` still covers every variable the application requires, because a missing one fails there rather than on somebody's first run.
 
 **Sixty-two of eighty-one operations carry a description.** More than the fifteen to twenty first estimated, because once the error helper carried the general warning, the remaining prose was about things a consumer genuinely cannot infer: that asking for a state which already holds succeeds, that a reduced place carries no identifier, that a relationship whose far end is inaccessible is absent rather than redacted, and that authentication answers say nothing about whether an account exists.
+
+# ADR-113 — Reactions Are Names, Counted by Aggregate, and Hidden Rather Than Deleted
+
+**Status:** Accepted
+
+## Decision
+
+Four reaction kinds ship: `loved`, `amused`, `astonished`, `saddened`. They are stored as names, never as glyphs.
+
+One reaction per person per Moment, enforced by the primary key, so changing one is an update.
+
+Counts are aggregated on read. There is no counter column anywhere.
+
+Only counts are exposed, never who reacted.
+
+An author may disable reactions on a Moment. Doing so hides the existing ones and refuses new ones; nothing is deleted, and re-enabling brings the same counts back.
+
+Blocking severs whatever two people left on each other's Moments, inside the transaction that records the Block.
+
+## Alternatives Considered
+
+Storing the emoji a client renders.
+
+A `reaction_count` column on `moments`, maintained on write.
+
+Returning the list of people who reacted alongside the counts.
+
+Deleting existing reactions when an author disables them.
+
+Filtering blocked people out of counts at read time rather than severing at block time.
+
+Including counts in the Moment response, so a client needs one request rather than two.
+
+## Rationale
+
+**Names, because an icon is not a meaning.** `reactions.md:101` requires that changing the icon or label of a stored reaction must not silently transform what it meant. A stored `❤️` would make restyling a retroactive edit of years of history; a stored `loved` lets the artwork change freely and the meaning not at all. It is also what allows the reactions to carry the product's own aesthetic rather than the Unicode Consortium's.
+
+**Four feelings that describe the reader, not the history.** `reactions.md:99` warns against reaction types implying claims the product cannot support — a reaction must not amount to confirming that a Moment occurred as represented, because no verification capability exists behind such a claim. `loved`, `amused`, `astonished`, and `saddened` all say something about the person reading, and none of them corroborates anything.
+
+**No counter column, because the roadmap forbids exactly that.** *Do not serialise high-volume interactions through a single contended row* — and a running total on `moments` is that row: every reaction on a popular Moment queueing behind one lock. Counts come from a grouped aggregate over `(moment_id, kind)`. `reactions.md:214` already calls counts derived and permits them to be eventually consistent, which is the door a projection walks through in phase 7 when the aggregate stops being cheap.
+
+**The primary key is the rule.** `reactions.md:111` requires at most one active reaction per person per Moment. Keying the table on the pair makes replacement the natural operation and reaction inflation impossible by construction, rather than something the application must remember not to do.
+
+**Counts, not identities.** `reactions.md:307` asks that the two be treated as separate decisions. On a restricted Moment, a list of reactors would tell everybody on that list who else was trusted with it — the audience revealed to itself. Your own reaction is returned, which is not a disclosure and without which a client cannot show what you chose.
+
+**Disabling hides rather than deletes.** Somebody who reacted is not retroactively unheard, and an author who changes their mind gets the same Moment back rather than a blank one. It also keeps signal that a later moderation phase may need.
+
+**A disabled Moment says so.** `enabled: false` rather than a count of zero, because "reactions are off" and "nobody has reacted" are different facts and a client that cannot distinguish them renders the wrong thing — the same distinction the place disclosure draws between a withheld place and no place at all.
+
+**Blocking severs at block time.** `reactions.md:364` permits a Block to invalidate a reaction, and severing matches what a Block already does to follows and requests. Doing it once, in that transaction, keeps the cost bounded by what those two people actually did; the alternative is joining against `user_blocks` on every count query for the rest of the system's life.
+
+## Consequences
+
+**Refusing to react never names a Block.** A blocked person is told the Moment is not accepting reactions — the same sentence an author's own setting produces. The policy answers blocking first for that reason: reversing the order would let somebody learn whether reactions were enabled on history they are not permitted to see.
+
+**Counts are absent rather than zero for a kind nobody chose.** The contract uses a partial record, so `counts` carries only what happened. A client rendering four buttons supplies its own zeroes; the API does not invent them.
+
+**Withdrawing is permitted where reacting is not.** Somebody blocked after reacting, or reacting before an author turned reactions off, can still take theirs back. Trapping a reaction somewhere its author can no longer reach would be the wrong asymmetry.
+
+**Counts are not on the Moment.** A Moment read and a Moment list would each need an aggregate on the hottest path in the system, for information a client can ask for when it needs it. Keeping them apart also leaves phase 7 free to serve them from a projection without changing the Moment contract.
+
+**No Integration Event is published.** Uploads publish the only event in the system and it has a worker behind it. An event is immutable and versioned, so publishing one with no consumer would fix a shape 5Q has not yet decided it wants.

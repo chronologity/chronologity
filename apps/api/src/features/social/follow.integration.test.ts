@@ -15,6 +15,7 @@ import {
   createRealWorldEvent,
 } from "../../testing/fixtures.js";
 import { LocationRepository } from "../locations/location.repository.js";
+import { MomentReactionRepository } from "../moments/moment-reaction.repository.js";
 import { MomentRepository } from "../moments/moment.repository.js";
 import { MomentService } from "../moments/moment.service.js";
 import { RealWorldEventRepository } from "../real-world-events/real-world-event.repository.js";
@@ -129,6 +130,8 @@ describe("following", () => {
         accounts,
         new RealWorldEventRepository(database.dataSource),
         new LocationRepository(database.dataSource),
+        undefined,
+        new MomentReactionRepository(database.dataSource),
       ),
       // Mounted so the property this whole sub-phase rests on can be asserted
       // rather than assumed: following somebody must not let you read their

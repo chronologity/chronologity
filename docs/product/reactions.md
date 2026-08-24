@@ -88,13 +88,25 @@ The initial model should not require first-class reactions to:
 
 Reactions to Comments may be considered separately, but they should not be assumed merely because Moment reactions exist.
 
+## What Is Settled
+
+**Four reaction kinds ship** (ADR-113): **loved**, **amused**, **astonished**, and **saddened**. Each describes the reader's own response, so none of them can be mistaken for confirming that a Moment happened as represented.
+
+**They are stored as names, never as icons.** The artwork a client renders may change freely; what a reaction meant when somebody left it may not.
+
+**Counts are shown, identities are not.** A list of who reacted to a restricted Moment would reveal that Moment's audience to everybody on it. Whoever is asking sees their own reaction, and nobody else's.
+
+**An author may turn reactions off on a Moment.** Doing so hides the existing counts as well as refusing new ones, and deletes nothing — turning them back on brings the same counts back. A Moment with reactions off says so, rather than reporting that nobody has reacted; those are different facts.
+
+**Blocking removes what two people left on each other's Moments**, alongside the follows and requests a Block already severs. A refusal to react never says a block is the reason.
+
+**Counts are aggregated, never accumulated in a column.** There is no running total to contend on, which is what the roadmap requires of high-volume interactions.
+
 ## Reaction Types
 
 Chronologity should support a **small, explicit set of reaction types** rather than an unbounded or user-defined reaction vocabulary.
 
 The reaction set should be expressive enough to support lightweight human response while remaining understandable, accessible, stable across clients, and suitable for aggregation.
-
-The exact day-one reaction set remains an open product decision.
 
 Chronologity should avoid choosing reaction types that imply unsupported historical claims. For example, a reaction should not mean that the reacting User confirms the Moment occurred exactly as represented unless the product explicitly introduces a separate verification capability.
 
