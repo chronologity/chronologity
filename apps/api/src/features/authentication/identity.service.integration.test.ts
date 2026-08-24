@@ -41,6 +41,7 @@ const config: AuthConfig = {
   accessTokenTtlSeconds: 600,
   refreshTokenTtlSeconds: 2_592_000,
   magicLinkTtlSeconds: 900,
+  phoneCodeTtlSeconds: 300,
   magicLinkBaseUrl: "http://localhost:3000/auth/sessions",
   // The cheapest the schema permits: these tests hash many passwords, and
   // production cost would dominate the suite without testing what it changes.

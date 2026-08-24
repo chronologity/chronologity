@@ -3229,3 +3229,57 @@ That guarantee paid for itself immediately. The compiler found five read paths, 
 The image derivatives were already clean, because the JPEG encoder does not write EXIF. They get the flag anyway — that was the encoder's behaviour rather than an instruction, and a property worth having is worth stating.
 
 **The original keeps its metadata.** It is what `GET /uploads/:uploadId/places` reads to offer place suggestions, and what private storage should retain is deliberately open (`locations.md:1313`).
+
+# ADR-110 — Sign In by Phone, and Lock a Number That Has Gone Quiet
+
+**Status:** Accepted
+
+## Decision
+
+A phone number is a way to sign in. An account holds one, and an email address remains required.
+
+A number that has not been used to sign in for **60 days** stops working for sign-in until its holder re-confirms it. When somebody asks for a code for such a number, no text is sent and the account's email address receives a notice instead.
+
+Every phone sign-in emails the account.
+
+Codes are six digits, live five minutes, are stored only as hashes, are bound to the number they were sent to, and are spent after five wrong guesses.
+
+## Alternatives Considered
+
+Treating a number as a contact detail that never signs anybody in.
+
+Letting a number stand alone, with no email address on the account.
+
+Reusing `magic_link_tokens` for codes, since both are single-use secrets with an expiry.
+
+Waiting for a provider that can answer whether a number was recently reassigned, and building nothing until then.
+
+Notifying by email on every phone sign-in and calling that the whole defence.
+
+## Rationale
+
+**The recycled-number problem is the reason most of this exists.** Phone numbers are leased, not owned. A carrier disconnects a number when somebody stops paying and, after a holding period, gives it to a different person — roughly 35 million numbers a year in the United States alone. That person can then receive a code sent to it and sign in. There is no skill in the attack; they answer their own telephone. It is why NIST downgraded SMS as an authenticator.
+
+**Dormancy is checked because dormancy is the precondition.** A number is only recycled after its holder stops using it, so a number that has gone quiet is exactly the one that may not be theirs any more. Locking sign-in after sixty days — comfortably inside the shortest carrier holding period — means a reassigned number is already refused before it can reach anybody new. Nothing about the code, the device, or the request could have told us this; only the silence could.
+
+**Re-confirmation runs through email, which is what makes it work.** Whoever received a recycled number holds the telephone and nothing else. Requiring the account's address to bring the number back is a check they cannot pass. This is also why an email address stays required: it is the fallback that makes every other decision here safe.
+
+**A dormant number produces a notice, not a silence.** ADR-081 forbids telling a caller whether an account exists, so the response is identical either way. But the account holder is a different audience from the caller, and reaching them through the address costs the attacker nothing they can observe. The stranger holding the telephone learns nothing; the person holding the address learns exactly what to do.
+
+**Codes are not magic links, and share no table with them.** A link carries 32 random bytes and cannot be guessed, so single use and expiry are enough. A code is six digits somebody types — one in a million, which is guessable — so it needs an attempt counter, a much shorter life, and binding to the number it was sent to. Storing the two kinds together would invite treating them alike.
+
+**A sign-in notice on every use, because prevention can fail.** Dormancy cannot see a SIM swap, where an attacker persuades a carrier to move a live number to their own SIM. Nothing buildable without carrier data can. The notice does not prevent that; it makes it visible the same minute, through a channel the attacker does not hold.
+
+## Consequences
+
+**This does not stop SIM swap**, and the product documentation says so rather than implying otherwise. Detecting it needs a provider that can report a recent swap or reassignment, and the place for that question is where a code is sent — `integrations/sms/sms-client.ts`. Adding it changes that adapter and nothing that calls it.
+
+**Nothing reaches a real phone yet.** There is no provider account, so the adapter records what it would have sent. That is the same shape email has, where local development points at Mailpit. The interface does not change when a provider arrives.
+
+**A refusal has to commit before it is thrown, and this was found by a test rather than by reasoning.** The first implementation counted a wrong guess and then threw from inside the same transaction, which rolled the count back — so guessing cost an attacker nothing, and the attempt limit did nothing at all. The test that spends a code after five wrong guesses caught it. Both code paths now record the refusal, return, and throw outside the transaction, matching what the password path already did.
+
+**Wrong guesses are counted against the outstanding code, not the one guessed.** A guessed value usually matches no row at all, which is precisely the case that has to be limited; counting only exact matches would have limited nothing.
+
+**Issuing a code spends any previous one for that number and purpose.** This differs from magic links, where old tokens are deliberately left alive so nobody can cancel somebody else's pending sign-in. With a short code the reasoning inverts: every live code multiplies the values an attacker may guess.
+
+**Two spellings of a number are one number.** `libphonenumber-js` is a new dependency at `apps/api`, and a justified one — country codes overlap, national prefixes come and go, and lengths vary, so hand-rolling this is how one telephone becomes two accounts. A number with no country is refused rather than guessed at, because guessing would resolve an ambiguous number to a real telephone somewhere else.

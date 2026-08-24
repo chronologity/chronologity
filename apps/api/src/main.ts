@@ -14,6 +14,9 @@ import { createPlaceSearchClient } from "./integrations/places/place-search-clie
 import { loadBreachedPasswordIndex } from "./lib/auth/breached-passwords.js";
 import { IdentityRepository } from "./features/authentication/identity.repository.js";
 import { IdentityService } from "./features/authentication/identity.service.js";
+import { PhoneRepository } from "./features/authentication/phone.repository.js";
+import { PhoneService } from "./features/authentication/phone.service.js";
+import { createSmsClient } from "./integrations/sms/sms-client.js";
 import { SessionRepository } from "./features/authentication/session.repository.js";
 import { SessionService } from "./features/authentication/session.service.js";
 import { AuthorizationRepository } from "./features/authorization/authorization.repository.js";
@@ -91,6 +94,15 @@ async function main(): Promise<void> {
         config.auth,
       ),
       sessions,
+      phones: new PhoneService(
+        database.dataSource,
+        new PhoneRepository(database.dataSource),
+        new IdentityRepository(database.dataSource),
+        sessions,
+        createSmsClient(),
+        email,
+        config.auth,
+      ),
       config: config.auth,
       dataSource: database.dataSource,
     },

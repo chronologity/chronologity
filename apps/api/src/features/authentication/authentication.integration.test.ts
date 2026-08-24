@@ -54,6 +54,7 @@ const config: AppConfig = {
     accessTokenTtlSeconds: 600,
     refreshTokenTtlSeconds: 2_592_000,
     magicLinkTtlSeconds: 900,
+    phoneCodeTtlSeconds: 300,
     magicLinkBaseUrl: "http://localhost:3000/auth/sessions",
     // Cheapest parameters the schema permits: these tests hash many passwords,
     // and Argon2id at production cost would dominate the suite's runtime
@@ -114,6 +115,27 @@ async function readMagicLinkFor(email: string, timeoutMs = 10_000): Promise<stri
   }
 
   throw new Error(`No sign-in link arrived for ${email}`);
+}
+
+/** Read the subject lines Mailpit received for an address, newest first. */
+async function readSubjectsFor(email: string, timeoutMs = 10_000): Promise<string[]> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const response = await fetch(
+      `${MAILPIT}/api/v1/search?query=${encodeURIComponent(`to:${email}`)}`,
+    );
+    const body = (await response.json()) as { messages?: { Subject: string }[] };
+    const subjects = body.messages?.map((message) => message.Subject) ?? [];
+
+    if (subjects.length > 0) {
+      return subjects;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+
+  return [];
 }
 
 const uniqueEmail = () => `person-${randomUUID()}@example.test`;
@@ -539,6 +561,8 @@ describe("authentication", () => {
           sessionCreationsPerWindow: 10,
           passwordAttemptsPerWindow: 3,
           registrationsPerWindow: 10,
+          phoneCodeRequestsPerWindow: 3,
+          phoneCodeAttemptsPerWindow: 10,
           windowMinutes: 15,
         },
       },
@@ -881,6 +905,8 @@ describe("authentication", () => {
             sessionCreationsPerWindow: 100,
             passwordAttemptsPerWindow: 3,
             registrationsPerWindow: 100,
+          phoneCodeRequestsPerWindow: 3,
+          phoneCodeAttemptsPerWindow: 10,
             windowMinutes: 15,
           },
         },
@@ -927,4 +953,372 @@ describe("authentication", () => {
     assert.ok(id !== undefined, `no identity for ${email}`);
     return id;
   }
+
+  describe("signing in with a phone number", () => {
+    /**
+     * A valid number nobody has claimed.
+     *
+     * Random rather than counted, because the database outlives the suite: a
+     * counter starting from the same place would collide with whatever the
+     * previous run left behind, and the collision would surface as a confusing
+     * failure in an unrelated test.
+     */
+    const uniquePhone = () => {
+      const exchange = 200 + Math.floor(Math.random() * 800);
+      const line = String(Math.floor(Math.random() * 10_000)).padStart(4, "0");
+
+      return `+1212${exchange}${line}`;
+    };
+
+    const authed = (accessToken: string) => ({ authorization: `Bearer ${accessToken}` });
+
+    const claim = async (accessToken: string, phone: string) =>
+      app.inject({
+        method: "POST",
+        url: "/auth/phone",
+        headers: authed(accessToken),
+        payload: { phone },
+      });
+
+    /** The most recent code texted to a number. */
+    const codeFor = (phone: string): string => {
+      const sent = authentication.textsSent.filter((text) => text.to === phone);
+      const last = sent[sent.length - 1];
+
+      assert.notEqual(last, undefined, `no code was texted to ${phone}`);
+
+      return /\b(\d{6})\b/.exec(last?.text ?? "")?.[1] ?? "";
+    };
+
+    const confirm = async (accessToken: string, code: string) =>
+      app.inject({
+        method: "POST",
+        url: "/auth/phone/verify",
+        headers: authed(accessToken),
+        payload: { code },
+      });
+
+    /** Somebody with an account and a proven number. */
+    const withAPhone = async () => {
+      const email = uniqueEmail();
+      const { credentials } = await signIn(email);
+      const phone = uniquePhone();
+
+      assert.equal((await claim(credentials.accessToken, phone)).statusCode, 202);
+      assert.equal((await confirm(credentials.accessToken, codeFor(phone))).statusCode, 204);
+
+      return { email, phone, credentials };
+    };
+
+    const askForCode = async (phone: string) =>
+      app.inject({ method: "POST", url: "/auth/phone/codes", payload: { phone } });
+
+    const signInWith = async (phone: string, code: string) =>
+      app.inject({ method: "POST", url: "/auth/sessions/phone", payload: { phone, code } });
+
+    /** Push a number's last use into the past, as a quiet year would. */
+    const goQuiet = async (phone: string, daysAgo: number) => {
+      await database.dataSource.query(
+        `UPDATE identity_phones
+            SET last_signed_in_at = now() - ($2 || ' days')::interval,
+                verified_at = now() - ($2 || ' days')::interval
+          WHERE normalized_phone = $1`,
+        [phone, String(daysAgo)],
+      );
+    };
+
+    it("claims a number, proves it, and signs in with it", async () => {
+      const { phone } = await withAPhone();
+
+      assert.equal((await askForCode(phone)).statusCode, 202);
+      const response = await signInWith(phone, codeFor(phone));
+
+      assert.equal(response.statusCode, 201, response.body);
+      assert.ok(response.json().accessToken.length > 0);
+    });
+
+    it("treats two spellings of one number as one number", async () => {
+      const email = uniqueEmail();
+      const { credentials } = await signIn(email);
+      const phone = uniquePhone();
+
+      const asTyped = `+1 (${phone.slice(2, 5)}) ${phone.slice(5, 8)}-${phone.slice(8)}`;
+
+      await claim(credentials.accessToken, asTyped);
+
+      // Sent to the canonical form, not to what was typed. Two spellings
+      // reaching two rows would be one person with two accounts.
+      assert.equal(authentication.textsSent.at(-1)?.to, phone);
+    });
+
+    it("refuses a number somebody else already holds", async () => {
+      const { phone } = await withAPhone();
+      const other = await signIn(uniqueEmail());
+
+      const response = await claim(other.credentials.accessToken, phone);
+
+      // The caller is already signed in, so saying so enumerates nothing they
+      // could not learn by trying to use it.
+      assert.equal(response.statusCode, 400, response.body);
+    });
+
+    it("leaves exactly one number when a replacement is claimed", async () => {
+      const { credentials } = await withAPhone();
+      const replacement = uniquePhone();
+
+      await claim(credentials.accessToken, replacement);
+
+      const held = await app.inject({
+        method: "GET",
+        url: "/auth/phone",
+        headers: authed(credentials.accessToken),
+      });
+
+      assert.equal(held.json().phone, replacement);
+      // Replacing is a claim, not a proof: the new number starts unverified.
+      assert.equal(held.json().verified, false);
+    });
+
+    it("refuses a wrong code", async () => {
+      const { phone } = await withAPhone();
+      await askForCode(phone);
+
+      const response = await signInWith(phone, "000000");
+
+      assert.equal(response.statusCode, 401, response.body);
+    });
+
+    it("spends a code after enough wrong guesses, right one or not", async () => {
+      const { phone } = await withAPhone();
+      await askForCode(phone);
+      const right = codeFor(phone);
+
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await signInWith(phone, "000000");
+      }
+
+      const response = await signInWith(phone, right);
+
+      // Six digits is one in a million, which is guessable. The attempt counter
+      // is what makes it not worth trying.
+      assert.equal(response.statusCode, 401, response.body);
+    });
+
+    it("refuses a code that has expired", async () => {
+      const { phone } = await withAPhone();
+      await askForCode(phone);
+      const code = codeFor(phone);
+
+      await database.dataSource.query(
+        `UPDATE phone_sign_in_codes SET expires_at = now() - interval '1 minute'
+          WHERE normalized_phone = $1`,
+        [phone],
+      );
+
+      assert.equal((await signInWith(phone, code)).statusCode, 401);
+    });
+
+    it("refuses a code the second time it is used", async () => {
+      const { phone } = await withAPhone();
+      await askForCode(phone);
+      const code = codeFor(phone);
+
+      assert.equal((await signInWith(phone, code)).statusCode, 201);
+      assert.equal((await signInWith(phone, code)).statusCode, 401);
+    });
+
+    it("refuses a code issued for a different number", async () => {
+      const mine = await withAPhone();
+      const theirs = await withAPhone();
+      await askForCode(theirs.phone);
+      const theirCode = codeFor(theirs.phone);
+
+      const response = await signInWith(mine.phone, theirCode);
+
+      // A six-digit secret is short enough that binding it to one telephone is
+      // what stops a guessed code opening somebody else's account.
+      assert.equal(response.statusCode, 401, response.body);
+    });
+
+    it("refuses a claim code used to sign in", async () => {
+      const email = uniqueEmail();
+      const { credentials } = await signIn(email);
+      const phone = uniquePhone();
+      await claim(credentials.accessToken, phone);
+
+      const response = await signInWith(phone, codeFor(phone));
+
+      // Purpose is bound into the record. Without it, claiming a number would
+      // hand over a working sign-in code.
+      assert.equal(response.statusCode, 401, response.body);
+    });
+
+    it("refuses an unproven number", async () => {
+      const email = uniqueEmail();
+      const { credentials } = await signIn(email);
+      const phone = uniquePhone();
+      await claim(credentials.accessToken, phone);
+      const before = authentication.textsSent.length;
+
+      await askForCode(phone);
+
+      assert.equal(authentication.textsSent.length, before, "a code was sent anyway");
+    });
+
+    it("answers identically for a number it knows and one it does not", async () => {
+      const { phone } = await withAPhone();
+      const stranger = uniquePhone();
+
+      const known = await askForCode(phone);
+      const unknown = await askForCode(stranger);
+
+      // ADR-081: no authentication surface may disclose whether an account
+      // exists. Compared whole, not by status code.
+      assert.equal(known.statusCode, unknown.statusCode);
+      assert.deepEqual(known.json(), unknown.json());
+    });
+
+    it("sends no code to a number that has gone quiet", async () => {
+      const { phone } = await withAPhone();
+      await goQuiet(phone, 61);
+      const before = authentication.textsSent.length;
+
+      await askForCode(phone);
+
+      // The whole recycled-number defence. Whoever holds the telephone now gets
+      // nothing at all.
+      assert.equal(authentication.textsSent.length, before, "a code went to a quiet number");
+    });
+
+    it("answers identically for a quiet number as for an unknown one", async () => {
+      const { phone } = await withAPhone();
+      await goQuiet(phone, 61);
+
+      const quiet = await askForCode(phone);
+      const unknown = await askForCode(uniquePhone());
+
+      assert.deepEqual(quiet.json(), unknown.json());
+    });
+
+    it("emails the account when its number has gone quiet", async () => {
+      const { email, phone } = await withAPhone();
+      await goQuiet(phone, 61);
+
+      await askForCode(phone);
+
+      // The other half: the stranger holding the number learns nothing, and the
+      // person holding the address learns what to do.
+      const subjects = await readSubjectsFor(email);
+      assert.ok(
+        subjects.some((subject) => /confirm your phone number/i.test(subject)),
+        `no notice arrived; subjects were ${JSON.stringify(subjects)}`,
+      );
+    });
+
+    it("refuses to sign in with a quiet number even given a valid code", async () => {
+      const { phone } = await withAPhone();
+      await askForCode(phone);
+      const code = codeFor(phone);
+      await goQuiet(phone, 61);
+
+      const response = await signInWith(phone, code);
+
+      // A code issued before the number went quiet must not outlive it.
+      assert.equal(response.statusCode, 401, response.body);
+    });
+
+    it("works again once a quiet number is re-confirmed", async () => {
+      const { phone, credentials } = await withAPhone();
+      await goQuiet(phone, 61);
+
+      await claim(credentials.accessToken, phone);
+      await confirm(credentials.accessToken, codeFor(phone));
+      await askForCode(phone);
+
+      assert.equal((await signInWith(phone, codeFor(phone))).statusCode, 201);
+    });
+
+    it("emails the account whenever its number is used to sign in", async () => {
+      const { email, phone } = await withAPhone();
+      await askForCode(phone);
+
+      await signInWith(phone, codeFor(phone));
+
+      // Dormancy cannot see a SIM swap. This is what makes one visible, through
+      // a channel the attacker does not hold.
+      const subjects = await readSubjectsFor(email);
+      assert.ok(
+        subjects.some((subject) => /used to sign in/i.test(subject)),
+        `no notice arrived; subjects were ${JSON.stringify(subjects)}`,
+      );
+    });
+
+    it("stops a removed number signing in", async () => {
+      const { phone, credentials } = await withAPhone();
+
+      await app.inject({
+        method: "DELETE",
+        url: "/auth/phone",
+        headers: authed(credentials.accessToken),
+      });
+
+      const before = authentication.textsSent.length;
+      await askForCode(phone);
+
+      assert.equal(authentication.textsSent.length, before);
+    });
+
+    it("treats removing a number nobody holds as already done", async () => {
+      const { credentials } = await signIn(uniqueEmail());
+
+      const response = await app.inject({
+        method: "DELETE",
+        url: "/auth/phone",
+        headers: authed(credentials.accessToken),
+      });
+
+      assert.equal(response.statusCode, 204, response.body);
+    });
+
+    it("refuses a number that could not be dialled", async () => {
+      const { credentials } = await signIn(uniqueEmail());
+
+      const response = await claim(credentials.accessToken, "+1 212 555");
+
+      assert.equal(response.statusCode, 400, response.body);
+    });
+
+    it("refuses a number with no country", async () => {
+      const { credentials } = await signIn(uniqueEmail());
+
+      const response = await claim(credentials.accessToken, "212 555 0184");
+
+      assert.equal(response.statusCode, 400, response.body);
+    });
+
+    it("tells somebody their own number has gone quiet", async () => {
+      const { phone, credentials } = await withAPhone();
+      await goQuiet(phone, 61);
+
+      const held = await app.inject({
+        method: "GET",
+        url: "/auth/phone",
+        headers: authed(credentials.accessToken),
+      });
+
+      // Told to its holder deliberately: they are the only person who can act
+      // on it, and it discloses nothing about anybody else.
+      assert.equal(held.json().dormant, true);
+    });
+
+    it("refuses claiming a number without a caller", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/auth/phone",
+        payload: { phone: uniquePhone() },
+      });
+
+      assert.equal(response.statusCode, 401, response.body);
+    });
+  });
 });

@@ -1,4 +1,4 @@
-import type { DataSource } from "typeorm";
+import { IsNull, Not, type DataSource } from "typeorm";
 import type { Transaction } from "../../lib/database/transaction.js";
 import { Identity, IdentityEmail, IdentityPassword } from "./identity.model.js";
 import { generateId } from "../../lib/ids/generate-id.js";
@@ -114,6 +114,23 @@ export class IdentityRepository {
     });
 
     return row?.identityId;
+  }
+
+  /**
+   * Find a verified address for an Identity.
+   *
+   * @param identityId - Whose address.
+   * @returns One of their verified addresses, or undefined when they have none.
+   *   Any will do: this is used to tell somebody something about their own
+   *   account, not to establish who they are.
+   */
+  async findVerifiedEmailFor(identityId: string): Promise<string | undefined> {
+    const row = await this.dataSource.getRepository(IdentityEmail).findOne({
+      where: { identityId, verifiedAt: Not(IsNull()) },
+      select: { email: true },
+    });
+
+    return row?.email;
   }
 
   /**

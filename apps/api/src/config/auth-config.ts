@@ -26,6 +26,14 @@ export interface AuthConfig {
   readonly accessTokenTtlSeconds: number;
   readonly refreshTokenTtlSeconds: number;
   readonly magicLinkTtlSeconds: number;
+  /**
+   * How long a code sent by text lasts.
+   *
+   * Much shorter than a magic link. A link carries 32 random bytes and cannot
+   * be guessed; a six-digit code can, so the window in which guessing is
+   * possible is kept small.
+   */
+  readonly phoneCodeTtlSeconds: number;
   readonly magicLinkBaseUrl: string;
   readonly passwordHashing: PasswordHashingConfig;
   readonly passwordPolicy: PasswordPolicyConfig;
@@ -46,6 +54,7 @@ export function toAuthConfig(env: Env): AuthConfig {
     accessTokenTtlSeconds: env.AUTH_ACCESS_TOKEN_TTL_SECONDS,
     refreshTokenTtlSeconds: env.AUTH_REFRESH_TOKEN_TTL_SECONDS,
     magicLinkTtlSeconds: env.AUTH_MAGIC_LINK_TTL_SECONDS,
+    phoneCodeTtlSeconds: env.AUTH_PHONE_CODE_TTL_SECONDS,
     magicLinkBaseUrl: env.AUTH_MAGIC_LINK_BASE_URL,
     passwordHashing: {
       memoryCostKib: env.AUTH_PASSWORD_MEMORY_COST_KIB,

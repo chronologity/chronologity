@@ -62,7 +62,7 @@ export class SessionService {
   async issue(input: {
     identityId: string;
     clientKind: string | undefined;
-    method: "magic_link" | "password";
+    method: "magic_link" | "password" | "phone_code";
     context: RequestContext;
   }): Promise<SessionCredentials> {
     const at = this.clock();

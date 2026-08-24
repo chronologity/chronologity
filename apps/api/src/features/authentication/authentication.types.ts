@@ -2,6 +2,7 @@ import type { DataSource } from "typeorm";
 import type { AuthConfig } from "../../config/auth-config.js";
 import type { AuthRateLimits } from "./authentication.rate-limits.js";
 import type { IdentityService } from "./identity.service.js";
+import type { PhoneService } from "./phone.service.js";
 import type { SessionService } from "./session.service.js";
 
 /** Feature-local types for authentication. */
@@ -59,6 +60,14 @@ export type RefreshRejection =
 export interface AuthenticationWiring {
   readonly identities: IdentityService;
   readonly sessions: SessionService;
+  /**
+   * Signing in with a phone number.
+   *
+   * Optional so an application can be built without it — the phone endpoints
+   * need an SMS adapter, and a test that has nothing to do with phones should
+   * not have to supply one.
+   */
+  readonly phones?: PhoneService | undefined;
   readonly config: AuthConfig;
   readonly dataSource: DataSource;
   /** Overrides the default endpoint limits. */

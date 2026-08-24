@@ -22,6 +22,57 @@ export const magicLinkRequestSchema = z.object({
 
 export type MagicLinkRequest = z.infer<typeof magicLinkRequestSchema>;
 
+/**
+ * A phone number as somebody types it.
+ *
+ * Must carry its country, as a leading `+`. There is no default: guessing one
+ * would resolve an ambiguous number to a real telephone in the wrong country
+ * rather than refusing it.
+ */
+export const phoneNumberSchema = z
+  .string()
+  .trim()
+  .min(4)
+  .max(20)
+  .regex(/^\+[0-9 ()\-.]+$/, "A phone number must start with + and its country code");
+
+export type PhoneNumber = z.infer<typeof phoneNumberSchema>;
+
+/** The code sent by text. Six digits, and nothing else. */
+export const phoneCodeSchema = z.string().trim().regex(/^[0-9]{6}$/, "A code is six digits");
+
+/** Claiming a number, or asking for a code to sign in with. */
+export const phoneRequestSchema = z.object({ phone: phoneNumberSchema });
+
+export type PhoneRequest = z.infer<typeof phoneRequestSchema>;
+
+/** Confirming a claimed number. */
+export const confirmPhoneRequestSchema = z.object({ code: phoneCodeSchema });
+
+export type ConfirmPhoneRequest = z.infer<typeof confirmPhoneRequestSchema>;
+
+/** Signing in with a number and the code sent to it. */
+export const phoneSignInRequestSchema = z.object({
+  phone: phoneNumberSchema,
+  code: phoneCodeSchema,
+});
+
+export type PhoneSignInRequest = z.infer<typeof phoneSignInRequestSchema>;
+
+/**
+ * The number on an account, as its holder sees it.
+ *
+ * `dormant` is told to its holder deliberately. They are the only person who
+ * can act on it, and it discloses nothing about anybody else.
+ */
+export const heldPhoneSchema = z.object({
+  phone: phoneNumberSchema.nullable(),
+  verified: z.boolean(),
+  dormant: z.boolean(),
+});
+
+export type HeldPhone = z.infer<typeof heldPhoneSchema>;
+
 export const magicLinkResponseSchema = z.object({
   message: z.string(),
 });

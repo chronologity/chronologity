@@ -29,6 +29,7 @@ const config: AuthConfig = {
   accessTokenTtlSeconds: 600,
   refreshTokenTtlSeconds: 2_592_000,
   magicLinkTtlSeconds: 900,
+  phoneCodeTtlSeconds: 300,
   magicLinkBaseUrl: "http://localhost:3000/auth/sessions",
   passwordHashing: { memoryCostKib: 8_192, timeCost: 1, parallelism: 1 },
   passwordPolicy: { minimumLength: 12, maximumLength: 256 },

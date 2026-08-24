@@ -52,6 +52,13 @@ export const envSchema = z.object({
   AUTH_JWT_AUDIENCE: z.string().min(1).default("chronologity-clients"),
   AUTH_ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(600),
   AUTH_REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(2_592_000),
+  /**
+   * How long a code sent by text lasts, in seconds.
+   *
+   * Five minutes by default. A six-digit code is guessable in a way a magic
+   * link is not, so the window it is guessable in stays small.
+   */
+  AUTH_PHONE_CODE_TTL_SECONDS: z.coerce.number().int().min(60).max(3_600).default(300),
   AUTH_MAGIC_LINK_TTL_SECONDS: z.coerce.number().int().positive().default(900),
   AUTH_MAGIC_LINK_BASE_URL: z.url(),
 

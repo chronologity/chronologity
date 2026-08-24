@@ -1,13 +1,17 @@
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import {
+  confirmPhoneRequestSchema,
   createSessionRequestSchema,
+  heldPhoneSchema,
   magicLinkRequestSchema,
   magicLinkResponseSchema,
   passwordChangeRequestSchema,
   passwordResetCompletionSchema,
   passwordResetRequestSchema,
   passwordSignInRequestSchema,
+  phoneRequestSchema,
+  phoneSignInRequestSchema,
   refreshSessionRequestSchema,
   registrationRequestSchema,
   registrationResponseSchema,
@@ -63,6 +67,16 @@ const MAGIC_LINK_RESPONSE = {
  * Telling the caller that an address is taken is a free account oracle; the
  * existing owner is notified by mail instead.
  */
+/**
+ * Identical whether the number is unknown, unproven, dormant, or good.
+ *
+ * A response that differed would tell whoever asked which numbers hold
+ * accounts, which is exactly what ADR-081 forbids.
+ */
+const PHONE_CODE_RESPONSE = {
+  message: "If that number can be used to sign in, a code has been sent to it.",
+};
+
 const REGISTRATION_RESPONSE = {
   message: "If that address can be registered, confirmation instructions have been sent.",
 };
@@ -74,7 +88,7 @@ const REGISTRATION_RESPONSE = {
  * @returns A Fastify plugin registering the authentication endpoints.
  */
 export function authenticationRoutes(wiring: AuthenticationWiring) {
-  const { identities, sessions } = wiring;
+  const { identities, sessions, phones } = wiring;
   const limits = wiring.rateLimits ?? defaultAuthRateLimits;
   const timeWindow = `${limits.windowMinutes} minutes`;
 
@@ -101,6 +115,102 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
         return reply.status(202).send(MAGIC_LINK_RESPONSE);
       },
     );
+
+    // Mounted only when there is something to send a text with. An endpoint
+    // that cannot work should be absent rather than present and failing.
+    if (phones !== undefined) {
+      app.post(
+        "/auth/phone",
+        {
+          schema: { body: phoneRequestSchema, response: { 202: magicLinkResponseSchema } },
+          config: { rateLimit: { max: limits.phoneCodeRequestsPerWindow, timeWindow } },
+          preHandler: requireSession,
+        },
+        async (request, reply) => {
+          await phones.claim(
+            request.session.identityId,
+            request.body.phone,
+            request.requestContext,
+          );
+
+          return reply.status(202).send({ message: "A code has been sent to that number." });
+        },
+      );
+
+      app.post(
+        "/auth/phone/verify",
+        {
+          schema: { body: confirmPhoneRequestSchema, response: { 204: z.null() } },
+          config: { rateLimit: { max: limits.phoneCodeAttemptsPerWindow, timeWindow } },
+          preHandler: requireSession,
+        },
+        async (request, reply) => {
+          await phones.confirm(
+            request.session.identityId,
+            request.body.code,
+            request.requestContext,
+          );
+
+          return reply.status(204).send(null);
+        },
+      );
+
+      app.get(
+        "/auth/phone",
+        { schema: { response: { 200: heldPhoneSchema } }, preHandler: requireSession },
+        async (request) => {
+          const held = await phones.held(request.session.identityId);
+
+          return held === undefined
+            ? { phone: null, verified: false, dormant: false }
+            : { phone: held.phone, verified: held.verified, dormant: held.dormant };
+        },
+      );
+
+      app.delete(
+        "/auth/phone",
+        { schema: { response: { 204: z.null() } }, preHandler: requireSession },
+        async (request, reply) => {
+          await phones.remove(request.session.identityId, request.requestContext);
+
+          return reply.status(204).send(null);
+        },
+      );
+
+      // Answers identically whether the number is unknown, unproven, dormant,
+      // or perfectly good. ADR-081 requires that no authentication surface
+      // disclose whether an account exists, and this is one.
+      app.post(
+        "/auth/phone/codes",
+        {
+          schema: { body: phoneRequestSchema, response: { 202: magicLinkResponseSchema } },
+          config: { rateLimit: { max: limits.phoneCodeRequestsPerWindow, timeWindow } },
+        },
+        async (request, reply) => {
+          await phones.requestSignInCode(request.body.phone, request.requestContext);
+
+          return reply.status(202).send(PHONE_CODE_RESPONSE);
+        },
+      );
+
+      app.post(
+        "/auth/sessions/phone",
+        {
+          schema: { body: phoneSignInRequestSchema, response: { 201: sessionCredentialsSchema } },
+          config: { rateLimit: { max: limits.phoneCodeAttemptsPerWindow, timeWindow } },
+        },
+        async (request, reply) => {
+          const credentials = await phones.signIn(
+            request.body.phone,
+            request.body.code,
+            request.headers["user-agent"]?.slice(0, 64),
+            request.requestContext,
+          );
+
+          return reply.status(201).send(credentials);
+        },
+      );
+    }
 
     app.post(
       "/auth/sessions",

@@ -838,11 +838,21 @@ These were open questions. Implementation settled them, and they are requirement
 
 **The minimum age is thirteen, and it is configuration rather than a constant.** The threshold in force when an account was created is stored alongside the birthdate, because without it nobody can say afterwards which rule an account was admitted under (`user_restricted_data.minimum_age_at_creation`, `USER_MINIMUM_AGE_YEARS`).
 
-**Two authentication methods ship: a magic link sent to an email address, and a password.** Both resolve to the same Identity.
+**Three authentication methods ship: a magic link sent to an email address, a password, and a code sent to a phone number.** All three resolve to the same Identity.
 
 **An email address is required.** It is how an Identity is established and how a returning person is recognised as the same one, not merely one mechanism among several (`identity_emails`).
 
-**Phone numbers will be supported.** They are not implemented, and what remains undecided is everything about how: whether a number authenticates or is only a contact detail, whether it can stand alone or must accompany an address, how a number is verified, and how numbers that change hands between people are handled. The intent is settled so that nothing is built which would have to be unpicked to admit them — an Identity already resolves through a separate table rather than through a column on the account, so a second kind of contact fits the shape that exists.
+**A phone number is a third way to sign in** (ADR-110). An account holds one, it is proven by a six-digit code sent to it, and it may be replaced or removed at any time. An email address is still required: it is the fallback that makes everything else about phone sign-in safe.
+
+**A number unused for sixty days stops working for sign-in until its holder confirms it again.** This is the answer to numbers changing hands. Carriers lease numbers rather than sell them, and a disconnected number is eventually given to somebody else — who could then receive a code sent to it. Reassignment only happens after the original holder stops using the number, so silence is the signal, and confirming again runs through the account's email address, which whoever received the number does not have.
+
+When somebody asks for a code for a number that has gone quiet, no text is sent and the account's address receives a notice explaining what to do. The caller learns nothing either way, which the account-existence rule requires; the account holder learns exactly what happened.
+
+**Every phone sign-in sends a notice to the account's email address.** Prevention can fail, and the holder should find out the same minute.
+
+**This does not stop SIM swapping**, where somebody persuades a carrier to move a live number to their own device. Nothing Chronologity can build without carrier data does. Detecting it needs a provider that can report a recent swap, and that check belongs where a code is sent.
+
+**Nothing reaches a real phone yet.** There is no messaging provider, so codes are recorded rather than delivered, exactly as local email goes to a local mail server. That is a credentials problem, not a design one.
 
 **Signing in with Google or Apple will be supported, and is deferred.** Neither is implemented. The obstacle is not design but access: both require registered applications and provider credentials that do not exist yet, and Apple's additionally requires a paid developer account. Building against credentials nobody holds would produce a path nobody could sign in through.
 
@@ -866,14 +876,12 @@ One obligation is inherited rather than open. ADR-081 requires that no authentic
 
 The following questions require deliberate resolution:
 
-- Should a phone number authenticate an Identity, or only serve as a contact detail?
 - Does signing in with a provider whose address is already registered join that Identity, or is it refused?
 - What happens when a provider stops asserting an address it previously asserted, as Apple's private relay allows?
 - May an Identity exist with only a provider, holding no password and no address of its own?
 - Can a provider be unlinked when it is the only way into an account?
-- Can a phone number stand alone, or must an Identity always carry an email address?
-- How is a phone number verified?
-- How should a number reassigned to a different person be handled?
+- Should an account be able to hold more than one phone number?
+- Should a number that has gone quiet also stop receiving notifications, or only stop signing anybody in?
 - What account attributes are searchable?
 - Can a User opt out of User search or recommendations?
 - What privacy defaults are configured at account creation?

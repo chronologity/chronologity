@@ -38,6 +38,7 @@
     "fastify-type-provider-zod": "^7.0.0",
     "jose": "^6.2.8",
     "kafkajs": "^2.2.4",
+    "libphonenumber-js": "^1.13.11",
     "nodemailer": "^9.0.5",
     "pg": "^8.23.0",
     "reflect-metadata": "^0.2.2",
