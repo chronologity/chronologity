@@ -3283,3 +3283,61 @@ Notifying by email on every phone sign-in and calling that the whole defence.
 **Issuing a code spends any previous one for that number and purpose.** This differs from magic links, where old tokens are deliberately left alive so nobody can cancel somebody else's pending sign-in. With a short code the reasoning inverts: every live code multiplies the values an attacker may guess.
 
 **Two spellings of a number are one number.** `libphonenumber-js` is a new dependency at `apps/api`, and a justified one — country codes overlap, national prefixes come and go, and lengths vary, so hand-rolling this is how one telephone becomes two accounts. A number with no country is refused rather than guessed at, because guessing would resolve an ambiguous number to a real telephone somewhere else.
+
+# ADR-111 — Relationships Between Moments Are Claims, Not Derivations
+
+**Status:** Accepted
+
+## Decision
+
+A Moment may be connected to another Moment by an explicit claim, stored one row per claim in `moment_relationships`.
+
+Five kinds ship. `led_to` and `contributed_to` assert influence; `related_to`, `alternate_perspective`, and `contradicts` deliberately do not.
+
+One end must belong to whoever makes the claim, and both ends must be Moments they can see.
+
+A causal claim is refused when the known occurrence times contradict it. An order nobody can establish is not a contradiction.
+
+A relationship is listed only when the Viewer may see the Moment at its far end.
+
+## Alternatives Considered
+
+An array of Moment identifiers on the Moment itself.
+
+`led_to` alone, as the strictest reading of "intentionally small".
+
+Recording a temporally contradictory claim and marking it disputed rather than refusing it.
+
+Full cycle detection over the causal graph with a recursive query.
+
+Requiring both Moments to belong to the claimant.
+
+## Rationale
+
+**A relationship is something somebody said.** `causality.md:103` is the rule everything follows from: "If Moment A occurred before Moment B, Chronologity knows only that A preceded B." Nothing is ever inferred from order. That single sentence is also what rules out the array, because an array of identifiers has nowhere to record the difference between "these are connected" and "somebody says these are connected".
+
+**Four things an array cannot hold**, each of which a row does: what the connection means, who asserted it, how to read it from the far end without scanning every Moment, and how somebody relates their own Moment to yours without writing into your row. That last one matters most — an array would have made a cross-author claim into a modification of somebody else's Moment, carving an exception into the rule that only an author may change their own.
+
+**Two causal kinds and three that are not.** `causality.md:415` insists contextual relationships must never imply causal ones. Without a non-causal option every connection anybody wanted to draw would have to be phrased as causation, which is precisely the conflation the specification spends pages preventing. `alternate_perspective` in particular is what makes shared history expressible: two accounts of one afternoon, neither causing the other.
+
+**Uncertainty is preserved rather than resolved.** A cause may occur before its effect or during it; only a cause whose interval begins strictly after the effect's ends is refused. So "sometime in 1998" leading to "June 1998" is allowed, because Chronologity genuinely does not know the order and `causality.md:281` is explicit that *unknown order ≠ invalid relationship*. Refusing it would fabricate a certainty the history does not have — the same fault as inventing a day for a Moment known only to the month.
+
+**Refusing, rather than recording as disputed.** `causality.md:253` requires only that a contradiction not be silently accepted, and `causality.md:263` that the product help resolve it rather than rewriting history. A refusal naming the conflict does both: nothing is altered, and the person can correct either the direction or the dates. A disputed state would have added a value nothing reads and which navigation would then have to learn to exclude.
+
+**One end must be yours.** It keeps every claim anchored to a history its author actually lived, while still allowing the cross-author claims shared history depends on. Requiring both ends would have made shared history inexpressible; allowing neither would let strangers attach causal readings to somebody's history, which needs a dispute and moderation story that does not exist.
+
+**No confidence scores**, per `causality.md:485`. "87% likely that Moment A caused Moment B" is false mathematical precision applied to a human life.
+
+## Consequences
+
+**Cycle detection needed almost no code, and the reason is worth recording.** `causality.md:643` asks that cycles be caught "where its temporal information is sufficiently precise". The temporal rule already does that: a cycle among precisely-dated Moments requires A before B before C before A, and the direction check refuses whichever edge closes it. Where dates are too coarse to order, the specification says not to reject — so such a cycle is permitted precisely because nothing can disprove it, which is the specified behaviour rather than a gap.
+
+What remained was the one case time cannot settle: `A led_to B` alongside `B led_to A`. That is incoherent whatever the dates say, so it is refused as a logical contradiction rather than a temporal one, and checked separately for that reason. No recursive query, and no cycle rules on the contextual kinds — which `contradicts` would break, since two accounts may contradict each other in either order.
+
+**Symmetric kinds needed a second unique index.** "A is another account of B" and "B is another account of A" are one claim. A unique index on the ordered triple would have let both rows exist and reported one relationship as two. An expression index on `(LEAST(source, target), GREATEST(source, target), kind)`, partial to the three symmetric kinds, makes the database decide that rather than application code.
+
+**The visibility predicate finally lives in one place.** ADR-108 recorded the rule existing twice — once in `checkVisibility`, once in the SQL of `findForAuthorAsViewer` — and noted the duplication was guarded by a test rather than removed. Listing relationships needed it a third time, for the far endpoint, which was the point at which extracting it became clearly right. `visibleToViewer(alias)` is now the single SQL statement of the rule, used by both queries, and the agreement test extends to relationships.
+
+**A relationship pointing somewhere inaccessible is omitted, not redacted.** `privacy.md:158` requires that Chronologity "never use a visible relationship to reveal an inaccessible Moment", and an identifier is itself the disclosure — returning the relationship with a blanked target would still say that something is there.
+
+**Only the claimant may withdraw a claim.** Owning one end does not make somebody else's reading of history yours to retract. Withdrawing leaves both Moments untouched, occurrence included, which `causality.md` invariants 14 and 15 require and a test asserts.

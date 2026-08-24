@@ -20,6 +20,8 @@ import {
 } from "../../testing/fixtures.js";
 import { FollowRepository } from "../social/follow.repository.js";
 import { FollowService } from "../social/follow.service.js";
+import { MomentRelationshipRepository } from "./moment-relationship.repository.js";
+import { MomentRelationshipService } from "./moment-relationship.service.js";
 import { MomentRepository } from "./moment.repository.js";
 import { withTransaction } from "../../lib/database/transaction.js";
 import { MomentService } from "./moment.service.js";
@@ -105,6 +107,7 @@ const uniqueHandle = () => `h${randomUUID().replaceAll("-", "").slice(0, 12)}`;
 
 describe("moments", () => {
   let app: FastifyInstance;
+  let moments: MomentService;
   let database: Database;
   let authentication: TestAuthentication;
 
@@ -115,6 +118,16 @@ describe("moments", () => {
 
     authentication = createTestAuthentication(database.dataSource, config.auth, config.email);
 
+
+    moments = new MomentService(
+      database.dataSource,
+      new MomentRepository(database.dataSource),
+      new UploadRepository(database.dataSource),
+      new LocationRepository(database.dataSource),
+      new RealWorldEventRepository(database.dataSource),
+      new FollowRepository(database.dataSource),
+      new UserRepository(database.dataSource),
+    );
 
     app = await buildApp({
       config,
@@ -133,14 +146,11 @@ describe("moments", () => {
         new RealWorldEventRepository(database.dataSource),
         new LocationRepository(database.dataSource),
       ),
-      moments: new MomentService(
+      moments,
+      momentRelationships: new MomentRelationshipService(
         database.dataSource,
-        new MomentRepository(database.dataSource),
-        new UploadRepository(database.dataSource),
-        new LocationRepository(database.dataSource),
-        new RealWorldEventRepository(database.dataSource),
-        new FollowRepository(database.dataSource),
-        new UserRepository(database.dataSource),
+        new MomentRelationshipRepository(database.dataSource),
+        moments,
       ),
     });
   });
@@ -2308,6 +2318,370 @@ describe("moments", () => {
         method: "PUT",
         url: `/moments/${randomUUID()}/location/disclosure`,
         payload: { disclosure: "hidden" },
+      });
+
+      assert.equal(response.statusCode, 401, response.body);
+    });
+  });
+
+  describe("relationships between moments", () => {
+    /** Record a Moment at a chosen time and visibility. */
+    const recordAt = async (
+      person: { accessToken: string; userId: string },
+      occurrence: { start: string; end: string; precision: string } = summer,
+      visibility = "public",
+    ): Promise<string> => {
+      const uploadId = await createReadyUpload(database.dataSource, person.userId);
+      const created = await record(person.accessToken, {
+        caption: "Something that happened",
+        occurrence,
+        occurrenceOffsetMinutes: NEW_YORK,
+        uploadIds: [uploadId],
+        visibility,
+      });
+
+      assert.equal(created.statusCode, 201, created.body);
+
+      return created.json().momentId as string;
+    };
+
+    const instant = (iso: string) => ({ start: iso, end: iso, precision: "instant" as const });
+    const EARLIER = instant("2010-06-12T19:30:00.000Z");
+    const LATER = instant("2020-06-12T19:30:00.000Z");
+
+    const relate = async (
+      accessToken: string,
+      sourceMomentId: string,
+      targetMomentId: string,
+      kind: string,
+    ) =>
+      app.inject({
+        method: "POST",
+        url: `/moments/${sourceMomentId}/relationships`,
+        headers: authed(accessToken),
+        payload: { targetMomentId, kind },
+      });
+
+    const relationshipsOf = async (accessToken: string, momentId: string) =>
+      app.inject({
+        method: "GET",
+        url: `/moments/${momentId}/relationships`,
+        headers: authed(accessToken),
+      });
+
+    it("records every kind of claim", async () => {
+      const author = await onboard();
+
+      for (const kind of [
+        "led_to",
+        "contributed_to",
+        "related_to",
+        "alternate_perspective",
+        "contradicts",
+      ]) {
+        const source = await recordAt(author, EARLIER);
+        const target = await recordAt(author, LATER);
+
+        const response = await relate(author.accessToken, source, target, kind);
+
+        assert.equal(response.statusCode, 201, `${kind}: ${response.body}`);
+        assert.equal(response.json().kind, kind);
+        assert.equal(response.json().origin, "asserted");
+        assert.equal(response.json().assertedByUserId, author.userId);
+      }
+    });
+
+    it("shows a claim from both ends", async () => {
+      const author = await onboard();
+      const source = await recordAt(author, EARLIER);
+      const target = await recordAt(author, LATER);
+      await relate(author.accessToken, source, target, "led_to");
+
+      const fromSource = await relationshipsOf(author.accessToken, source);
+      const fromTarget = await relationshipsOf(author.accessToken, target);
+
+      // The row belongs to the relationship, not to either Moment, so it reads
+      // the same whichever end you start from.
+      assert.equal(fromSource.json().relationships.length, 1);
+      assert.equal(fromTarget.json().relationships.length, 1);
+    });
+
+    it("treats a symmetric claim made both ways as one claim", async () => {
+      const author = await onboard();
+      const first = await recordAt(author, EARLIER);
+      const second = await recordAt(author, LATER);
+
+      const forward = await relate(author.accessToken, first, second, "alternate_perspective");
+      const backward = await relate(author.accessToken, second, first, "alternate_perspective");
+
+      // Two accounts of one afternoon are each the other's. Recording that
+      // twice would report one relationship as two.
+      assert.equal(backward.statusCode, 201, backward.body);
+      assert.equal(backward.json().relationshipId, forward.json().relationshipId);
+      assert.equal((await relationshipsOf(author.accessToken, first)).json().relationships.length, 1);
+    });
+
+    it("refuses a cause that happened after its effect", async () => {
+      const author = await onboard();
+      const later = await recordAt(author, LATER);
+      const earlier = await recordAt(author, EARLIER);
+
+      const response = await relate(author.accessToken, later, earlier, "led_to");
+
+      assert.equal(response.statusCode, 400, response.body);
+      assert.match(response.json().message, /after/i);
+    });
+
+    it("allows a causal claim whose order nobody can establish", async () => {
+      const author = await onboard();
+      const vague = await recordAt(author, {
+        start: "1998-01-01T00:00:00.000Z",
+        end: "1998-12-31T23:59:59.000Z",
+        precision: "year",
+      });
+      const june = await recordAt(author, {
+        start: "1998-06-01T00:00:00.000Z",
+        end: "1998-06-30T23:59:59.000Z",
+        precision: "month",
+      });
+
+      const response = await relate(author.accessToken, vague, june, "led_to");
+
+      // Unknown order is not invalid order. Refusing would invent a certainty
+      // the history does not have.
+      assert.equal(response.statusCode, 201, response.body);
+    });
+
+    it("applies no temporal rule to a contextual claim", async () => {
+      const author = await onboard();
+      const later = await recordAt(author, LATER);
+      const earlier = await recordAt(author, EARLIER);
+
+      const response = await relate(author.accessToken, later, earlier, "contradicts");
+
+      assert.equal(response.statusCode, 201, response.body);
+    });
+
+    it("refuses a causal claim running back the other way", async () => {
+      const author = await onboard();
+      const overlapping = { start: "2010-01-01T00:00:00.000Z", end: "2010-12-31T00:00:00.000Z", precision: "year" as const };
+      const first = await recordAt(author, overlapping);
+      const second = await recordAt(author, overlapping);
+      assert.equal((await relate(author.accessToken, first, second, "led_to")).statusCode, 201);
+
+      const response = await relate(author.accessToken, second, first, "led_to");
+
+      // Incoherent whatever the dates say, which is why it is checked as logic
+      // rather than as time — these two share a year and cannot be ordered.
+      assert.equal(response.statusCode, 400, response.body);
+      assert.match(response.json().message, /other way/i);
+    });
+
+    it("refuses a moment related to itself", async () => {
+      const author = await onboard();
+      const momentId = await recordAt(author);
+
+      const response = await relate(author.accessToken, momentId, momentId, "related_to");
+
+      assert.equal(response.statusCode, 400, response.body);
+    });
+
+    it("lets somebody connect their own moment to another person's", async () => {
+      const mine = await onboard();
+      const theirs = await onboard();
+      const myMoment = await recordAt(mine, EARLIER);
+      const theirMoment = await recordAt(theirs, LATER);
+
+      const response = await relate(
+        mine.accessToken,
+        myMoment,
+        theirMoment,
+        "alternate_perspective",
+      );
+
+      // What makes shared history expressible: my photograph of that afternoon
+      // is another account of yours.
+      assert.equal(response.statusCode, 201, response.body);
+    });
+
+    it("refuses a claim about two moments that are both somebody else's", async () => {
+      const stranger = await onboard();
+      const author = await onboard();
+      const first = await recordAt(author, EARLIER);
+      const second = await recordAt(author, LATER);
+
+      const response = await relate(stranger.accessToken, first, second, "related_to");
+
+      assert.equal(response.statusCode, 400, response.body);
+      assert.match(response.json().message, /your own/i);
+    });
+
+    it("hides a moment the claimant cannot see, exactly as one that does not exist", async () => {
+      const mine = await onboard();
+      const theirs = await onboard();
+      const myMoment = await recordAt(mine, EARLIER);
+      const hidden = await recordAt(theirs, LATER, "private");
+
+      const toHidden = await relate(mine.accessToken, myMoment, hidden, "related_to");
+      const toMissing = await relate(mine.accessToken, myMoment, randomUUID(), "related_to");
+
+      // Naming a Moment somebody cannot see would disclose that it exists.
+      assert.equal(toHidden.statusCode, 404, toHidden.body);
+      assert.equal(toMissing.statusCode, 404, toMissing.body);
+      assert.equal(toHidden.json().message, toMissing.json().message);
+    });
+
+    it("omits a claim whose far end the viewer cannot see", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+      const visible = await recordAt(author, EARLIER);
+      const hidden = await recordAt(author, LATER, "private");
+      await relate(author.accessToken, visible, hidden, "related_to");
+
+      const asAuthor = await relationshipsOf(author.accessToken, visible);
+      const asStranger = await relationshipsOf(stranger.accessToken, visible);
+
+      // `privacy.md:158`: a visible relationship must never reveal an
+      // inaccessible Moment. The identifier alone would be the disclosure, so
+      // the relationship is absent rather than redacted.
+      assert.equal(asAuthor.json().relationships.length, 1);
+      assert.deepEqual(asStranger.json().relationships, []);
+    });
+
+    it("omits a claim reaching across a block", async () => {
+      const author = await onboard();
+      const blocked = await onboard();
+      const mine = await recordAt(blocked, EARLIER);
+      const theirs = await recordAt(author, LATER);
+      await relate(blocked.accessToken, mine, theirs, "related_to");
+
+      await app.inject({
+        method: "POST",
+        url: `/users/${blocked.userId}/block`,
+        headers: authed(author.accessToken),
+      });
+
+      const listed = await relationshipsOf(blocked.accessToken, mine);
+
+      assert.deepEqual(listed.json().relationships, []);
+    });
+
+    it("agrees with what the single read allows", async () => {
+      const author = await onboard();
+      const viewer = await onboard();
+      const anchor = await recordAt(author, EARLIER);
+      const ends = [
+        await recordAt(author, LATER, "public"),
+        await recordAt(author, LATER, "private"),
+      ];
+
+      for (const end of ends) {
+        await relate(author.accessToken, anchor, end, "related_to");
+      }
+
+      const listed = (await relationshipsOf(viewer.accessToken, anchor)).json().relationships;
+
+      // The list filters in SQL; the single read applies the policy in
+      // TypeScript. Held against each other rather than trusted separately.
+      for (const end of ends) {
+        const readable =
+          (
+            await app.inject({
+              method: "GET",
+              url: `/moments/${end}`,
+              headers: authed(viewer.accessToken),
+            })
+          ).statusCode === 200;
+        const present = listed.some(
+          (relationship: { targetMomentId: string }) => relationship.targetMomentId === end,
+        );
+
+        assert.equal(present, readable, `${end} listed=${present} readable=${readable}`);
+      }
+    });
+
+    it("leaves both moments untouched when a claim is withdrawn", async () => {
+      const author = await onboard();
+      const source = await recordAt(author, EARLIER);
+      const target = await recordAt(author, LATER);
+      const created = await relate(author.accessToken, source, target, "led_to");
+      const before = (
+        await app.inject({
+          method: "GET",
+          url: `/moments/${source}`,
+          headers: authed(author.accessToken),
+        })
+      ).json();
+
+      const withdrawn = await app.inject({
+        method: "DELETE",
+        url: `/moments/${source}/relationships/${created.json().relationshipId}`,
+        headers: authed(author.accessToken),
+      });
+
+      assert.equal(withdrawn.statusCode, 204, withdrawn.body);
+
+      const after = (
+        await app.inject({
+          method: "GET",
+          url: `/moments/${source}`,
+          headers: authed(author.accessToken),
+        })
+      ).json();
+
+      // Removing a claim never deletes its Moments, and never moves one through
+      // history.
+      assert.deepEqual(after.occurrence, before.occurrence);
+      assert.equal(after.caption, before.caption);
+      assert.deepEqual((await relationshipsOf(author.accessToken, source)).json().relationships, []);
+    });
+
+    it("lets only whoever made a claim withdraw it", async () => {
+      const mine = await onboard();
+      const theirs = await onboard();
+      const myMoment = await recordAt(mine, EARLIER);
+      const theirMoment = await recordAt(theirs, LATER);
+      const created = await relate(mine.accessToken, myMoment, theirMoment, "related_to");
+
+      const attempt = await app.inject({
+        method: "DELETE",
+        url: `/moments/${myMoment}/relationships/${created.json().relationshipId}`,
+        headers: authed(theirs.accessToken),
+      });
+
+      // It is the claimant's reading of history. Owning one end does not make
+      // it yours to retract.
+      assert.equal(attempt.statusCode, 404, attempt.body);
+      assert.equal((await relationshipsOf(mine.accessToken, myMoment)).json().relationships.length, 1);
+    });
+
+    it("treats claiming the same thing twice as the claim already made", async () => {
+      const author = await onboard();
+      const source = await recordAt(author, EARLIER);
+      const target = await recordAt(author, LATER);
+
+      const first = await relate(author.accessToken, source, target, "led_to");
+      const again = await relate(author.accessToken, source, target, "led_to");
+
+      assert.equal(again.statusCode, 201, again.body);
+      assert.equal(again.json().relationshipId, first.json().relationshipId);
+    });
+
+    it("refuses a kind it does not recognise", async () => {
+      const author = await onboard();
+      const source = await recordAt(author, EARLIER);
+      const target = await recordAt(author, LATER);
+
+      const response = await relate(author.accessToken, source, target, "caused_by_fate");
+
+      assert.equal(response.statusCode, 400, response.body);
+    });
+
+    it("refuses claiming a relationship without a caller", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: `/moments/${randomUUID()}/relationships`,
+        payload: { targetMomentId: randomUUID(), kind: "related_to" },
       });
 
       assert.equal(response.statusCode, 401, response.body);

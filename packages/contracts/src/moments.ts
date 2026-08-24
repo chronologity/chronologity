@@ -263,6 +263,90 @@ export const setLocationDisclosureRequestSchema = z.object({
 
 export type SetLocationDisclosureRequest = z.infer<typeof setLocationDisclosureRequestSchema>;
 
+/**
+ * What one Moment may claim about another.
+ *
+ * Two kinds assert influence and three deliberately do not.
+ * `causality.md:415` requires that contextual relationships never imply causal
+ * ones, and without a non-causal option every connection somebody wants to draw
+ * would have to be phrased as causation.
+ *
+ * Deliberately small. `causality.md:156` asks that the vocabulary "remain
+ * intentionally small until product testing demonstrates that users need more
+ * precision", and warns against an elaborate ontology built before anybody has
+ * watched how people describe their own histories.
+ */
+export const momentRelationshipKindSchema = z.enum([
+  /** The source meaningfully brought the target about. */
+  "led_to",
+  /** The source was one of several things that brought the target about. */
+  "contributed_to",
+  /** Connected, without any claim about how. */
+  "related_to",
+  /** Another account of substantially the same occurrence. */
+  "alternate_perspective",
+  /** The source disputes a claim the target represents. */
+  "contradicts",
+]);
+
+export type MomentRelationshipKind = z.infer<typeof momentRelationshipKindSchema>;
+
+/**
+ * Where a relationship came from.
+ *
+ * Only `asserted` is producible. The others are named so that a suggestion
+ * engine is additive and so that what it produces can never be mistaken for
+ * what a person said — `causality.md:187` requires that such output stay a
+ * hypothesis rather than becoming historical authority.
+ */
+export const momentRelationshipOriginSchema = z.enum(["asserted", "derived", "suggested"]);
+
+export type MomentRelationshipOrigin = z.infer<typeof momentRelationshipOriginSchema>;
+
+/**
+ * A claim connecting two Moments.
+ *
+ * Carries no confidence score, deliberately. `causality.md:485` warns against
+ * "87% likely that Moment A caused Moment B": human histories are not improved
+ * by false mathematical precision.
+ */
+export const momentRelationshipSchema = z.object({
+  relationshipId: identifierSchema,
+  /** Which way the claim runs. Meaningless for the symmetric kinds. */
+  sourceMomentId: identifierSchema,
+  targetMomentId: identifierSchema,
+  kind: momentRelationshipKindSchema,
+  origin: momentRelationshipOriginSchema,
+  /** Whose perspective this is (`causality.md:520`). */
+  assertedByUserId: identifierSchema,
+  createdAt: timestampSchema,
+});
+
+export type MomentRelationship = z.infer<typeof momentRelationshipSchema>;
+
+/** Claiming a relationship from one Moment to another. */
+export const assertMomentRelationshipRequestSchema = z.object({
+  targetMomentId: identifierSchema,
+  kind: momentRelationshipKindSchema,
+});
+
+export type AssertMomentRelationshipRequest = z.infer<
+  typeof assertMomentRelationshipRequestSchema
+>;
+
+/**
+ * A Moment's relationships, in both directions.
+ *
+ * Only those whose other end this Viewer may see. `privacy.md:158`:
+ * "Chronologity must never use a visible relationship to reveal an
+ * inaccessible Moment."
+ */
+export const momentRelationshipListSchema = z.object({
+  relationships: z.array(momentRelationshipSchema),
+});
+
+export type MomentRelationshipList = z.infer<typeof momentRelationshipListSchema>;
+
 /** Correcting what a Moment says happened. */
 export const updateCaptionRequestSchema = z.object({ caption: captionSchema });
 

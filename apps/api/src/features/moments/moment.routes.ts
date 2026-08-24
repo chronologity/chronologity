@@ -1,21 +1,25 @@
 import {
   addMediaRequestSchema,
+  assertMomentRelationshipRequestSchema,
   correctOccurrenceRequestSchema,
   createMomentRequestSchema,
-  reorderMediaRequestSchema,
-  updateCaptionRequestSchema,
   identifierSchema,
   listMomentsRequestSchema,
   momentAudienceSchema,
   momentPageSchema,
+  momentRelationshipListSchema,
+  momentRelationshipSchema,
   momentSchema,
+  reorderMediaRequestSchema,
   setLocationDisclosureRequestSchema,
   setMomentVisibilityRequestSchema,
+  updateCaptionRequestSchema,
 } from "@chronologity/contracts";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { requireUser } from "../../plugins/auth.plugin.js";
+import type { MomentRelationshipService } from "./moment-relationship.service.js";
 import type { MomentService } from "./moment.service.js";
 
 /**
@@ -30,9 +34,11 @@ import type { MomentService } from "./moment.service.js";
  * repeated.
  *
  * @param moments - The service these routes delegate to.
+ * @param relationships - Claims connecting Moments. Optional so an application
+ *   can be built without them; the endpoints are absent rather than failing.
  * @returns A Fastify plugin registering the Moment endpoints.
  */
-export function momentRoutes(moments: MomentService) {
+export function momentRoutes(moments: MomentService, relationships?: MomentRelationshipService) {
   return async function register(instance: FastifyInstance): Promise<void> {
     const app = instance.withTypeProvider<ZodTypeProvider>();
 
@@ -291,6 +297,68 @@ export function momentRoutes(moments: MomentService) {
       },
       async (request) => moments.audience(request.params.momentId, request.user.userId),
     );
+
+    if (relationships !== undefined) {
+      // A claim, never a derivation. Chronologity knows only that one Moment
+      // preceded another (`causality.md:103`), so nothing here is inferred from
+      // order.
+      app.post(
+        "/moments/:momentId/relationships",
+        {
+          schema: {
+            params: z.object({ momentId: identifierSchema }),
+            body: assertMomentRelationshipRequestSchema,
+            response: { 201: momentRelationshipSchema },
+          },
+          preHandler: requireUser,
+        },
+        async (request, reply) => {
+          const relationship = await relationships.assert(
+            request.params.momentId,
+            request.user.userId,
+            request.body,
+          );
+
+          return reply.status(201).send(relationship);
+        },
+      );
+
+      // Both directions. A relationship whose far end this Viewer cannot see is
+      // absent entirely: the identifier alone would disclose that something is
+      // there (`privacy.md:158`).
+      app.get(
+        "/moments/:momentId/relationships",
+        {
+          schema: {
+            params: z.object({ momentId: identifierSchema }),
+            response: { 200: momentRelationshipListSchema },
+          },
+          preHandler: requireUser,
+        },
+        async (request) => relationships.list(request.params.momentId, request.user.userId),
+      );
+
+      // Only whoever made a claim may withdraw it. Withdrawing leaves both
+      // Moments exactly as they were.
+      app.delete(
+        "/moments/:momentId/relationships/:relationshipId",
+        {
+          schema: {
+            params: z.object({
+              momentId: identifierSchema,
+              relationshipId: identifierSchema,
+            }),
+            response: { 204: z.null() },
+          },
+          preHandler: requireUser,
+        },
+        async (request, reply) => {
+          await relationships.withdraw(request.params.relationshipId, request.user.userId);
+
+          return reply.status(204).send(null);
+        },
+      );
+    }
 
     // Somebody else's history, filtered to what this Viewer may see. Asking for
     // your own returns everything, exactly as `GET /moments` does.

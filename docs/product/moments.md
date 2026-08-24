@@ -586,6 +586,8 @@ This has a consequence `moments.md` anticipated: because the last media asset ca
 
 Every read requires a Viewer, public Moments included. That is what lets a Block take effect: a blocked person must not be able to route around it by signing out. Reading and editing are separately gated, so seeing a Moment is never enough to change one.
 
+**A Moment may be connected to another Moment by an explicit claim** (ADR-111) — `led_to`, `contributed_to`, `related_to`, `alternate_perspective`, or `contradicts`. A relationship is always something somebody said, never something derived from chronological order, and it records whose reading of history it is. One end must belong to whoever makes the claim, and a relationship is visible only when both its ends are.
+
 **A Moment's author chooses how much of its place other people are told** (ADR-109) — exact, the neighbourhood, the city, or nothing. The author always sees the exact place. New Moments disclose exactly unless their author says otherwise, and the choice can be made while recording.
 
 Below exact, the response carries no Location identifier and no coordinates, which is what stops the reduction being undone by looking the place up. Disclosure is a separate thing from a Location's precision: precision says how well the place is known and is the same for everybody, disclosure says how much of that a Viewer receives.
@@ -612,7 +614,6 @@ The following behaviors should remain open until deliberately designed rather th
 - How should historical corrections be presented to users?
 - How should participation, tagging, and consent work when other people appear in a Moment?
 - Can multiple users collaboratively contribute to the same Moment?
-- Which relationships between Moments should be first-class product concepts?
 - How should Moments participate in automatically derived location and event groupings?
 
 The following questions are **resolved** and should not be reopened accidentally during implementation:

@@ -26,6 +26,8 @@ import { LocationService } from "./features/locations/location.service.js";
 import { FollowRepository } from "./features/social/follow.repository.js";
 import { FollowService } from "./features/social/follow.service.js";
 import { MomentRepository } from "./features/moments/moment.repository.js";
+import { MomentRelationshipRepository } from "./features/moments/moment-relationship.repository.js";
+import { MomentRelationshipService } from "./features/moments/moment-relationship.service.js";
 import { MomentService } from "./features/moments/moment.service.js";
 import { RealWorldEventRepository } from "./features/real-world-events/real-world-event.repository.js";
 import { RealWorldEventService } from "./features/real-world-events/real-world-event.service.js";
@@ -82,6 +84,16 @@ async function main(): Promise<void> {
     config.auth,
   );
 
+  const moments = new MomentService(
+    database.dataSource,
+    new MomentRepository(database.dataSource),
+    uploadRepository,
+    locationRepository,
+    realWorldEventRepository,
+    new FollowRepository(database.dataSource),
+    accounts,
+  );
+
   const app = await buildApp({
     config,
     dependencies,
@@ -135,14 +147,11 @@ async function main(): Promise<void> {
       realWorldEventRepository,
       locationRepository,
     ),
-    moments: new MomentService(
+    moments,
+    momentRelationships: new MomentRelationshipService(
       database.dataSource,
-      new MomentRepository(database.dataSource),
-      uploadRepository,
-      locationRepository,
-      realWorldEventRepository,
-      new FollowRepository(database.dataSource),
-      accounts,
+      new MomentRelationshipRepository(database.dataSource),
+      moments,
     ),
     realWorldEvents: new RealWorldEventService(
       database.dataSource,

@@ -81,6 +81,42 @@ function toMoment(row: MomentRow): UndisclosedMoment {
   };
 }
 
+/**
+ * The rule deciding whether a Viewer may see a Moment, as SQL.
+ *
+ * The same rule `checkVisibility` states in TypeScript. It exists twice because
+ * a set query cannot call a per-row function without breaking keyset
+ * pagination, and it exists here exactly once so that a third and fourth reader
+ * do not each write their own — which is the mistake ADR-107 records about
+ * cursors.
+ *
+ * Reads `:viewerUserId`, which the caller must supply.
+ *
+ * @param alias - The query-builder alias the Moment table is joined under.
+ * @returns A SQL condition. Ordered as the policy is: the author first, then
+ *   blocking, then visibility, so a Block cannot be outlived by an invitation
+ *   issued before it.
+ */
+export function visibleToViewer(alias: string): string {
+  return `(
+    ${alias}.author_user_id = :viewerUserId
+    OR (
+      NOT EXISTS (
+        SELECT 1 FROM user_blocks b
+         WHERE (b.blocker_user_id = ${alias}.author_user_id AND b.blocked_user_id = :viewerUserId)
+            OR (b.blocker_user_id = :viewerUserId AND b.blocked_user_id = ${alias}.author_user_id)
+      )
+      AND (
+        ${alias}.visibility = 'public'
+        OR EXISTS (
+          SELECT 1 FROM moment_audience a
+           WHERE a.moment_id = ${alias}.moment_id AND a.user_id = :viewerUserId
+        )
+      )
+    )
+  )`;
+}
+
 /** Reads and writes Moments. */
 export class MomentRepository {
   /**
@@ -229,26 +265,7 @@ export class MomentRepository {
       .leftJoinAndSelect("event.locations", "eventPlace")
       .where("moment.author_user_id = :authorUserId", { authorUserId })
       .andWhere("moment.deleted_at IS NULL")
-      .andWhere(
-        `(
-           moment.author_user_id = :viewerUserId
-           OR (
-             NOT EXISTS (
-               SELECT 1 FROM user_blocks b
-                WHERE (b.blocker_user_id = moment.author_user_id AND b.blocked_user_id = :viewerUserId)
-                   OR (b.blocker_user_id = :viewerUserId AND b.blocked_user_id = moment.author_user_id)
-             )
-             AND (
-               moment.visibility = 'public'
-               OR EXISTS (
-                 SELECT 1 FROM moment_audience a
-                  WHERE a.moment_id = moment.moment_id AND a.user_id = :viewerUserId
-               )
-             )
-           )
-         )`,
-        { viewerUserId },
-      );
+      .andWhere(visibleToViewer("moment"), { viewerUserId });
 
     if (cursor !== undefined) {
       query.andWhere(

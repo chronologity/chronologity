@@ -694,17 +694,28 @@ The important architectural requirement is that Chronologity does not make a mod
 19. Causal cycle validation should depend on relationship semantics and known temporal information.
 20. The architecture must preserve the ability to represent explicit relationships between Moments even if the complete authoring experience is introduced later.
 
+## What Is Settled
+
+**Five relationship kinds ship** (ADR-111). `led_to` and `contributed_to` assert influence; `related_to`, `alternate_perspective`, and `contradicts` deliberately do not. The split is the point: without a non-causal option, every connection somebody wants to draw would have to be phrased as causation.
+
+**A relationship is a claim, stored with who made it.** Nothing is derived from chronological order.
+
+**One end must belong to whoever makes the claim**, and both ends must be Moments they can see. This keeps every reading of history anchored to a history its author lived, while still allowing the cross-author claims shared history depends on.
+
+**A causal claim contradicting known times is refused, and says why.** Only a cause whose interval begins strictly after its effect's interval ends is contradictory. An order nobody can establish — "sometime in 1998" against "June 1998" — is allowed, because refusing it would invent a certainty the history does not have.
+
+**Cycles are handled by the temporal rule**, plus the one check it cannot make: `led to` running both ways between two Moments is refused as a logical contradiction whatever the dates say. Where dates are too coarse to establish order, longer cycles are permitted, because nothing can disprove them.
+
+**A relationship is visible only when both its ends are.** An identifier pointing at an inaccessible Moment is itself a disclosure, so such a relationship is omitted rather than redacted.
+
+**No confidence scores**, as this document requires.
+
 ## Open Product Questions
 
 The following questions should be resolved deliberately:
 
-- Which relationship types should Chronologity support initially?
-- Is `led to` sufficient for the first causal relationship experience?
-- Should `contributed to` be distinct from `led to`?
-- Should a generic `related to` relationship exist?
-- Which relationships are directional and which are symmetric?
-- Who may establish a relationship between Moments owned by different users?
-- Can another person propose a relationship for a Moment they do not own?
+- Can another person propose a relationship for a Moment they do not own? Asserting one about two Moments that are both somebody else's is refused; whether a stranger may *propose* one, awaiting acceptance, is a different question and remains open.
+- Should the author of the far Moment be able to see, dispute, or remove a claim somebody else made about it?
 - What consent model is required for shared causal relationships?
 - How should users discover the relationship-authoring capability?
 - How should relationships appear within Moment depth?
