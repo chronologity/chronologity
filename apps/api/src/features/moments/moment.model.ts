@@ -103,6 +103,17 @@ export class Moment {
   @Column("boolean", { name: "reactions_enabled", default: true })
   reactionsEnabled!: boolean;
 
+  /**
+   * Who may join the discussion: `anyone`, `followers`, or `disabled`.
+   *
+   * Seeing a Moment does not by itself mean being able to comment on it
+   * (`comments.md:417`). Closing the discussion leaves what was already said
+   * readable — that is what separates it from hiding reactions, where there is
+   * no speech to leave standing.
+   */
+  @Column("text", { name: "comment_policy", default: "anyone" })
+  commentPolicy!: string;
+
   @Column("timestamptz", { name: "created_at" })
   createdAt!: Date;
 

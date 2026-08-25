@@ -417,6 +417,12 @@ Neither interaction should automatically create the other.
 
 ## Reactions to Comments
 
+**Comment reactions shipped, overriding the caution below** (ADR-114). It was a product decision taken with this section read, and no further justification is claimed — recording that plainly is better than inventing a rationale this document would not recognise.
+
+They use the same four kinds a Moment takes. A Moment's own reaction setting does not reach the discussion underneath it: silencing reactions to a photograph should not silence agreement between other people talking about it.
+
+The original caution follows, unchanged, because the decisions it warns about — types, counts, notifications, moderation, thread presentation, engagement incentives — remain live as those capabilities arrive.
+
 The initial Moment Reaction model does not require reactions to Comments.
 
 Comment reactions introduce additional decisions around reaction types, counts, notifications, moderation, thread presentation, and engagement incentives.

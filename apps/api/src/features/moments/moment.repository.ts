@@ -1,6 +1,7 @@
 import type { Cursor } from "../../lib/pagination/cursor.js";
 import { randomUUID } from "node:crypto";
 import type {
+  CommentPolicy,
   LocationDisclosure,
   MomentVisibility,
   PublicUser,
@@ -355,6 +356,40 @@ export class MomentRepository {
         audience.map((userId) => ({ momentId, userId, addedAt: at })),
       );
     }
+  }
+
+  /**
+   * Who may join a Moment's discussion.
+   *
+   * @param momentId - Which Moment.
+   * @returns Its policy. A Moment that does not exist admits nobody, which the
+   *   caller has already refused on other grounds by the time this is asked.
+   */
+  async commentPolicy(momentId: string): Promise<CommentPolicy> {
+    const row = await this.dataSource
+      .getRepository(MomentRow)
+      .findOne({ where: { momentId }, select: { commentPolicy: true } });
+
+    return (row?.commentPolicy as CommentPolicy) ?? "disabled";
+  }
+
+  /**
+   * Set who may join a Moment's discussion.
+   *
+   * @param tx - The caller's transaction.
+   * @param momentId - Which Moment.
+   * @param policy - Who may join.
+   * @param at - When.
+   * @returns Nothing. Nothing said already is touched: closing a discussion
+   *   leaves it readable (`comments.md:427`).
+   */
+  async setCommentPolicy(
+    tx: Transaction,
+    momentId: string,
+    policy: CommentPolicy,
+    at: Date,
+  ): Promise<void> {
+    await tx.update(MomentRow, { momentId }, { commentPolicy: policy, updatedAt: at });
   }
 
   /**

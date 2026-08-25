@@ -25554,6 +25554,3456 @@
         }
       }
     },
+    "/moments/{momentId}/comments": {
+      "post": {
+        "summary": "Say something about a Moment",
+        "tags": [
+          "Moments"
+        ],
+        "description": "Conversation, not history: when this was written says nothing about when the Moment happened, and nothing here moves it. Supply `commentId` to make a retry safe — the same identifier twice yields one comment, while the same text twice without one yields two, because repeating yourself deliberately is allowed. Replying to a reply joins that reply's thread rather than nesting deeper.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "body": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "inReplyToCommentId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "commentId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  }
+                },
+                "required": [
+                  "body"
+                ]
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "momentId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "commentId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "momentId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "author": {
+                      "nullable": true,
+                      "type": "object",
+                      "properties": {
+                        "userId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "handle": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 30,
+                          "pattern": "^[a-zA-Z0-9_]+$"
+                        },
+                        "displayName": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "biography": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        }
+                      },
+                      "required": [
+                        "userId",
+                        "handle",
+                        "displayName",
+                        "biography",
+                        "createdAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "body": {
+                      "nullable": true,
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "deleted": {
+                      "type": "boolean"
+                    },
+                    "threadCommentId": {
+                      "nullable": true,
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "inReplyToCommentId": {
+                      "nullable": true,
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "mentions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "userId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "handle": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "userId",
+                          "handle"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "reactions": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "counts": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "yours": {
+                          "nullable": true,
+                          "type": "string",
+                          "enum": [
+                            "loved",
+                            "amused",
+                            "astonished",
+                            "saddened"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "counts",
+                        "total",
+                        "yours"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "editedAt": {
+                      "nullable": true,
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    }
+                  },
+                  "required": [
+                    "commentId",
+                    "momentId",
+                    "author",
+                    "body",
+                    "deleted",
+                    "threadCommentId",
+                    "inReplyToCommentId",
+                    "mentions",
+                    "reactions",
+                    "createdAt",
+                    "editedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation. `details` names the field where it can.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "The request failed validation. `details` names the field where it can."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required, or the session can no longer authenticate a request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authentication is required, or the session can no longer authenticate a request."
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted. `ONBOARDING_REQUIRED` means the caller has an Identity but has not finished creating an account, and should be sent to onboarding rather than to sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authenticated, but not permitted. `ONBOARDING_REQUIRED` means the caller has an Identity but has not finished creating an account, and should be sent to onboarding rather than to sign in again."
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such thing — or it exists and is not for you. These are deliberately indistinguishable, so a 404 must never be read as proof that something does not exist. A Moment you may not see, an account that has blocked you, and an identifier nobody holds all answer this way.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "No such thing — or it exists and is not for you. These are deliberately indistinguishable, so a 404 must never be read as proof that something does not exist. A Moment you may not see, an account that has blocked you, and an identifier nobody holds all answer this way."
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push."
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller."
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Read a Moment's discussion",
+        "tags": [
+          "Moments"
+        ],
+        "description": "Top-level comments, oldest first, and never ranked by engagement. `total` counts replies too. A deleted comment with replies appears as a tombstone carrying neither body nor author, so the replies still have something to hang from; one without replies is simply gone.",
+        "parameters": [
+          {
+            "schema": {
+              "default": 20,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "in": "query",
+            "name": "cursor",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "momentId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "comments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "commentId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "momentId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "author": {
+                            "nullable": true,
+                            "type": "object",
+                            "properties": {
+                              "userId": {
+                                "type": "string",
+                                "format": "uuid",
+                                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                              },
+                              "handle": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 30,
+                                "pattern": "^[a-zA-Z0-9_]+$"
+                              },
+                              "displayName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 80
+                              },
+                              "biography": {
+                                "nullable": true,
+                                "type": "string"
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                              }
+                            },
+                            "required": [
+                              "userId",
+                              "handle",
+                              "displayName",
+                              "biography",
+                              "createdAt"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "body": {
+                            "nullable": true,
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "deleted": {
+                            "type": "boolean"
+                          },
+                          "threadCommentId": {
+                            "nullable": true,
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "inReplyToCommentId": {
+                            "nullable": true,
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "mentions": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "userId": {
+                                  "type": "string",
+                                  "format": "uuid",
+                                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                                },
+                                "handle": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "userId",
+                                "handle"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "reactions": {
+                            "type": "object",
+                            "properties": {
+                              "enabled": {
+                                "type": "boolean"
+                              },
+                              "counts": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                }
+                              },
+                              "total": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "yours": {
+                                "nullable": true,
+                                "type": "string",
+                                "enum": [
+                                  "loved",
+                                  "amused",
+                                  "astonished",
+                                  "saddened"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "enabled",
+                              "counts",
+                              "total",
+                              "yours"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          },
+                          "editedAt": {
+                            "nullable": true,
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          }
+                        },
+                        "required": [
+                          "commentId",
+                          "momentId",
+                          "author",
+                          "body",
+                          "deleted",
+                          "threadCommentId",
+                          "inReplyToCommentId",
+                          "mentions",
+                          "reactions",
+                          "createdAt",
+                          "editedAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "nextCursor": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "comments",
+                    "total"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation. `details` names the field where it can.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "The request failed validation. `details` names the field where it can."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required, or the session can no longer authenticate a request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authentication is required, or the session can no longer authenticate a request."
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted. `ONBOARDING_REQUIRED` means the caller has an Identity but has not finished creating an account, and should be sent to onboarding rather than to sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authenticated, but not permitted. `ONBOARDING_REQUIRED` means the caller has an Identity but has not finished creating an account, and should be sent to onboarding rather than to sign in again."
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such thing — or it exists and is not for you. These are deliberately indistinguishable, so a 404 must never be read as proof that something does not exist. A Moment you may not see, an account that has blocked you, and an identifier nobody holds all answer this way.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "No such thing — or it exists and is not for you. These are deliberately indistinguishable, so a 404 must never be read as proof that something does not exist. A Moment you may not see, an account that has blocked you, and an identifier nobody holds all answer this way."
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push."
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/comments/{commentId}/replies": {
+      "get": {
+        "summary": "Read one thread",
+        "tags": [
+          "Moments"
+        ],
+        "description": "Replies to a top-level comment, oldest first.",
+        "parameters": [
+          {
+            "schema": {
+              "default": 20,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "in": "query",
+            "name": "cursor",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "commentId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "comments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "commentId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "momentId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "author": {
+                            "nullable": true,
+                            "type": "object",
+                            "properties": {
+                              "userId": {
+                                "type": "string",
+                                "format": "uuid",
+                                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                              },
+                              "handle": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 30,
+                                "pattern": "^[a-zA-Z0-9_]+$"
+                              },
+                              "displayName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 80
+                              },
+                              "biography": {
+                                "nullable": true,
+                                "type": "string"
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                              }
+                            },
+                            "required": [
+                              "userId",
+                              "handle",
+                              "displayName",
+                              "biography",
+                              "createdAt"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "body": {
+                            "nullable": true,
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "deleted": {
+                            "type": "boolean"
+                          },
+                          "threadCommentId": {
+                            "nullable": true,
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "inReplyToCommentId": {
+                            "nullable": true,
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "mentions": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "userId": {
+                                  "type": "string",
+                                  "format": "uuid",
+                                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                                },
+                                "handle": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "userId",
+                                "handle"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "reactions": {
+                            "type": "object",
+                            "properties": {
+                              "enabled": {
+                                "type": "boolean"
+                              },
+                              "counts": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                }
+                              },
+                              "total": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "yours": {
+                                "nullable": true,
+                                "type": "string",
+                                "enum": [
+                                  "loved",
+                                  "amused",
+                                  "astonished",
+                                  "saddened"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "enabled",
+                              "counts",
+                              "total",
+                              "yours"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          },
+                          "editedAt": {
+                            "nullable": true,
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          }
+                        },
+                        "required": [
+                          "commentId",
+                          "momentId",
+                          "author",
+                          "body",
+                          "deleted",
+                          "threadCommentId",
+                          "inReplyToCommentId",
+                          "mentions",
+                          "reactions",
+                          "createdAt",
+                          "editedAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "nextCursor": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "comments",
+                    "total"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation. `details` names the field where it can.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "The request failed validation. `details` names the field where it can."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required, or the session can no longer authenticate a request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authentication is required, or the session can no longer authenticate a request."
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted. `ONBOARDING_REQUIRED` means the caller has an Identity but has not finished creating an account, and should be sent to onboarding rather than to sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authenticated, but not permitted. `ONBOARDING_REQUIRED` means the caller has an Identity but has not finished creating an account, and should be sent to onboarding rather than to sign in again."
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such thing — or it exists and is not for you. These are deliberately indistinguishable, so a 404 must never be read as proof that something does not exist. A Moment you may not see, an account that has blocked you, and an identifier nobody holds all answer this way.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "No such thing — or it exists and is not for you. These are deliberately indistinguishable, so a 404 must never be read as proof that something does not exist. A Moment you may not see, an account that has blocked you, and an identifier nobody holds all answer this way."
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push."
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/comments/{commentId}": {
+      "patch": {
+        "summary": "Correct what you said",
+        "tags": [
+          "Moments"
+        ],
+        "description": "Marks the comment edited and leaves its place in the conversation alone — editing must not become a way of moving up the discussion.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "body": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "body"
+                ]
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "commentId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "commentId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "momentId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "author": {
+                      "nullable": true,
+                      "type": "object",
+                      "properties": {
+                        "userId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "handle": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 30,
+                          "pattern": "^[a-zA-Z0-9_]+$"
+                        },
+                        "displayName": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "biography": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        }
+                      },
+                      "required": [
+                        "userId",
+                        "handle",
+                        "displayName",
+                        "biography",
+                        "createdAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "body": {
+                      "nullable": true,
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "deleted": {
+                      "type": "boolean"
+                    },
+                    "threadCommentId": {
+                      "nullable": true,
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "inReplyToCommentId": {
+                      "nullable": true,
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "mentions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "userId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "handle": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "userId",
+                          "handle"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "reactions": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "counts": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "yours": {
+                          "nullable": true,
+                          "type": "string",
+                          "enum": [
+                            "loved",
+                            "amused",
+                            "astonished",
+                            "saddened"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "counts",
+                        "total",
+                        "yours"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "editedAt": {
+                      "nullable": true,
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    }
+                  },
+                  "required": [
+                    "commentId",
+                    "momentId",
+                    "author",
+                    "body",
+                    "deleted",
+                    "threadCommentId",
+                    "inReplyToCommentId",
+                    "mentions",
+                    "reactions",
+                    "createdAt",
+                    "editedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation. `details` names the field where it can.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "The request failed validation. `details` names the field where it can."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required, or the session can no longer authenticate a request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authentication is required, or the session can no longer authenticate a request."
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted. `ONBOARDING_REQUIRED` means the caller has an Identity but has not finished creating an account, and should be sent to onboarding rather than to sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authenticated, but not permitted. `ONBOARDING_REQUIRED` means the caller has an Identity but has not finished creating an account, and should be sent to onboarding rather than to sign in again."
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such thing — or it exists and is not for you. These are deliberately indistinguishable, so a 404 must never be read as proof that something does not exist. A Moment you may not see, an account that has blocked you, and an identifier nobody holds all answer this way.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "No such thing — or it exists and is not for you. These are deliberately indistinguishable, so a 404 must never be read as proof that something does not exist. A Moment you may not see, an account that has blocked you, and an identifier nobody holds all answer this way."
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push."
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller."
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Take back what you said",
+        "tags": [
+          "Moments"
+        ],
+        "description": "Leaves the Moment untouched. If replies hang from it, a tombstone remains so the conversation still reads; if none do, it disappears.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "commentId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "nullable": true,
+                  "enum": [
+                    null
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required, or the session can no longer authenticate a request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authentication is required, or the session can no longer authenticate a request."
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted. `ONBOARDING_REQUIRED` means the caller has an Identity but has not finished creating an account, and should be sent to onboarding rather than to sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authenticated, but not permitted. `ONBOARDING_REQUIRED` means the caller has an Identity but has not finished creating an account, and should be sent to onboarding rather than to sign in again."
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such thing — or it exists and is not for you. These are deliberately indistinguishable, so a 404 must never be read as proof that something does not exist. A Moment you may not see, an account that has blocked you, and an identifier nobody holds all answer this way.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "No such thing — or it exists and is not for you. These are deliberately indistinguishable, so a 404 must never be read as proof that something does not exist. A Moment you may not see, an account that has blocked you, and an identifier nobody holds all answer this way."
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push."
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/moments/{momentId}/comments/policy": {
+      "put": {
+        "summary": "Set who may join the discussion",
+        "tags": [
+          "Moments"
+        ],
+        "description": "`anyone` who can see the Moment, `followers` of its author, or `disabled`. Closing a discussion refuses new comments and leaves what was already said readable — removing it would be a separate act. The author may always comment on their own Moment.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "policy": {
+                    "type": "string",
+                    "enum": [
+                      "anyone",
+                      "followers",
+                      "disabled"
+                    ]
+                  }
+                },
+                "required": [
+                  "policy"
+                ]
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "momentId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "nullable": true,
+                  "enum": [
+                    null
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation. `details` names the field where it can.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "The request failed validation. `details` names the field where it can."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required, or the session can no longer authenticate a request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authentication is required, or the session can no longer authenticate a request."
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted. `ONBOARDING_REQUIRED` means the caller has an Identity but has not finished creating an account, and should be sent to onboarding rather than to sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authenticated, but not permitted. `ONBOARDING_REQUIRED` means the caller has an Identity but has not finished creating an account, and should be sent to onboarding rather than to sign in again."
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such thing — or it exists and is not for you. These are deliberately indistinguishable, so a 404 must never be read as proof that something does not exist. A Moment you may not see, an account that has blocked you, and an identifier nobody holds all answer this way.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "No such thing — or it exists and is not for you. These are deliberately indistinguishable, so a 404 must never be read as proof that something does not exist. A Moment you may not see, an account that has blocked you, and an identifier nobody holds all answer this way."
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push."
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/comments/{commentId}/reaction": {
+      "put": {
+        "summary": "React to a comment",
+        "tags": [
+          "Moments"
+        ],
+        "description": "The same four kinds a Moment takes. A Moment's own reaction setting does not reach its discussion: silencing reactions to a photograph should not silence agreement between people talking underneath it.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "loved",
+                      "amused",
+                      "astonished",
+                      "saddened"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "commentId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "commentId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "momentId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "author": {
+                      "nullable": true,
+                      "type": "object",
+                      "properties": {
+                        "userId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "handle": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 30,
+                          "pattern": "^[a-zA-Z0-9_]+$"
+                        },
+                        "displayName": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "biography": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        }
+                      },
+                      "required": [
+                        "userId",
+                        "handle",
+                        "displayName",
+                        "biography",
+                        "createdAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "body": {
+                      "nullable": true,
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "deleted": {
+                      "type": "boolean"
+                    },
+                    "threadCommentId": {
+                      "nullable": true,
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "inReplyToCommentId": {
+                      "nullable": true,
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "mentions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "userId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "handle": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "userId",
+                          "handle"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "reactions": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "counts": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "yours": {
+                          "nullable": true,
+                          "type": "string",
+                          "enum": [
+                            "loved",
+                            "amused",
+                            "astonished",
+                            "saddened"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "counts",
+                        "total",
+                        "yours"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "editedAt": {
+                      "nullable": true,
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    }
+                  },
+                  "required": [
+                    "commentId",
+                    "momentId",
+                    "author",
+                    "body",
+                    "deleted",
+                    "threadCommentId",
+                    "inReplyToCommentId",
+                    "mentions",
+                    "reactions",
+                    "createdAt",
+                    "editedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation. `details` names the field where it can.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "The request failed validation. `details` names the field where it can."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required, or the session can no longer authenticate a request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authentication is required, or the session can no longer authenticate a request."
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted. `ONBOARDING_REQUIRED` means the caller has an Identity but has not finished creating an account, and should be sent to onboarding rather than to sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authenticated, but not permitted. `ONBOARDING_REQUIRED` means the caller has an Identity but has not finished creating an account, and should be sent to onboarding rather than to sign in again."
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such thing — or it exists and is not for you. These are deliberately indistinguishable, so a 404 must never be read as proof that something does not exist. A Moment you may not see, an account that has blocked you, and an identifier nobody holds all answer this way.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "No such thing — or it exists and is not for you. These are deliberately indistinguishable, so a 404 must never be read as proof that something does not exist. A Moment you may not see, an account that has blocked you, and an identifier nobody holds all answer this way."
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push."
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller."
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Take a reaction to a comment back",
+        "tags": [
+          "Moments"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "commentId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "commentId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "momentId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "author": {
+                      "nullable": true,
+                      "type": "object",
+                      "properties": {
+                        "userId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "handle": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 30,
+                          "pattern": "^[a-zA-Z0-9_]+$"
+                        },
+                        "displayName": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "biography": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        }
+                      },
+                      "required": [
+                        "userId",
+                        "handle",
+                        "displayName",
+                        "biography",
+                        "createdAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "body": {
+                      "nullable": true,
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "deleted": {
+                      "type": "boolean"
+                    },
+                    "threadCommentId": {
+                      "nullable": true,
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "inReplyToCommentId": {
+                      "nullable": true,
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "mentions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "userId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "handle": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "userId",
+                          "handle"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "reactions": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "counts": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "yours": {
+                          "nullable": true,
+                          "type": "string",
+                          "enum": [
+                            "loved",
+                            "amused",
+                            "astonished",
+                            "saddened"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "counts",
+                        "total",
+                        "yours"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "editedAt": {
+                      "nullable": true,
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    }
+                  },
+                  "required": [
+                    "commentId",
+                    "momentId",
+                    "author",
+                    "body",
+                    "deleted",
+                    "threadCommentId",
+                    "inReplyToCommentId",
+                    "mentions",
+                    "reactions",
+                    "createdAt",
+                    "editedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required, or the session can no longer authenticate a request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authentication is required, or the session can no longer authenticate a request."
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted. `ONBOARDING_REQUIRED` means the caller has an Identity but has not finished creating an account, and should be sent to onboarding rather than to sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authenticated, but not permitted. `ONBOARDING_REQUIRED` means the caller has an Identity but has not finished creating an account, and should be sent to onboarding rather than to sign in again."
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such thing — or it exists and is not for you. These are deliberately indistinguishable, so a 404 must never be read as proof that something does not exist. A Moment you may not see, an account that has blocked you, and an identifier nobody holds all answer this way.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "No such thing — or it exists and is not for you. These are deliberately indistinguishable, so a 404 must never be read as proof that something does not exist. A Moment you may not see, an account that has blocked you, and an identifier nobody holds all answer this way."
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push."
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/users/{userId}/moments": {
       "get": {
         "summary": "Read somebody's history",

@@ -1,9 +1,14 @@
 import {
   addMediaRequestSchema,
   assertMomentRelationshipRequestSchema,
+  commentPageSchema,
+  commentSchema,
   correctOccurrenceRequestSchema,
+  createCommentRequestSchema,
   createMomentRequestSchema,
+  editCommentRequestSchema,
   identifierSchema,
+  listCommentsRequestSchema,
   listMomentsRequestSchema,
   momentAudienceSchema,
   momentPageSchema,
@@ -12,6 +17,7 @@ import {
   momentSchema,
   reactionSummarySchema,
   reorderMediaRequestSchema,
+  setCommentPolicyRequestSchema,
   setLocationDisclosureRequestSchema,
   setMomentVisibilityRequestSchema,
   setReactionRequestSchema,
@@ -23,6 +29,7 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { requireUser } from "../../plugins/auth.plugin.js";
 import { errors } from "../../server/error-responses.js";
+import type { MomentCommentService } from "./moment-comment.service.js";
 import type { MomentReactionService } from "./moment-reaction.service.js";
 import type { MomentRelationshipService } from "./moment-relationship.service.js";
 import type { MomentService } from "./moment.service.js";
@@ -43,12 +50,15 @@ import type { MomentService } from "./moment.service.js";
  *   can be built without them; the endpoints are absent rather than failing.
  * @param reactions - Responses to Moments. Optional so an application can be
  *   built without them; the endpoints are absent rather than failing.
+ * @param comments - Discussion about Moments. Optional so an application can be
+ *   built without it; the endpoints are absent rather than failing.
  * @returns A Fastify plugin registering the Moment endpoints.
  */
 export function momentRoutes(
   moments: MomentService,
   relationships?: MomentRelationshipService,
   reactions?: MomentReactionService,
+  comments?: MomentCommentService,
 ) {
   return async function register(instance: FastifyInstance): Promise<void> {
     const app = instance.withTypeProvider<ZodTypeProvider>();
@@ -497,6 +507,164 @@ export function momentRoutes(
         },
         async (request) =>
           reactions.setEnabled(request.params.momentId, request.user.userId, request.body),
+      );
+    }
+
+    if (comments !== undefined) {
+      app.post(
+        "/moments/:momentId/comments",
+        {
+          schema: {
+            summary: "Say something about a Moment",
+            description:
+              "Conversation, not history: when this was written says nothing about when the Moment happened, and nothing here moves it. Supply `commentId` to make a retry safe — the same identifier twice yields one comment, while the same text twice without one yields two, because repeating yourself deliberately is allowed. Replying to a reply joins that reply's thread rather than nesting deeper.",
+            params: z.object({ momentId: identifierSchema }),
+            body: createCommentRequestSchema,
+            response: { 201: commentSchema, ...errors(400, 401, 403, 404) },
+          },
+          preHandler: requireUser,
+        },
+        async (request, reply) => {
+          const comment = await comments.add(
+            request.params.momentId,
+            request.user.userId,
+            request.body,
+          );
+
+          return reply.status(201).send(comment);
+        },
+      );
+
+      // Oldest first, unlike every other list here. Reading a conversation
+      // newest-first privileges recency over the context that makes later
+      // replies comprehensible (`comments.md:198`).
+      app.get(
+        "/moments/:momentId/comments",
+        {
+          schema: {
+            summary: "Read a Moment's discussion",
+            description:
+              "Top-level comments, oldest first, and never ranked by engagement. `total` counts replies too. A deleted comment with replies appears as a tombstone carrying neither body nor author, so the replies still have something to hang from; one without replies is simply gone.",
+            params: z.object({ momentId: identifierSchema }),
+            querystring: listCommentsRequestSchema,
+            response: { 200: commentPageSchema, ...errors(400, 401, 403, 404) },
+          },
+          preHandler: requireUser,
+        },
+        async (request) =>
+          comments.list(
+            request.params.momentId,
+            request.user.userId,
+            request.query.limit,
+            request.query.cursor,
+          ),
+      );
+
+      app.get(
+        "/comments/:commentId/replies",
+        {
+          schema: {
+            summary: "Read one thread",
+            description: "Replies to a top-level comment, oldest first.",
+            params: z.object({ commentId: identifierSchema }),
+            querystring: listCommentsRequestSchema,
+            response: { 200: commentPageSchema, ...errors(400, 401, 403, 404) },
+          },
+          preHandler: requireUser,
+        },
+        async (request) =>
+          comments.replies(
+            request.params.commentId,
+            request.user.userId,
+            request.query.limit,
+            request.query.cursor,
+          ),
+      );
+
+      app.patch(
+        "/comments/:commentId",
+        {
+          schema: {
+            summary: "Correct what you said",
+            description:
+              "Marks the comment edited and leaves its place in the conversation alone — editing must not become a way of moving up the discussion.",
+            params: z.object({ commentId: identifierSchema }),
+            body: editCommentRequestSchema,
+            response: { 200: commentSchema, ...errors(400, 401, 403, 404) },
+          },
+          preHandler: requireUser,
+        },
+        async (request) =>
+          comments.edit(request.params.commentId, request.user.userId, request.body.body),
+      );
+
+      app.delete(
+        "/comments/:commentId",
+        {
+          schema: {
+            summary: "Take back what you said",
+            description:
+              "Leaves the Moment untouched. If replies hang from it, a tombstone remains so the conversation still reads; if none do, it disappears.",
+            params: z.object({ commentId: identifierSchema }),
+            response: { 204: z.null(), ...errors(401, 403, 404) },
+          },
+          preHandler: requireUser,
+        },
+        async (request, reply) => {
+          await comments.remove(request.params.commentId, request.user.userId);
+
+          return reply.status(204).send(null);
+        },
+      );
+
+      app.put(
+        "/moments/:momentId/comments/policy",
+        {
+          schema: {
+            summary: "Set who may join the discussion",
+            description:
+              "`anyone` who can see the Moment, `followers` of its author, or `disabled`. Closing a discussion refuses new comments and leaves what was already said readable — removing it would be a separate act. The author may always comment on their own Moment.",
+            params: z.object({ momentId: identifierSchema }),
+            body: setCommentPolicyRequestSchema,
+            response: { 204: z.null(), ...errors(400, 401, 403, 404) },
+          },
+          preHandler: requireUser,
+        },
+        async (request, reply) => {
+          await comments.setPolicy(request.params.momentId, request.user.userId, request.body);
+
+          return reply.status(204).send(null);
+        },
+      );
+
+      app.put(
+        "/comments/:commentId/reaction",
+        {
+          schema: {
+            summary: "React to a comment",
+            description:
+              "The same four kinds a Moment takes. A Moment's own reaction setting does not reach its discussion: silencing reactions to a photograph should not silence agreement between people talking underneath it.",
+            params: z.object({ commentId: identifierSchema }),
+            body: setReactionRequestSchema,
+            response: { 200: commentSchema, ...errors(400, 401, 403, 404) },
+          },
+          preHandler: requireUser,
+        },
+        async (request) =>
+          comments.react(request.params.commentId, request.user.userId, request.body.kind),
+      );
+
+      app.delete(
+        "/comments/:commentId/reaction",
+        {
+          schema: {
+            summary: "Take a reaction to a comment back",
+            params: z.object({ commentId: identifierSchema }),
+            response: { 200: commentSchema, ...errors(401, 403, 404) },
+          },
+          preHandler: requireUser,
+        },
+        async (request) => comments.unreact(request.params.commentId, request.user.userId),
       );
     }
 

@@ -20,6 +20,8 @@ import {
 } from "../../testing/fixtures.js";
 import { FollowRepository } from "../social/follow.repository.js";
 import { FollowService } from "../social/follow.service.js";
+import { MomentCommentRepository } from "./moment-comment.repository.js";
+import { MomentCommentService } from "./moment-comment.service.js";
 import { MomentReactionRepository } from "./moment-reaction.repository.js";
 import { MomentReactionService } from "./moment-reaction.service.js";
 import { MomentRelationshipRepository } from "./moment-relationship.repository.js";
@@ -151,6 +153,7 @@ describe("moments", () => {
         // Blocking severs reactions alongside follows and requests, which the
         // suite asserts rather than assumes.
         new MomentReactionRepository(database.dataSource),
+        new MomentCommentRepository(database.dataSource),
       ),
       moments,
       momentRelationships: new MomentRelationshipService(
@@ -164,6 +167,14 @@ describe("moments", () => {
         new MomentRepository(database.dataSource),
         moments,
         new FollowRepository(database.dataSource),
+      ),
+      momentComments: new MomentCommentService(
+        database.dataSource,
+        new MomentCommentRepository(database.dataSource),
+        new MomentRepository(database.dataSource),
+        moments,
+        new FollowRepository(database.dataSource),
+        new UserRepository(database.dataSource),
       ),
     });
   });
@@ -3062,6 +3073,709 @@ describe("moments", () => {
       const response = await app.inject({
         method: "PUT",
         url: `/moments/${randomUUID()}/reaction`,
+        payload: { kind: "loved" },
+      });
+
+      assert.equal(response.statusCode, 401, response.body);
+    });
+  });
+
+  describe("discussion", () => {
+    const aMoment = async (author: { accessToken: string; userId: string }) => {
+      const uploadId = await createReadyUpload(database.dataSource, author.userId);
+      const created = await record(author.accessToken, {
+        caption: "Something that happened",
+        occurrence: summer,
+        occurrenceOffsetMinutes: NEW_YORK,
+        uploadIds: [uploadId],
+      });
+
+      assert.equal(created.statusCode, 201, created.body);
+
+      return created.json().momentId as string;
+    };
+
+    const say = async (
+      accessToken: string,
+      momentId: string,
+      body: string,
+      extra: Record<string, unknown> = {},
+    ) =>
+      app.inject({
+        method: "POST",
+        url: `/moments/${momentId}/comments`,
+        headers: authed(accessToken),
+        payload: { body, ...extra },
+      });
+
+    const discussionOf = async (accessToken: string, momentId: string) =>
+      app.inject({
+        method: "GET",
+        url: `/moments/${momentId}/comments`,
+        headers: authed(accessToken),
+      });
+
+    const repliesTo = async (accessToken: string, commentId: string) =>
+      app.inject({
+        method: "GET",
+        url: `/comments/${commentId}/replies`,
+        headers: authed(accessToken),
+      });
+
+    const setPolicy = async (accessToken: string, momentId: string, policy: string) =>
+      app.inject({
+        method: "PUT",
+        url: `/moments/${momentId}/comments/policy`,
+        headers: authed(accessToken),
+        payload: { policy },
+      });
+
+    it("records something said and reads it back", async () => {
+      const author = await onboard();
+      const momentId = await aMoment(author);
+
+      const said = await say(author.accessToken, momentId, "I remember this");
+
+      assert.equal(said.statusCode, 201, said.body);
+      assert.equal(said.json().body, "I remember this");
+      assert.equal(said.json().deleted, false);
+      assert.equal((await discussionOf(author.accessToken, momentId)).json().total, 1);
+    });
+
+    it("reads a conversation oldest first", async () => {
+      const author = await onboard();
+      const momentId = await aMoment(author);
+
+      for (const body of ["first", "second", "third"]) {
+        await say(author.accessToken, momentId, body);
+      }
+
+      const bodies = (await discussionOf(author.accessToken, momentId))
+        .json()
+        .comments.map((comment: { body: string }) => comment.body);
+
+      // Ascending, unlike every other list here: showing the beginning first
+      // preserves the context that makes later replies comprehensible.
+      assert.deepEqual(bodies, ["first", "second", "third"]);
+    });
+
+    it("pages forward through a conversation without losing anything", async () => {
+      const author = await onboard();
+      const momentId = await aMoment(author);
+      const written: string[] = [];
+
+      for (let index = 0; index < 5; index += 1) {
+        written.push((await say(author.accessToken, momentId, `comment ${index}`)).json().commentId);
+      }
+
+      await database.dataSource.query(
+        `UPDATE moment_comments SET created_at = '2026-01-01T00:00:00Z' WHERE moment_id = $1`,
+        [momentId],
+      );
+
+      const seen: string[] = [];
+      let cursor: string | undefined;
+
+      do {
+        const page = await app.inject({
+          method: "GET",
+          url: `/moments/${momentId}/comments?limit=2${cursor === undefined ? "" : `&cursor=${cursor}`}`,
+          headers: authed(author.accessToken),
+        });
+
+        seen.push(...page.json().comments.map((comment: { commentId: string }) => comment.commentId));
+        cursor = page.json().nextCursor;
+      } while (cursor !== undefined);
+
+      assert.equal(seen.length, 5, "a comment was skipped or repeated");
+      assert.deepEqual([...seen].sort(), [...written].sort());
+    });
+
+    it("keeps a reply out of the top level and under its thread", async () => {
+      const author = await onboard();
+      const momentId = await aMoment(author);
+      const top = (await say(author.accessToken, momentId, "the first thing")).json();
+
+      const reply = await say(author.accessToken, momentId, "answering that", {
+        inReplyToCommentId: top.commentId,
+      });
+
+      assert.equal(reply.json().threadCommentId, top.commentId);
+      assert.equal((await discussionOf(author.accessToken, momentId)).json().comments.length, 1);
+      assert.equal((await repliesTo(author.accessToken, top.commentId)).json().comments.length, 1);
+    });
+
+    it("flattens a reply to a reply into the same thread", async () => {
+      const author = await onboard();
+      const momentId = await aMoment(author);
+      const top = (await say(author.accessToken, momentId, "the first thing")).json();
+      const reply = (
+        await say(author.accessToken, momentId, "answering", { inReplyToCommentId: top.commentId })
+      ).json();
+
+      const deeper = await say(author.accessToken, momentId, "answering the answer", {
+        inReplyToCommentId: reply.commentId,
+      });
+
+      // One visible level: the thread stays the top-level comment, while which
+      // comment was actually addressed is kept so a busy thread does not lose
+      // who was being answered.
+      assert.equal(deeper.json().threadCommentId, top.commentId);
+      assert.equal(deeper.json().inReplyToCommentId, reply.commentId);
+      assert.equal((await repliesTo(author.accessToken, top.commentId)).json().comments.length, 2);
+    });
+
+    it("counts replies in the total", async () => {
+      const author = await onboard();
+      const momentId = await aMoment(author);
+      const top = (await say(author.accessToken, momentId, "the first thing")).json();
+      await say(author.accessToken, momentId, "a reply", { inReplyToCommentId: top.commentId });
+
+      assert.equal((await discussionOf(author.accessToken, momentId)).json().total, 2);
+    });
+
+    it("marks an edit without moving the comment", async () => {
+      const author = await onboard();
+      const momentId = await aMoment(author);
+      const first = (await say(author.accessToken, momentId, "first")).json();
+      await say(author.accessToken, momentId, "second");
+
+      const edited = await app.inject({
+        method: "PATCH",
+        url: `/comments/${first.commentId}`,
+        headers: authed(author.accessToken),
+        payload: { body: "corrected" },
+      });
+
+      assert.equal(edited.json().body, "corrected");
+      assert.notEqual(edited.json().editedAt, null);
+      assert.equal(edited.json().createdAt, first.createdAt);
+
+      // Editing must not become a way of moving up the discussion.
+      const bodies = (await discussionOf(author.accessToken, momentId))
+        .json()
+        .comments.map((comment: { body: string }) => comment.body);
+      assert.deepEqual(bodies, ["corrected", "second"]);
+    });
+
+    it("lets only the author edit or delete", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+      const momentId = await aMoment(author);
+      const said = (await say(author.accessToken, momentId, "mine")).json();
+
+      const edit = await app.inject({
+        method: "PATCH",
+        url: `/comments/${said.commentId}`,
+        headers: authed(stranger.accessToken),
+        payload: { body: "not yours" },
+      });
+      const remove = await app.inject({
+        method: "DELETE",
+        url: `/comments/${said.commentId}`,
+        headers: authed(stranger.accessToken),
+      });
+
+      assert.equal(edit.statusCode, 404, edit.body);
+      assert.equal(remove.statusCode, 404, remove.body);
+    });
+
+    it("leaves a tombstone where replies still hang", async () => {
+      const author = await onboard();
+      const momentId = await aMoment(author);
+      const top = (await say(author.accessToken, momentId, "the first thing")).json();
+      await say(author.accessToken, momentId, "a reply", { inReplyToCommentId: top.commentId });
+
+      await app.inject({
+        method: "DELETE",
+        url: `/comments/${top.commentId}`,
+        headers: authed(author.accessToken),
+      });
+
+      const [remaining] = (await discussionOf(author.accessToken, momentId)).json().comments;
+
+      // The replies need something to hang from, and a generic representation
+      // is preferred to one preserving an author nobody needs to see.
+      assert.equal(remaining.deleted, true);
+      assert.equal(remaining.body, null);
+      assert.equal(remaining.author, null);
+      assert.equal((await repliesTo(author.accessToken, top.commentId)).json().comments.length, 1);
+    });
+
+    it("removes a comment nothing hangs from", async () => {
+      const author = await onboard();
+      const momentId = await aMoment(author);
+      const said = (await say(author.accessToken, momentId, "alone")).json();
+
+      await app.inject({
+        method: "DELETE",
+        url: `/comments/${said.commentId}`,
+        headers: authed(author.accessToken),
+      });
+
+      assert.deepEqual((await discussionOf(author.accessToken, momentId)).json().comments, []);
+    });
+
+    it("leaves the Moment untouched when a comment goes", async () => {
+      const author = await onboard();
+      const momentId = await aMoment(author);
+      const said = (await say(author.accessToken, momentId, "something")).json();
+      const before = (
+        await app.inject({
+          method: "GET",
+          url: `/moments/${momentId}`,
+          headers: authed(author.accessToken),
+        })
+      ).json();
+
+      await app.inject({
+        method: "DELETE",
+        url: `/comments/${said.commentId}`,
+        headers: authed(author.accessToken),
+      });
+
+      const after = (
+        await app.inject({
+          method: "GET",
+          url: `/moments/${momentId}`,
+          headers: authed(author.accessToken),
+        })
+      ).json();
+
+      assert.deepEqual(after, before);
+    });
+
+    it("refuses a comment with nothing in it", async () => {
+      const author = await onboard();
+      const momentId = await aMoment(author);
+
+      assert.equal((await say(author.accessToken, momentId, "   ")).statusCode, 400);
+    });
+
+    it("refuses a comment longer than the limit", async () => {
+      const author = await onboard();
+      const momentId = await aMoment(author);
+
+      assert.equal((await say(author.accessToken, momentId, "a".repeat(501))).statusCode, 400);
+    });
+
+    it("treats a retried submission as one comment", async () => {
+      const author = await onboard();
+      const momentId = await aMoment(author);
+      const commentId = randomUUID();
+
+      const first = await say(author.accessToken, momentId, "said once", { commentId });
+      const again = await say(author.accessToken, momentId, "said once", { commentId });
+
+      assert.equal(again.json().commentId, first.json().commentId);
+      assert.equal((await discussionOf(author.accessToken, momentId)).json().total, 1);
+    });
+
+    it("allows saying the same thing twice on purpose", async () => {
+      const author = await onboard();
+      const momentId = await aMoment(author);
+
+      await say(author.accessToken, momentId, "yes");
+      await say(author.accessToken, momentId, "yes");
+
+      // Repeating yourself deliberately is not a duplicate; a retry is.
+      assert.equal((await discussionOf(author.accessToken, momentId)).json().total, 2);
+    });
+
+    it("admits only followers when the author says so", async () => {
+      const author = await onboard();
+      const follower = await onboard();
+      const stranger = await onboard();
+      const momentId = await aMoment(author);
+      await setPolicy(author.accessToken, momentId, "followers");
+      await app.inject({
+        method: "POST",
+        url: `/users/${author.userId}/follow`,
+        headers: authed(follower.accessToken),
+      });
+
+      const asFollower = await say(follower.accessToken, momentId, "I follow them");
+      const asStranger = await say(stranger.accessToken, momentId, "I do not");
+
+      // Following grants no access here: the stranger can still read the
+      // Moment. It governs participation, not sight.
+      assert.equal(asFollower.statusCode, 201, asFollower.body);
+      assert.equal(asStranger.statusCode, 400, asStranger.body);
+      assert.equal(
+        (await app.inject({
+          method: "GET",
+          url: `/moments/${momentId}`,
+          headers: authed(stranger.accessToken),
+        })).statusCode,
+        200,
+      );
+    });
+
+    it("lets the author comment under every policy", async () => {
+      const author = await onboard();
+
+      for (const policy of ["anyone", "followers", "disabled"]) {
+        const momentId = await aMoment(author);
+        await setPolicy(author.accessToken, momentId, policy);
+
+        const said = await say(author.accessToken, momentId, "my own moment");
+
+        assert.equal(said.statusCode, 201, `${policy}: ${said.body}`);
+      }
+    });
+
+    it("leaves the discussion readable when it is closed", async () => {
+      const author = await onboard();
+      const other = await onboard();
+      const momentId = await aMoment(author);
+      await say(other.accessToken, momentId, "said before it closed");
+
+      await setPolicy(author.accessToken, momentId, "disabled");
+
+      const refused = await say(other.accessToken, momentId, "and after");
+      const discussion = await discussionOf(other.accessToken, momentId);
+
+      // Closing a discussion is not erasing it. Hiding a tally erases an
+      // aggregate; hiding speech leaves replies answering nothing.
+      assert.equal(refused.statusCode, 400, refused.body);
+      assert.equal(discussion.json().comments.length, 1);
+      assert.equal(discussion.json().comments[0].body, "said before it closed");
+    });
+
+    it("lets only the author set the policy", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+      const momentId = await aMoment(author);
+
+      const attempt = await setPolicy(stranger.accessToken, momentId, "disabled");
+
+      assert.equal(attempt.statusCode, 404, attempt.body);
+    });
+
+    it("hides two blocked people from each other while others see both", async () => {
+      const author = await onboard();
+      const other = await onboard();
+      const onlooker = await onboard();
+      const momentId = await aMoment(author);
+      await say(author.accessToken, momentId, "from the author");
+      await say(other.accessToken, momentId, "from the other");
+      await say(onlooker.accessToken, momentId, "from a bystander");
+
+      await app.inject({
+        method: "POST",
+        url: `/users/${other.userId}/block`,
+        headers: authed(author.accessToken),
+      });
+
+      const asOnlooker = (await discussionOf(onlooker.accessToken, momentId)).json();
+
+      // Prevent future interaction is not rewrite all prior conversation: a
+      // third party still sees a coherent discussion.
+      assert.equal(asOnlooker.comments.length, 3);
+      assert.equal((await discussionOf(author.accessToken, momentId)).json().comments.length, 2);
+    });
+
+    it("stops a blocked person commenting", async () => {
+      const author = await onboard();
+      const blocked = await onboard();
+      const momentId = await aMoment(author);
+      await app.inject({
+        method: "POST",
+        url: `/users/${blocked.userId}/block`,
+        headers: authed(author.accessToken),
+      });
+
+      const attempt = await say(blocked.accessToken, momentId, "let me in");
+
+      assert.equal(attempt.statusCode, 404, attempt.body);
+      assert.doesNotMatch(attempt.body, /block/i);
+    });
+
+    it("refuses the discussion on a Moment you cannot see", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+      const uploadId = await createReadyUpload(database.dataSource, author.userId);
+      const hidden = (
+        await record(author.accessToken, {
+          caption: "Not yours",
+          occurrence: summer,
+          occurrenceOffsetMinutes: NEW_YORK,
+          uploadIds: [uploadId],
+          visibility: "private",
+        })
+      ).json().momentId;
+
+      const refused = await discussionOf(stranger.accessToken, hidden);
+      const missing = await discussionOf(stranger.accessToken, randomUUID());
+
+      assert.equal(refused.statusCode, 404, refused.body);
+      assert.equal(missing.statusCode, 404, missing.body);
+      assert.equal(refused.json().message, missing.json().message);
+    });
+
+    it("refuses commenting without a caller", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: `/moments/${randomUUID()}/comments`,
+        payload: { body: "hello" },
+      });
+
+      assert.equal(response.statusCode, 401, response.body);
+    });
+  });
+
+  describe("mentions and reactions in a discussion", () => {
+    const aMoment = async (author: { accessToken: string; userId: string }) => {
+      const uploadId = await createReadyUpload(database.dataSource, author.userId);
+
+      return (
+        await record(author.accessToken, {
+          caption: "Something that happened",
+          occurrence: summer,
+          occurrenceOffsetMinutes: NEW_YORK,
+          uploadIds: [uploadId],
+        })
+      ).json().momentId as string;
+    };
+
+    const say = async (accessToken: string, momentId: string, body: string) =>
+      app.inject({
+        method: "POST",
+        url: `/moments/${momentId}/comments`,
+        headers: authed(accessToken),
+        payload: { body },
+      });
+
+    /** Somebody with a handle we can mention them by. */
+    const withHandle = async () => {
+      const person = await onboard();
+      const profile = await app.inject({
+        method: "GET",
+        url: "/users/me",
+        headers: authed(person.accessToken),
+      });
+
+      return { ...person, handle: profile.json().handle as string };
+    };
+
+    it("resolves a mention to a person", async () => {
+      const author = await onboard();
+      const mentioned = await withHandle();
+      const momentId = await aMoment(author);
+
+      const said = await say(author.accessToken, momentId, `thanks @${mentioned.handle}`);
+
+      assert.equal(said.statusCode, 201, said.body);
+      assert.deepEqual(said.json().mentions, [
+        { userId: mentioned.userId, handle: mentioned.handle },
+      ]);
+    });
+
+    it("keeps a mention pointing at the same person after a handle change", async () => {
+      const author = await onboard();
+      const mentioned = await withHandle();
+      const momentId = await aMoment(author);
+      const said = (await say(author.accessToken, momentId, `hello @${mentioned.handle}`)).json();
+
+      const renamed = `renamed${randomUUID().replaceAll("-", "").slice(0, 10)}`;
+      await app.inject({
+        method: "PUT",
+        url: "/users/me/handle",
+        headers: authed(mentioned.accessToken),
+        payload: { handle: renamed },
+      });
+
+      const reread = await app.inject({
+        method: "GET",
+        url: `/moments/${momentId}/comments`,
+        headers: authed(author.accessToken),
+      });
+      const [comment] = reread.json().comments;
+
+      // Identity was stored, never the handle. The mention follows the person.
+      assert.equal(comment.commentId, said.commentId);
+      assert.equal(comment.mentions[0].userId, mentioned.userId);
+      assert.equal(comment.mentions[0].handle, renamed);
+    });
+
+    it("leaves an unresolvable handle alone", async () => {
+      const author = await onboard();
+      const momentId = await aMoment(author);
+
+      const said = await say(author.accessToken, momentId, "thanks @nobodyatall");
+
+      assert.equal(said.statusCode, 201, said.body);
+      assert.deepEqual(said.json().mentions, []);
+      assert.equal(said.json().body, "thanks @nobodyatall");
+    });
+
+    it("refuses a mention across a block", async () => {
+      const author = await onboard();
+      const blocked = await withHandle();
+      const momentId = await aMoment(author);
+      await app.inject({
+        method: "POST",
+        url: `/users/${blocked.userId}/block`,
+        headers: authed(author.accessToken),
+      });
+
+      const attempt = await say(author.accessToken, momentId, `about @${blocked.handle}`);
+
+      // A mention must not become a way around a safety boundary.
+      assert.equal(attempt.statusCode, 400, attempt.body);
+    });
+
+    it("refuses a comment mentioning more people than it may", async () => {
+      const author = await onboard();
+      const momentId = await aMoment(author);
+      const many = Array.from({ length: 11 }, (_, index) => `@person${index}abc`).join(" ");
+
+      assert.equal((await say(author.accessToken, momentId, many)).statusCode, 400);
+    });
+
+    it("re-reads mentions when a comment is edited", async () => {
+      const author = await onboard();
+      const first = await withHandle();
+      const second = await withHandle();
+      const momentId = await aMoment(author);
+      const said = (await say(author.accessToken, momentId, `hello @${first.handle}`)).json();
+
+      const edited = await app.inject({
+        method: "PATCH",
+        url: `/comments/${said.commentId}`,
+        headers: authed(author.accessToken),
+        payload: { body: `actually @${second.handle}` },
+      });
+
+      // Editing rewrites the text, so the mentions come from what it now says
+      // rather than accumulating what it once said.
+      assert.deepEqual(
+        edited.json().mentions.map((mention: { userId: string }) => mention.userId),
+        [second.userId],
+      );
+    });
+
+    it("reacts to a comment and counts it", async () => {
+      const author = await onboard();
+      const other = await onboard();
+      const momentId = await aMoment(author);
+      const said = (await say(author.accessToken, momentId, "I remember")).json();
+
+      const reacted = await app.inject({
+        method: "PUT",
+        url: `/comments/${said.commentId}/reaction`,
+        headers: authed(other.accessToken),
+        payload: { kind: "loved" },
+      });
+
+      assert.equal(reacted.statusCode, 200, reacted.body);
+      assert.equal(reacted.json().reactions.counts.loved, 1);
+      assert.equal(reacted.json().reactions.total, 1);
+      assert.equal(reacted.json().reactions.yours, "loved");
+    });
+
+    it("replaces a reaction to a comment rather than adding one", async () => {
+      const author = await onboard();
+      const momentId = await aMoment(author);
+      const said = (await say(author.accessToken, momentId, "I remember")).json();
+
+      await app.inject({
+        method: "PUT",
+        url: `/comments/${said.commentId}/reaction`,
+        headers: authed(author.accessToken),
+        payload: { kind: "loved" },
+      });
+      const changed = await app.inject({
+        method: "PUT",
+        url: `/comments/${said.commentId}/reaction`,
+        headers: authed(author.accessToken),
+        payload: { kind: "amused" },
+      });
+
+      assert.equal(changed.json().reactions.total, 1);
+      assert.equal(changed.json().reactions.counts.amused, 1);
+      assert.equal(changed.json().reactions.counts.loved, undefined);
+    });
+
+    it("takes a reaction to a comment back", async () => {
+      const author = await onboard();
+      const momentId = await aMoment(author);
+      const said = (await say(author.accessToken, momentId, "I remember")).json();
+      await app.inject({
+        method: "PUT",
+        url: `/comments/${said.commentId}/reaction`,
+        headers: authed(author.accessToken),
+        payload: { kind: "loved" },
+      });
+
+      const withdrawn = await app.inject({
+        method: "DELETE",
+        url: `/comments/${said.commentId}/reaction`,
+        headers: authed(author.accessToken),
+      });
+
+      assert.equal(withdrawn.json().reactions.total, 0);
+      assert.equal(withdrawn.json().reactions.yours, null);
+    });
+
+    it("still allows comment reactions when the Moment's are off", async () => {
+      const author = await onboard();
+      const momentId = await aMoment(author);
+      const said = (await say(author.accessToken, momentId, "I remember")).json();
+      await app.inject({
+        method: "PUT",
+        url: `/moments/${momentId}/reactions/enabled`,
+        headers: authed(author.accessToken),
+        payload: { enabled: false },
+      });
+
+      const reacted = await app.inject({
+        method: "PUT",
+        url: `/comments/${said.commentId}/reaction`,
+        headers: authed(author.accessToken),
+        payload: { kind: "loved" },
+      });
+
+      // Silencing reactions to a photograph should not silence agreement
+      // between people talking underneath it.
+      assert.equal(reacted.statusCode, 200, reacted.body);
+      assert.equal(reacted.json().reactions.total, 1);
+    });
+
+    it("severs comment reactions when a block is made", async () => {
+      const author = await onboard();
+      const other = await onboard();
+      const onlooker = await onboard();
+      const momentId = await aMoment(author);
+      const said = (await say(author.accessToken, momentId, "I remember")).json();
+      await app.inject({
+        method: "PUT",
+        url: `/comments/${said.commentId}/reaction`,
+        headers: authed(other.accessToken),
+        payload: { kind: "loved" },
+      });
+
+      await app.inject({
+        method: "POST",
+        url: `/users/${other.userId}/block`,
+        headers: authed(author.accessToken),
+      });
+
+      const asOnlooker = await app.inject({
+        method: "GET",
+        url: `/moments/${momentId}/comments`,
+        headers: authed(onlooker.accessToken),
+      });
+
+      // Tallies are severed even though speech is only hidden: a count is not
+      // a conversation anybody else took part in.
+      assert.equal(asOnlooker.json().comments[0].reactions.total, 0);
+    });
+
+    it("refuses reacting to a comment without a caller", async () => {
+      const response = await app.inject({
+        method: "PUT",
+        url: `/comments/${randomUUID()}/reaction`,
         payload: { kind: "loved" },
       });
 

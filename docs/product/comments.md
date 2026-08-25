@@ -394,6 +394,24 @@ For example, if a formerly public Moment becomes private, its existing Comments 
 
 Privacy revocation applies to discussion as well as source content.
 
+## What Is Settled
+
+**Three policies, chosen per Moment by its author** (ADR-114): `anyone` who can see it, `followers` of the author, or `disabled`. The author may always comment on their own Moment under every one.
+
+**`followers` grants no access.** A stranger who could read the Moment still can; what changes is whether they may speak. That is why it does not contradict the rule that a Follow never bypasses a visibility rule — nothing here is a visibility rule.
+
+**Closing a discussion leaves it readable.** New comments are refused; what was already said stays. This deliberately differs from disabling reactions, which hides the counts: hiding a tally erases an aggregate nobody authored, while hiding a conversation erases speech and leaves replies answering questions that are no longer there.
+
+**Blocking hides each party's comments from the other and from nobody else.** Future interaction is refused and prior conversation stands for everybody else, so nothing a third person wrote becomes incoherent. The reactions the two left on each other's comments are severed, because a count is not something anybody else took part in.
+
+**Five hundred characters**, measured after normalisation. Whitespace alone is not a comment.
+
+**A mention stores a person, never a handle**, so it survives its target renaming. Mentioning somebody a Block separates you from is refused, and a comment may name at most ten people.
+
+**A retried submission is not a duplicate.** The caller may name the submission: the same identifier twice yields one comment, while the same text twice without one yields two, because repeating yourself deliberately is allowed.
+
+**Reactions on comments ship**, using the same four kinds a Moment takes. A Moment's own reaction setting does not reach the discussion underneath it.
+
 ## Who May Comment
 
 Being able to view a Moment does not automatically imply the right to comment.

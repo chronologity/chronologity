@@ -420,6 +420,132 @@ export const reactionSummarySchema = z.object({
 
 export type ReactionSummary = z.infer<typeof reactionSummarySchema>;
 
+/**
+ * Who may join the discussion on a Moment.
+ *
+ * Seeing a Moment does not by itself mean being able to comment on it
+ * (`comments.md:417`); this is what separates the two.
+ *
+ * `followers` grants no access. A stranger who could read the Moment still can
+ * — it governs participation rather than sight, which is why it does not
+ * contradict the rule that a Follow never bypasses a visibility rule.
+ */
+export const commentPolicySchema = z.enum(["anyone", "followers", "disabled"]);
+
+export type CommentPolicy = z.infer<typeof commentPolicySchema>;
+
+/** How long a comment may be, after normalisation. */
+export const COMMENT_MAX_LENGTH = 500;
+
+/**
+ * What somebody wrote.
+ *
+ * Plain text. `comments.md:537` asks the initial model to avoid a rich-text
+ * editor, and `comments.md:527` keeps media out entirely: Chronologity already
+ * has a first-class construct for preserving media, and it is a Moment.
+ */
+export const commentBodySchema = z.string().trim().min(1).max(COMMENT_MAX_LENGTH);
+
+/** Somebody a comment refers to, resolved to identity rather than to a handle. */
+export const commentMentionSchema = z.object({
+  userId: identifierSchema,
+  /** Their handle as it stands now, which may not be the one that was typed. */
+  handle: z.string(),
+});
+
+export type CommentMention = z.infer<typeof commentMentionSchema>;
+
+/**
+ * A comment on a Moment.
+ *
+ * Conversation, not history (`comments.md:58`). When it was written says
+ * nothing about when the experience happened.
+ *
+ * A deleted comment with replies still appears, carrying neither body nor
+ * author: the replies need something to hang from, and `comments.md:339` asks
+ * for a generic representation rather than one preserving identity nobody needs
+ * to see.
+ */
+export const commentSchema = z.object({
+  commentId: identifierSchema,
+  momentId: identifierSchema,
+  /** Null on a deleted comment kept as a tombstone. */
+  author: publicUserSchema.nullable(),
+  /** Null on a deleted comment kept as a tombstone. */
+  body: commentBodySchema.nullable(),
+  /** True when this is a tombstone rather than something somebody wrote. */
+  deleted: z.boolean(),
+  /** The top-level comment this belongs to, or null when it is one. */
+  threadCommentId: identifierSchema.nullable(),
+  /** Which comment was actually addressed, where that differs from the thread. */
+  inReplyToCommentId: identifierSchema.nullable(),
+  /** Who it refers to in conversation. Never a claim that they were there. */
+  mentions: z.array(commentMentionSchema),
+  /** How it has been responded to, and your own. */
+  reactions: reactionSummarySchema,
+  /** Its position in the conversation, and never rewritten by an edit. */
+  createdAt: timestampSchema,
+  /** When the visible text last changed, or null if it never has. */
+  editedAt: timestampSchema.nullable(),
+});
+
+export type Comment = z.infer<typeof commentSchema>;
+
+/**
+ * A page of comments, oldest first.
+ *
+ * Ascending, unlike every other list here. `comments.md:198`: showing the
+ * beginning of a discussion first preserves the context that makes later
+ * replies comprehensible, and engagement ranking would make the order opaque.
+ */
+export const commentPageSchema = z.object({
+  comments: z.array(commentSchema),
+  /** Every comment on the Moment, replies included (`comments.md:230`). */
+  total: z.number().int().min(0),
+  nextCursor: z.string().optional(),
+});
+
+export type CommentPage = z.infer<typeof commentPageSchema>;
+
+/** Saying something, or replying to something already said. */
+export const createCommentRequestSchema = z.object({
+  body: commentBodySchema,
+  /**
+   * Which comment this replies to, if any.
+   *
+   * Replying to a reply joins that reply's thread rather than nesting deeper.
+   */
+  inReplyToCommentId: identifierSchema.optional(),
+  /**
+   * Optional, and the answer to a retried submission.
+   *
+   * Supplying the same identifier twice yields one comment; supplying none
+   * twice yields two, because repeating yourself deliberately is allowed
+   * (`comments.md:561`).
+   */
+  commentId: identifierSchema.optional(),
+});
+
+export type CreateCommentRequest = z.infer<typeof createCommentRequestSchema>;
+
+/** Correcting what somebody wrote. */
+export const editCommentRequestSchema = z.object({ body: commentBodySchema });
+
+export type EditCommentRequest = z.infer<typeof editCommentRequestSchema>;
+
+/** Setting who may join the discussion. */
+export const setCommentPolicyRequestSchema = z.object({ policy: commentPolicySchema });
+
+export type SetCommentPolicyRequest = z.infer<typeof setCommentPolicyRequestSchema>;
+
+/** What a caller may ask for when reading a discussion. */
+export const listCommentsRequestSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  cursor: z.string().max(200).optional(),
+});
+
+export type ListCommentsRequest = z.infer<typeof listCommentsRequestSchema>;
+
 /** Correcting what a Moment says happened. */
 export const updateCaptionRequestSchema = z.object({ caption: captionSchema });
 

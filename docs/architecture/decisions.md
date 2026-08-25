@@ -3455,3 +3455,67 @@ Including counts in the Moment response, so a client needs one request rather th
 **Counts are not on the Moment.** A Moment read and a Moment list would each need an aggregate on the hottest path in the system, for information a client can ask for when it needs it. Keeping them apart also leaves phase 7 free to serve them from a projection without changing the Moment contract.
 
 **No Integration Event is published.** Uploads publish the only event in the system and it has a worker behind it. An event is immutable and versioned, so publishing one with no consumer would fix a shape 5Q has not yet decided it wants.
+
+# ADR-114 — Closing a Discussion Leaves It Readable, and Blocking Hides Speech Rather Than Deleting It
+
+**Status:** Accepted
+
+## Decision
+
+A Moment carries a comment policy: `anyone`, `followers`, or `disabled`, chosen by its author. Closing a discussion refuses new comments and leaves everything already said readable.
+
+Blocking hides each party's comments from the other and from nobody else. It severs the reactions they left on each other's comments.
+
+Comments are ordered oldest first, at both levels, with one visible level of reply nesting. Editing preserves position; deleting leaves a tombstone where replies hang from it.
+
+Mentions resolve to identity, never to a stored handle. A mention across a Block is refused.
+
+Reactions on comments ship, with the same four kinds a Moment takes, and a Moment's reaction switch does not reach them.
+
+Five hundred characters, after normalisation.
+
+## Alternatives Considered
+
+Hiding the discussion when comments are disabled, matching what ADR-113 does to reactions.
+
+Deleting the comments between two people when a Block is made, matching what ADR-113 does to their reactions.
+
+Storing the typed handle in a mention.
+
+Embedding the first few replies inside each top-level comment rather than paging them separately.
+
+Rejecting repeated text outright, rather than making retries idempotent.
+
+## Rationale
+
+**Disabling comments and disabling reactions deliberately differ, and the difference is what each thing is.** `comments.md:427` prescribes that existing discussion stay readable, and it is right to: hiding a tally erases an aggregate nobody authored, while hiding a conversation erases speech and leaves replies answering questions that are no longer visible. `reactions.md:301` asked for the two to be consistent; they are consistent in principle — an author closes the door, and what is behind it depends on whether anybody wrote anything.
+
+**Blocking hides speech rather than deleting it**, which is `comments.md:459` almost verbatim: *prevent future interaction* is not *rewrite all prior conversation*. A third party keeps a coherent discussion, and neither party sees the other. The reactions they left are severed instead, because a count is not something anybody else took part in — the same reasoning ADR-113 used, applied to the half of this that is a tally.
+
+**`followers` does not breach `social-graph.md`.** That rule is that a Follow grants no *access* — "what a follower may see is decided by the visibility rules of individual Moments, which a Follow must never bypass". A followers-only policy bypasses no visibility rule: a stranger who could read the Moment still can, which a test asserts directly. It governs participation, which `comments.md:417` asks to be kept separate from sight.
+
+**Mentions store a person, not a handle.** `comments.md:503` requires that a mention survive its target renaming, which storing text could not do. A test changes a handle after the fact and reads the comment back.
+
+**Idempotency is the caller's to declare.** `comments.md:561` asks that a retried submission not duplicate while repeating oneself deliberately stays allowed. Letting the client name the submission answers both without guessing at intent: the same identifier twice yields one comment, none twice yields two.
+
+**Oldest first, which is the first ascending list in the system.** `comments.md:198`: reading a conversation newest-first privileges recency over the context that makes later replies comprehensible. Every cursor comparison here inverts accordingly, and a test proves the direction rather than assuming it.
+
+**Comment reactions ship over a documented caution.** `reactions.md:406` says the initial model "does not require reactions to Comments" and that they "should be introduced only if they materially improve conversation rather than because reaction mechanics already exist elsewhere." This was a product decision taken with that caution read, and no further justification is claimed. Recording it plainly is better than inventing a rationale the document would not recognise.
+
+## Consequences
+
+**The block check in the comment policy is unreachable through HTTP, and this was found by trying to break it.** Removing it broke no test. The reason is that a blocked person is already refused by the Moment's own visibility check before the policy is ever consulted, so the branch cannot fire through a route. It is kept as defence in depth — if the visibility rules ever loosen, it still holds — and it is covered by the policy's unit tests. But the integration suite does not prove it, and saying otherwise would be false.
+
+That is worth recording as a general caution: a check placed behind a stronger check is not tested by tests that go through the stronger one.
+
+**Neutering the block filter had to be done carefully to mean anything.** The first attempt replaced the predicate with one that broke the query itself, failing five unrelated tests — which demonstrates nothing except that a broken query fails. Making the subquery unmatchable while leaving it valid failed exactly the one test that exists for it.
+
+**A tombstone carries neither body nor author.** `comments.md:339` prefers a generic representation to one preserving identity nobody needs, and the replies still need something to hang from. A comment with nothing hanging from it simply disappears.
+
+**Two parent columns rather than one.** `thread_comment_id` flattens presentation to a single visible level; `in_reply_to_comment_id` records who was actually being answered, which `comments.md:177` permits retaining and without which a busy thread loses that. Replying to a reply joins the thread and keeps the target.
+
+**Counts exclude what a Block hides.** A count that included comments the Viewer cannot see would invite them to go looking for the difference.
+
+**No counter columns**, for the reason ADR-113 records: a running total is the contended row the roadmap forbids.
+
+**Mentions are re-read when a comment is edited**, rather than accumulating what it once said. Editing rewrites the text, so it rewrites who the text refers to.
