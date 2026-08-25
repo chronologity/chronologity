@@ -264,6 +264,40 @@ export class MomentRealWorldEvent {
 }
 
 /**
+ * Who may see a restricted Moment.
+ *
+ * A list belonging to one Moment rather than a reusable group. `privacy.md:98`
+ * asks that the access model stay "as simple as possible" and warns against
+ * reproducing a matrix of social-network privacy controls; a shared group would
+ * also mean that editing it silently changed the audience of every Moment
+ * already pointing at it.
+ *
+ * Here rather than in a file of its own because it is part of a Moment rather
+ * than a concept about one: it is the list `visibility` governs, written by the
+ * same operation that sets it, with no service or endpoints of its own.
+ */
+@Entity("moment_audience")
+@Index("moment_audience_user_idx", ["userId", "momentId"])
+export class MomentAudience {
+  @PrimaryColumn("uuid", { name: "moment_id" })
+  momentId!: string;
+
+  @PrimaryColumn("uuid", { name: "user_id" })
+  userId!: string;
+
+  @Column("timestamptz", { name: "added_at" })
+  addedAt!: Date;
+
+  @ManyToOne(() => Moment)
+  @JoinColumn({ name: "moment_id" })
+  moment?: Moment;
+
+  @ManyToOne(() => User)
+  @JoinColumn({ name: "user_id" })
+  user?: User;
+}
+
+/**
  * One piece of media representing a Moment, and where it sits in the order.
  *
  * Presentation order only: it says nothing about when anything happened, and

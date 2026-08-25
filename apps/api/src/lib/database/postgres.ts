@@ -19,7 +19,6 @@ import {
   RealWorldEventFollow,
   UserFollow,
 } from "../../features/social/follow.model.js";
-import { MomentAudience } from "../../features/moments/moment-audience.model.js";
 import {
   CommentMention,
   CommentReaction,
@@ -30,6 +29,7 @@ import { MomentRelationship } from "../../features/moments/moment-relationship.m
 import { IdentityPhone, PhoneSignInCode } from "../../features/authentication/phone.model.js";
 import {
   Moment,
+  MomentAudience,
   MomentEdit,
   MomentLocation,
   MomentMedium,

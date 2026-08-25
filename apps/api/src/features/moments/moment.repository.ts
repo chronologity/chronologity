@@ -13,13 +13,13 @@ import { IsNull } from "typeorm";
 import type { Transaction } from "../../lib/database/transaction.js";
 import { User } from "../users/user.model.js";
 import { toPublicUser } from "../users/user.repository.js";
-import { MomentAudience } from "./moment-audience.model.js";
 import type { Upload as UploadRow } from "../uploads/upload.model.js";
 import { toUpload } from "../uploads/upload.repository.js";
 import { toLocation } from "../locations/location.repository.js";
 import { toRealWorldEvent } from "../real-world-events/real-world-event.repository.js";
 import {
   Moment as MomentRow,
+  MomentAudience,
   MomentEdit,
   MomentLocation,
   MomentMedium,
