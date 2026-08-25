@@ -3519,3 +3519,65 @@ That is worth recording as a general caution: a check placed behind a stronger c
 **No counter columns**, for the reason ADR-113 records: a running total is the contended row the roadmap forbids.
 
 **Mentions are re-read when a comment is edited**, rather than accumulating what it once said. Editing rewrites the text, so it rewrites who the text refers to.
+
+# ADR-115 — Significance Is Derived Per Scope, and Cannot See Engagement
+
+**Status:** Accepted
+
+## Decision
+
+All eight significance dimensions ship: causal, structural, temporal, personal, collective, Event, evidentiary, retrospective.
+
+Significance is stored per Moment, per scope, per dimension — `person`, `real_world_event`, `location`, or `global` — never as one value per Moment.
+
+The one human input is a single binary mark, `significant`. Anybody may mark any Moment they can see. A mark is private, always.
+
+A temporal boundary is inferred from position: first or last in a scope.
+
+Derived values are computed by a worker sweeping stalest-first, carrying an algorithm version and a provenance.
+
+Nothing in the significance code can reach reactions or comments.
+
+## Alternatives Considered
+
+One significance value per Moment.
+
+Causal significance as out-degree, which is the obvious implementation.
+
+Personal significance as a graded vocabulary — milestone, defining, important.
+
+Temporal boundaries inferred from gaps in a record, or authored directly.
+
+Deferring collective significance until coordinated posting can be resisted.
+
+Recomputation driven by events rather than by a periodic sweep.
+
+## Rationale
+
+**Scope is part of the meaning.** `historical-significance.md:76` argues that `Significance(Moment, Context)` is the better model, and its example decides it: a family's first photograph after immigrating may be among the most consequential Moments in that family's history and globally unremarkable. One value per Moment cannot hold both, so the key carries the scope.
+
+**Causal significance counts descendants, not edges.** Invariant 7 forbids reducing it to out-degree, and the document's own example says why: in `A → B → C → D` every Moment has exactly one outgoing edge, and the whole chain descends from the first. A recursive walk, bounded in depth, is what distinguishes them — an unbounded walk over a graph people can extend is a query with no worst case.
+
+**Retrospective significance is not a separate analysis.** *"Later causal history may increase the significance of earlier Moments"* describes what happens when you recompute, not a new graph to walk. It becomes observable only by remembering what a dimension scored when first assessed, which is what `baseline_value` is for.
+
+**One mark, because it is the floor of any scale.** `historical-significance.md:305` says the initial product needs no numerical personal rating. A three-level vocabulary would ask somebody to rank their own life on boundaries nobody could explain consistently, and a single mark can always be reinterpreted as the middle of a scale added later.
+
+**Anybody may mark anything they can see.** The document's own example is the last photograph of a loved one — which may have been taken by a sibling. Scoping the mark to the person who made it means two people marking one Moment is not a conflict but the model working, and invariant 12 already says a mark establishes nothing about universal importance.
+
+**Marks are private because they are closer to a diary than to a reaction.** Which Moments matter to somebody reveals a great deal, and there is no shape in the contract that could carry another person's mark — the strongest form that guarantee can take.
+
+**Boundaries are inferred from position, and gaps were rejected on principle.** A gap rule needs a threshold, and any threshold is a guess about somebody's life the system cannot check: a quiet year and a year of upheaval look identical from outside. An arbitrary constant inside a significance algorithm is exactly the *"accidental definition of what Chronologity considers important"* the document's closing line warns against. What position-based inference misses — a turning point leaving no trace — the personal mark already covers, which is why a second authored vocabulary was not needed.
+
+**Collective significance ships knowingly weak, and this is recorded rather than glossed.** It counts distinct authors, never Moment volume, which invariants 13 and 14 require. But the document asks how coordinated posting should be prevented from manufacturing convergence, and that is unsolved. Distinct authors raise the cost without removing the hole. It carries its own algorithm version so it can be replaced alone, and nothing consumes significance until temporal zoom exists — which is the actual mitigation.
+
+## Consequences
+
+**The engagement constraint is enforced by construction, not by intention.** The architecture constraints ask that engagement remain separable *"so that a future optimization cannot casually turn reaction or view counts into historical importance"* — and reactions and comments were built in the two phases immediately before this one. So the scoring module imports nothing at all, the repository reaches no engagement table, and a unit test strips the comments from the source and asserts the code mentions neither. Intention is not separation; being unable to reach them is.
+
+**Nothing reads derived significance.** Invariant 37 says Chronologity should not initially expose a universal score, and no endpoint does. The three routes concern the personal mark alone. Tests read the tables directly, which is honest about what exists.
+
+**Reassessing one Moment had to become possible, and a test found that out.** The first implementation offered only a batch sweep, so a test checking one Moment reassessed the whole database — hundreds of Moments left by other suites, at roughly ten queries each. Two tests failed because the batch never reached the Moment under test, and the suite took over three minutes. Extracting `recomputeSignificanceFor` brought it to four seconds and gave the system something it was missing anyway.
+
+**A guard test that could not fail was found by trying to break it.** Forcing every Moment at a place to count as a boundary broke nothing, because the test compared the first Moment against the middle and the first was *also* the earliest in its author's record — the record boundary hid the place rule entirely. Asserting that the middle scores exactly zero is what makes the rule testable. A comparison between two values can pass for reasons that have nothing to do with the rule under test.
+
+**The sweep is periodic rather than event-driven.** `historical-significance.md:206` permits computing asynchronously, incrementally, or periodically, and says plainly that not every causal relationship should trigger a synchronous recalculation. Nothing publishes the events that would drive this, and inventing them here would fix a shape 5Q has not decided.

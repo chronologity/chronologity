@@ -11,6 +11,7 @@ import type { FollowService } from "../features/social/follow.service.js";
 import { momentRoutes } from "../features/moments/moment.routes.js";
 import type { MomentCommentService } from "../features/moments/moment-comment.service.js";
 import type { MomentReactionService } from "../features/moments/moment-reaction.service.js";
+import type { MomentSignificanceService } from "../features/moments/moment-significance.service.js";
 import type { MomentRelationshipService } from "../features/moments/moment-relationship.service.js";
 import type { MomentService } from "../features/moments/moment.service.js";
 import { realWorldEventRoutes } from "../features/real-world-events/real-world-event.routes.js";
@@ -47,6 +48,8 @@ import type { UserService } from "../features/users/user.service.js";
  *   Moment service, whose visibility check every reaction read depends on.
  * @param momentComments - Discussion about Moments; mounted only alongside the
  *   Moment service, whose visibility check bounds every comment read.
+ * @param momentSignificance - Saying a Moment matters to you; mounted only
+ *   alongside the Moment service, whose visibility check bounds every mark.
  * @param follows - The follow service; mounted only alongside users, since
  *   following is a relationship between two accounts.
  * @returns Nothing.
@@ -63,6 +66,7 @@ export async function registerRoutes(
   momentRelationships?: MomentRelationshipService | undefined,
   momentReactions?: MomentReactionService | undefined,
   momentComments?: MomentCommentService | undefined,
+  momentSignificance?: MomentSignificanceService | undefined,
   follows?: FollowService | undefined,
 ): Promise<void> {
   await app.register(healthRoutes);
@@ -93,7 +97,13 @@ export async function registerRoutes(
       }
 
       if (moments !== undefined) {
-        await app.register(momentRoutes(moments, momentRelationships, momentReactions, momentComments));
+        await app.register(momentRoutes(
+            moments,
+            momentRelationships,
+            momentReactions,
+            momentComments,
+            momentSignificance,
+          ));
       }
 
       if (follows !== undefined) {

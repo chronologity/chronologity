@@ -8,6 +8,7 @@ import type { AuthorizationService } from "../features/authorization/authorizati
 import type { LocationService } from "../features/locations/location.service.js";
 import type { MomentCommentService } from "../features/moments/moment-comment.service.js";
 import type { MomentReactionService } from "../features/moments/moment-reaction.service.js";
+import type { MomentSignificanceService } from "../features/moments/moment-significance.service.js";
 import type { MomentRelationshipService } from "../features/moments/moment-relationship.service.js";
 import type { MomentService } from "../features/moments/moment.service.js";
 import type { FollowService } from "../features/social/follow.service.js";
@@ -60,6 +61,8 @@ export interface BuildAppOptions {
   momentReactions?: MomentReactionService | undefined;
   /** Discussion about Moments. Mounted only alongside the Moment service. */
   momentComments?: MomentCommentService | undefined;
+  /** Saying a Moment matters to you. Mounted only alongside the Moment service. */
+  momentSignificance?: MomentSignificanceService | undefined;
   /** The follow service. Mounted only alongside users. */
   follows?: FollowService | undefined;
 }
@@ -88,6 +91,7 @@ export async function buildApp({
   momentRelationships,
   momentReactions,
   momentComments,
+  momentSignificance,
   follows,
 }: BuildAppOptions): Promise<FastifyInstance> {
   // Typed explicitly: Fastify's overloads otherwise resolve a broadly-typed
@@ -146,6 +150,7 @@ export async function buildApp({
     momentRelationships,
     momentReactions,
     momentComments,
+    momentSignificance,
     follows,
   );
 

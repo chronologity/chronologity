@@ -30,6 +30,8 @@ import { MomentRepository } from "../features/moments/moment.repository.js";
 import { MomentCommentRepository } from "../features/moments/moment-comment.repository.js";
 import { MomentCommentService } from "../features/moments/moment-comment.service.js";
 import { MomentReactionRepository } from "../features/moments/moment-reaction.repository.js";
+import { MomentSignificanceRepository } from "../features/moments/moment-significance.repository.js";
+import { MomentSignificanceService } from "../features/moments/moment-significance.service.js";
 import { MomentReactionService } from "../features/moments/moment-reaction.service.js";
 import { MomentRelationshipRepository } from "../features/moments/moment-relationship.repository.js";
 import { MomentRelationshipService } from "../features/moments/moment-relationship.service.js";
@@ -130,6 +132,8 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
   const momentReactionRepository = new MomentReactionRepository(database.dataSource);
   const momentCommentRepository = new MomentCommentRepository(database.dataSource);
 
+  const momentSignificanceRepository = new MomentSignificanceRepository(database.dataSource);
+
   const app = await buildApp({
     config,
     dependencies,
@@ -208,6 +212,11 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
       moments,
       new FollowRepository(database.dataSource),
       accounts,
+    ),
+    momentSignificance: new MomentSignificanceService(
+      database.dataSource,
+      momentSignificanceRepository,
+      moments,
     ),
     realWorldEvents: new RealWorldEventService(
       database.dataSource,

@@ -25,6 +25,10 @@ import {
   MomentComment,
 } from "../../features/moments/moment-comment.model.js";
 import { MomentReaction } from "../../features/moments/moment-reaction.model.js";
+import {
+  MomentPersonalSignificance,
+  MomentSignificance,
+} from "../../features/moments/moment-significance.model.js";
 import { MomentRelationship } from "../../features/moments/moment-relationship.model.js";
 import { IdentityPhone, PhoneSignInCode } from "../../features/authentication/phone.model.js";
 import {
@@ -96,6 +100,8 @@ const entities = [
   MomentComment,
   CommentMention,
   CommentReaction,
+  MomentPersonalSignificance,
+  MomentSignificance,
   IdentityPhone,
   PhoneSignInCode,
   RealWorldEvent,

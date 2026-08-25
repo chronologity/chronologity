@@ -15,6 +15,7 @@ import {
   momentRelationshipListSchema,
   momentRelationshipSchema,
   momentSchema,
+  personalSignificanceSchema,
   reactionSummarySchema,
   reorderMediaRequestSchema,
   setCommentPolicyRequestSchema,
@@ -31,6 +32,7 @@ import { requireUser } from "../../plugins/auth.plugin.js";
 import { errors } from "../../server/error-responses.js";
 import type { MomentCommentService } from "./moment-comment.service.js";
 import type { MomentReactionService } from "./moment-reaction.service.js";
+import type { MomentSignificanceService } from "./moment-significance.service.js";
 import type { MomentRelationshipService } from "./moment-relationship.service.js";
 import type { MomentService } from "./moment.service.js";
 
@@ -52,6 +54,8 @@ import type { MomentService } from "./moment.service.js";
  *   built without them; the endpoints are absent rather than failing.
  * @param comments - Discussion about Moments. Optional so an application can be
  *   built without it; the endpoints are absent rather than failing.
+ * @param significance - Saying a Moment matters to you. Optional for the same
+ *   reason.
  * @returns A Fastify plugin registering the Moment endpoints.
  */
 export function momentRoutes(
@@ -59,6 +63,7 @@ export function momentRoutes(
   relationships?: MomentRelationshipService,
   reactions?: MomentReactionService,
   comments?: MomentCommentService,
+  significance?: MomentSignificanceService,
 ) {
   return async function register(instance: FastifyInstance): Promise<void> {
     const app = instance.withTypeProvider<ZodTypeProvider>();
@@ -665,6 +670,55 @@ export function momentRoutes(
           preHandler: requireUser,
         },
         async (request) => comments.unreact(request.params.commentId, request.user.userId),
+      );
+    }
+
+    if (significance !== undefined) {
+      // The one significance signal a person supplies. Everything else is
+      // derived from the shape of history and is not exposed: Chronologity does
+      // not show a universal significance score.
+      app.put(
+        "/moments/:momentId/significance",
+        {
+          schema: {
+            summary: "Say this Moment matters to you",
+            description:
+              "Private, always — nobody sees anybody else's mark, and no response anywhere carries one. You may mark any Moment you can see, including one somebody else recorded: the last photograph of a loved one may have been taken by a sibling. Two people marking the same Moment is not a conflict; each mark belongs to its own history. Marking twice is the state already holding.",
+            params: z.object({ momentId: identifierSchema }),
+            response: { 200: personalSignificanceSchema, ...errors(401, 403, 404) },
+          },
+          preHandler: requireUser,
+        },
+        async (request) => significance.mark(request.params.momentId, request.user.userId),
+      );
+
+      app.delete(
+        "/moments/:momentId/significance",
+        {
+          schema: {
+            summary: "Take your mark back",
+            description: "Unmarking one you never marked is the state you asked for, not an error.",
+            params: z.object({ momentId: identifierSchema }),
+            response: { 200: personalSignificanceSchema, ...errors(401, 403, 404) },
+          },
+          preHandler: requireUser,
+        },
+        async (request) => significance.unmark(request.params.momentId, request.user.userId),
+      );
+
+      app.get(
+        "/moments/:momentId/significance",
+        {
+          schema: {
+            summary: "Whether you marked this Moment",
+            description:
+              "Your own mark and nothing else. Which Moments matter to somebody is closer to a diary than to a reaction, so there is no way to ask whether anybody else marked one.",
+            params: z.object({ momentId: identifierSchema }),
+            response: { 200: personalSignificanceSchema, ...errors(401, 403, 404) },
+          },
+          preHandler: requireUser,
+        },
+        async (request) => significance.read(request.params.momentId, request.user.userId),
       );
     }
 

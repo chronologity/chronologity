@@ -546,6 +546,26 @@ export const listCommentsRequestSchema = z.object({
 
 export type ListCommentsRequest = z.infer<typeof listCommentsRequestSchema>;
 
+/**
+ * Whether somebody has marked a Moment as mattering to them.
+ *
+ * One binary mark, and private always. Which Moments matter to somebody is
+ * closer to a diary than to a reaction, so this reports only the caller's own —
+ * there is no shape here that could carry anybody else's.
+ *
+ * A mark says something about that person's relationship to the Moment and
+ * nothing about universal importance (`historical-significance.md:312`).
+ */
+export const personalSignificanceSchema = z.object({
+  momentId: identifierSchema,
+  /** Whether you marked it. Never whether anybody else did. */
+  significant: z.boolean(),
+  /** When you marked it, or null. */
+  markedAt: timestampSchema.nullable(),
+});
+
+export type PersonalSignificance = z.infer<typeof personalSignificanceSchema>;
+
 /** Correcting what a Moment says happened. */
 export const updateCaptionRequestSchema = z.object({ caption: captionSchema });
 

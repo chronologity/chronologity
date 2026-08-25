@@ -23,6 +23,8 @@ import { FollowService } from "../social/follow.service.js";
 import { MomentCommentRepository } from "./moment-comment.repository.js";
 import { MomentCommentService } from "./moment-comment.service.js";
 import { MomentReactionRepository } from "./moment-reaction.repository.js";
+import { MomentSignificanceRepository } from "./moment-significance.repository.js";
+import { MomentSignificanceService } from "./moment-significance.service.js";
 import { MomentReactionService } from "./moment-reaction.service.js";
 import { MomentRelationshipRepository } from "./moment-relationship.repository.js";
 import { MomentRelationshipService } from "./moment-relationship.service.js";
@@ -175,6 +177,11 @@ describe("moments", () => {
         moments,
         new FollowRepository(database.dataSource),
         new UserRepository(database.dataSource),
+      ),
+      momentSignificance: new MomentSignificanceService(
+        database.dataSource,
+        new MomentSignificanceRepository(database.dataSource),
+        moments,
       ),
     });
   });
@@ -3777,6 +3784,172 @@ describe("moments", () => {
         method: "PUT",
         url: `/comments/${randomUUID()}/reaction`,
         payload: { kind: "loved" },
+      });
+
+      assert.equal(response.statusCode, 401, response.body);
+    });
+  });
+
+  describe("saying a moment matters to you", () => {
+    const aMoment = async (author: { accessToken: string; userId: string }) => {
+      const uploadId = await createReadyUpload(database.dataSource, author.userId);
+
+      return (
+        await record(author.accessToken, {
+          caption: "Something that happened",
+          occurrence: summer,
+          occurrenceOffsetMinutes: NEW_YORK,
+          uploadIds: [uploadId],
+        })
+      ).json().momentId as string;
+    };
+
+    const mark = async (accessToken: string, momentId: string) =>
+      app.inject({
+        method: "PUT",
+        url: `/moments/${momentId}/significance`,
+        headers: authed(accessToken),
+      });
+
+    const unmark = async (accessToken: string, momentId: string) =>
+      app.inject({
+        method: "DELETE",
+        url: `/moments/${momentId}/significance`,
+        headers: authed(accessToken),
+      });
+
+    const readMark = async (accessToken: string, momentId: string) =>
+      app.inject({
+        method: "GET",
+        url: `/moments/${momentId}/significance`,
+        headers: authed(accessToken),
+      });
+
+    it("marks a Moment and reads it back", async () => {
+      const author = await onboard();
+      const momentId = await aMoment(author);
+
+      const marked = await mark(author.accessToken, momentId);
+
+      assert.equal(marked.statusCode, 200, marked.body);
+      assert.equal(marked.json().significant, true);
+      assert.notEqual(marked.json().markedAt, null);
+      assert.equal((await readMark(author.accessToken, momentId)).json().significant, true);
+    });
+
+    it("reports nothing for a Moment nobody marked", async () => {
+      const author = await onboard();
+      const momentId = await aMoment(author);
+
+      const read = await readMark(author.accessToken, momentId);
+
+      assert.equal(read.json().significant, false);
+      assert.equal(read.json().markedAt, null);
+    });
+
+    it("treats marking twice as the state already holding", async () => {
+      const author = await onboard();
+      const momentId = await aMoment(author);
+
+      const first = await mark(author.accessToken, momentId);
+      const again = await mark(author.accessToken, momentId);
+
+      assert.equal(again.statusCode, 200, again.body);
+      assert.equal(again.json().markedAt, first.json().markedAt);
+    });
+
+    it("takes a mark back", async () => {
+      const author = await onboard();
+      const momentId = await aMoment(author);
+      await mark(author.accessToken, momentId);
+
+      const unmarked = await unmark(author.accessToken, momentId);
+
+      assert.equal(unmarked.json().significant, false);
+      assert.equal(unmarked.json().markedAt, null);
+    });
+
+    it("treats unmarking one you never marked as already done", async () => {
+      const author = await onboard();
+      const momentId = await aMoment(author);
+
+      assert.equal((await unmark(author.accessToken, momentId)).statusCode, 200);
+    });
+
+    it("lets somebody mark a Moment they did not record", async () => {
+      const author = await onboard();
+      const other = await onboard();
+      const momentId = await aMoment(author);
+
+      const marked = await mark(other.accessToken, momentId);
+
+      // The last photograph of a loved one may have been taken by a sibling,
+      // and it is no less the Moment that matters most.
+      assert.equal(marked.statusCode, 200, marked.body);
+      assert.equal(marked.json().significant, true);
+    });
+
+    it("keeps two people's marks entirely separate", async () => {
+      const author = await onboard();
+      const other = await onboard();
+      const momentId = await aMoment(author);
+
+      await mark(other.accessToken, momentId);
+
+      const asAuthor = await readMark(author.accessToken, momentId);
+      const asOther = await readMark(other.accessToken, momentId);
+
+      // Two people marking one Moment is not a conflict. Each mark belongs to
+      // its own history, and neither can see the other's.
+      assert.equal(asOther.json().significant, true);
+      assert.equal(asAuthor.json().significant, false);
+    });
+
+    it("never carries anybody else's mark in any response", async () => {
+      const author = await onboard();
+      const other = await onboard();
+      const momentId = await aMoment(author);
+      await mark(other.accessToken, momentId);
+
+      const read = await readMark(author.accessToken, momentId);
+      const moment = await app.inject({
+        method: "GET",
+        url: `/moments/${momentId}`,
+        headers: authed(author.accessToken),
+      });
+
+      // Which Moments matter to somebody is closer to a diary than to a
+      // reaction. Nothing anywhere reports another person's mark.
+      assert.equal(JSON.stringify(read.json()).includes(other.userId), false);
+      assert.equal(JSON.stringify(moment.json()).includes("significan"), false);
+    });
+
+    it("refuses a Moment you cannot see, exactly as one that does not exist", async () => {
+      const author = await onboard();
+      const stranger = await onboard();
+      const uploadId = await createReadyUpload(database.dataSource, author.userId);
+      const hidden = (
+        await record(author.accessToken, {
+          caption: "Not yours",
+          occurrence: summer,
+          occurrenceOffsetMinutes: NEW_YORK,
+          uploadIds: [uploadId],
+          visibility: "private",
+        })
+      ).json().momentId;
+
+      const refused = await mark(stranger.accessToken, hidden);
+      const missing = await mark(stranger.accessToken, randomUUID());
+
+      assert.equal(refused.statusCode, 404, refused.body);
+      assert.equal(missing.statusCode, 404, missing.body);
+      assert.equal(refused.json().message, missing.json().message);
+    });
+
+    it("refuses marking without a caller", async () => {
+      const response = await app.inject({
+        method: "PUT",
+        url: `/moments/${randomUUID()}/significance`,
       });
 
       assert.equal(response.statusCode, 401, response.body);

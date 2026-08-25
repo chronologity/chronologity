@@ -19,6 +19,7 @@
     "start": "node dist/main.js",
     "start:media": "node dist/workers/media/index.js",
     "start:outbox-publisher": "node dist/workers/outbox-publisher/index.js",
+    "start:significance": "node dist/workers/significance/index.js",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:unit": "vitest run",
