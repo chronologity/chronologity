@@ -1,8 +1,14 @@
-import { searchPageSchema, searchRequestSchema } from "@chronologity/contracts";
+import {
+  searchPageSchema,
+  searchRequestSchema,
+  searchSuggestionsSchema,
+  searchSuggestRequestSchema,
+} from "@chronologity/contracts";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { requireUser } from "../../plugins/auth.plugin.js";
 import { errors } from "../../server/error-responses.js";
+import { defaultSearchRateLimits, type SearchRateLimits } from "./search.rate-limits.js";
 import type { SearchService } from "./search.service.js";
 
 /**
@@ -13,12 +19,19 @@ import type { SearchService } from "./search.service.js";
  * an undifferentiated list of media posts, and a client wanting one kind sends
  * a type filter rather than calling a different path.
  *
- * @param search - The service this route delegates to.
- * @returns A Fastify plugin registering the Search endpoint.
+ * @param search - The service these routes delegate to.
+ * @param rateLimits - How hard each may be pushed. Injected so a test can reach
+ *   a limit deliberately while every other test stays under it.
+ * @returns A Fastify plugin registering the Search endpoints.
  */
-export function searchRoutes(search: SearchService) {
+export function searchRoutes(
+  search: SearchService,
+  rateLimits: SearchRateLimits | undefined = defaultSearchRateLimits,
+) {
   return async function register(instance: FastifyInstance): Promise<void> {
     const app = instance.withTypeProvider<ZodTypeProvider>();
+    const limits = rateLimits ?? defaultSearchRateLimits;
+    const timeWindow = `${limits.windowMinutes} minute`;
 
     app.addHook("onRoute", (route) => {
       route.schema = { ...route.schema, tags: ["Search"] };
@@ -47,9 +60,33 @@ export function searchRoutes(search: SearchService) {
           querystring: searchRequestSchema,
           response: { 200: searchPageSchema, ...errors(400, 401) },
         },
+        config: { rateLimit: { max: limits.searchesPerWindow, timeWindow } },
         preHandler: requireUser,
       },
       async (request) => search.search(request.query, request.user.userId),
+    );
+
+    app.get(
+      "/search/suggestions",
+      {
+        schema: {
+          summary: "Complete a name",
+          description: [
+            "Suggests accounts, real-world Events, and Locations for a prefix — the things you navigate to. **Moments are never suggested.** A caption is the most sensitive text Chronologity holds, and a surface that answers every keystroke is the worst place to put it; finding a Moment is what `/search` is for.",
+            "",
+            "**Suggestions obey exactly the same eligibility rule as results, not a looser one.** A private entity's name must not surface because somebody typed three letters that happen to match it. The same predicate decides both, so the two cannot drift apart.",
+            "",
+            "A suggestion carries a name and an identifier and nothing else — no snippet, no caption, no occurrence. Where an alias matched, the response says so and gives the name the thing normally goes by, since 'The Great War' on its own looks like a different Event.",
+            "",
+            "Fewer than two characters returns an empty list rather than an error: a box somebody is still typing into has not done anything wrong, and answering one letter would turn this into a listing of everything they may see. Rate limited more tightly than search, because walking the alphabet through it is a way of asking what exists.",
+          ].join("\n"),
+          querystring: searchSuggestRequestSchema,
+          response: { 200: searchSuggestionsSchema, ...errors(400, 401) },
+        },
+        config: { rateLimit: { max: limits.suggestionsPerWindow, timeWindow } },
+        preHandler: requireUser,
+      },
+      async (request) => search.suggest(request.query, request.user.userId),
     );
   };
 }

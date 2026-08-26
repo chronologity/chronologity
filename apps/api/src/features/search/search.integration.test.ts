@@ -179,6 +179,15 @@ describe("search", () => {
         new PostgresSearchRetrieval(database.dataSource),
         moderationRepository,
       ),
+      // Raised well above the production ceiling. This suite drives hundreds of
+      // searches through one process in a minute, which is not the traffic the
+      // limiter defends against; the one test that proves limiting works builds
+      // its own application with a real ceiling.
+      searchRateLimits: {
+        searchesPerWindow: 100_000,
+        suggestionsPerWindow: 100_000,
+        windowMinutes: 1,
+      },
     });
   });
 
@@ -292,6 +301,33 @@ describe("search", () => {
 
   const idsFrom = (response: { json(): { results: { entityId: string }[] } }) =>
     response.json().results.map((result) => result.entityId);
+
+  const suggest = async (accessToken: string, params: Record<string, string | number>) =>
+    app.inject({
+      method: "GET",
+      url: `/search/suggestions?${new URLSearchParams(
+        Object.entries(params).map(([key, value]): [string, string] => [key, String(value)]),
+      ).toString()}`,
+      headers: authed(accessToken),
+    });
+
+  const suggestedIds = (response: { json(): { suggestions: { entityId: string }[] } }) =>
+    response.json().suggestions.map((suggestion) => suggestion.entityId);
+
+  /** An account whose display name nothing else will match. */
+  const namedAccount = async (displayName: string) => {
+    const account = await onboard();
+
+    await app.inject({
+      method: "PATCH",
+      url: "/users/me",
+      headers: authed(account.accessToken),
+      payload: { displayName },
+    });
+    await indexer.index("user", account.userId);
+
+    return account;
+  };
 
   describe("finding things", () => {
     it("finds a public Moment by a word in its caption", async () => {
@@ -958,6 +994,392 @@ describe("search", () => {
       });
 
       assert.equal(opened.statusCode, 404, opened.body);
+    });
+  });
+
+  describe("completing a name", () => {
+    it("suggests an account by the start of its display name", async () => {
+      const name = `Zq${randomUUID().replaceAll("-", "").slice(0, 10)}`;
+      const account = await namedAccount(name);
+      const seeker = await onboard();
+
+      const response = await suggest(seeker.accessToken, { q: name.slice(0, 6) });
+
+      assert.equal(response.statusCode, 200, response.body);
+      assert.deepEqual(suggestedIds(response), [account.userId]);
+      assert.equal(response.json().suggestions[0].matchedOn, "title");
+    });
+
+    it("never suggests a Moment, however well its caption matches", async () => {
+      const author = await onboard();
+      const word = rareWord();
+      const momentId = await recordAndIndex(author, `${word} exactly`);
+
+      // The author's own Moment, a perfect prefix match, and still absent: a
+      // caption is the most sensitive text Chronologity holds and this surface
+      // answers every keystroke.
+      const response = await suggest(author.accessToken, { q: word.slice(0, 6) });
+
+      assert.equal(suggestedIds(response).includes(momentId), false);
+      // And search still finds it, so the omission is scope rather than a hole.
+      assert.deepEqual(idsFrom(await search(author.accessToken, { q: word })), [momentId]);
+    });
+
+    it("carries a name and an identifier and nothing else", async () => {
+      const name = `Zq${randomUUID().replaceAll("-", "").slice(0, 10)}`;
+      await namedAccount(name);
+      const seeker = await onboard();
+
+      const suggestion = (await suggest(seeker.accessToken, { q: name.slice(0, 6) })).json()
+        .suggestions[0];
+
+      assert.equal(suggestion.snippet, undefined);
+      assert.equal(suggestion.occurrence, undefined);
+      assert.equal(suggestion.body, undefined);
+      assert.deepEqual(Object.keys(suggestion).sort(), [
+        "entityId",
+        "entityType",
+        "label",
+        "matchedOn",
+      ]);
+    });
+
+    it("answers nothing rather than everything for one character", async () => {
+      const seeker = await onboard();
+
+      const response = await suggest(seeker.accessToken, { q: "a" });
+
+      assert.equal(response.statusCode, 200, response.body);
+      assert.deepEqual(response.json().suggestions, []);
+    });
+
+    it("honours the limit however many match", async () => {
+      const prefix = `Zq${randomUUID().replaceAll("-", "").slice(0, 6)}`;
+
+      for (let i = 0; i < 5; i += 1) {
+        await namedAccount(`${prefix}${i}`);
+      }
+
+      const seeker = await onboard();
+      const response = await suggest(seeker.accessToken, { q: prefix, limit: 2 });
+
+      assert.equal(response.json().suggestions.length, 2);
+    });
+
+    it("returns the same suggestions in the same order twice", async () => {
+      const prefix = `Zq${randomUUID().replaceAll("-", "").slice(0, 6)}`;
+
+      for (let i = 0; i < 3; i += 1) {
+        await namedAccount(`${prefix}${i}`);
+      }
+
+      const seeker = await onboard();
+
+      assert.deepEqual(
+        suggestedIds(await suggest(seeker.accessToken, { q: prefix })),
+        suggestedIds(await suggest(seeker.accessToken, { q: prefix })),
+      );
+    });
+
+    it("narrows to one kind when asked", async () => {
+      const name = `Zq${randomUUID().replaceAll("-", "").slice(0, 10)}`;
+      await namedAccount(name);
+      const seeker = await onboard();
+
+      const response = await suggest(seeker.accessToken, {
+        q: name.slice(0, 6),
+        type: "location",
+      });
+
+      assert.deepEqual(response.json().suggestions, []);
+    });
+
+    it("suggests an Event by a historical alias, and says which name matched", async () => {
+      const author = await onboard();
+      const alias = `Zq${randomUUID().replaceAll("-", "").slice(0, 10)}`;
+      const eventId = randomUUID();
+
+      await database.dataSource.query(
+        `INSERT INTO real_world_events (real_world_event_id, created_by_user_id, name,
+                                        occurrence_start, occurrence_end, occurrence_precision,
+                                        created_at, updated_at)
+         VALUES ($1, $2, 'The First World War', '1914-01-01', '1918-12-31', 'year', now(), now())`,
+        [eventId, author.userId],
+      );
+      await database.dataSource.query(
+        `INSERT INTO real_world_event_aliases (real_world_event_id, alias, created_at)
+         VALUES ($1, $2, now())`,
+        [eventId, alias],
+      );
+      await indexer.index("event", eventId);
+
+      const seeker = await onboard();
+      const response = await suggest(seeker.accessToken, { q: alias.slice(0, 6) });
+      const suggestion = response.json().suggestions[0];
+
+      assert.equal(suggestion.entityId, eventId);
+      assert.equal(suggestion.matchedOn, "alias");
+      assert.equal(suggestion.label, alias);
+      // Without this, "The Great War" looks like an Event nobody recognises.
+      assert.equal(suggestion.title, "The First World War");
+    });
+  });
+
+  describe("what a suggestion must never reveal", () => {
+    it("suggests the author of a private Moment, never the Moment", async () => {
+      const name = `Zq${randomUUID().replaceAll("-", "").slice(0, 10)}`;
+      const author = await namedAccount(name);
+      const momentId = await recordAndIndex(author, `${name} private thing`, {
+        visibility: "private",
+      });
+      const stranger = await onboard();
+
+      const suggested = suggestedIds(await suggest(stranger.accessToken, { q: name.slice(0, 6) }));
+
+      assert.ok(suggested.includes(author.userId));
+      assert.equal(suggested.includes(momentId), false);
+    });
+
+    it("does not suggest a suspended account", async () => {
+      const name = `Zq${randomUUID().replaceAll("-", "").slice(0, 10)}`;
+      const account = await namedAccount(name);
+      const moderator = await onboardModerator();
+      const seeker = await onboard();
+
+      assert.ok(suggestedIds(await suggest(seeker.accessToken, { q: name.slice(0, 6) })).includes(
+        account.userId,
+      ));
+
+      await app.inject({
+        method: "PUT",
+        url: `/users/${account.userId}/suspension`,
+        headers: authed(moderator.accessToken),
+        payload: { suspended: true, reason: "integration test" },
+      });
+      await indexer.index("user", account.userId);
+
+      assert.deepEqual(suggestedIds(await suggest(seeker.accessToken, { q: name.slice(0, 6) })), []);
+    });
+
+    it("does not suggest a deactivated account", async () => {
+      const name = `Zq${randomUUID().replaceAll("-", "").slice(0, 10)}`;
+      const account = await namedAccount(name);
+      const seeker = await onboard();
+
+      await app.inject({
+        method: "POST",
+        url: "/users/me/deactivate",
+        headers: authed(account.accessToken),
+      });
+      await indexer.index("user", account.userId);
+
+      assert.deepEqual(suggestedIds(await suggest(seeker.accessToken, { q: name.slice(0, 6) })), []);
+    });
+
+    it("hides suggestions in both directions once a Block exists", async () => {
+      const name = `Zq${randomUUID().replaceAll("-", "").slice(0, 10)}`;
+      const other = `Zq${randomUUID().replaceAll("-", "").slice(0, 10)}`;
+      const one = await namedAccount(name);
+      const two = await namedAccount(other);
+
+      await app.inject({
+        method: "POST",
+        url: `/users/${two.userId}/block`,
+        headers: authed(one.accessToken),
+      });
+
+      assert.equal(
+        suggestedIds(await suggest(two.accessToken, { q: name.slice(0, 6) })).includes(one.userId),
+        false,
+      );
+      assert.equal(
+        suggestedIds(await suggest(one.accessToken, { q: other.slice(0, 6) })).includes(two.userId),
+        false,
+      );
+    });
+
+    it("uses the same eligibility as search, so anything suggested can be found", async () => {
+      const name = `Zq${randomUUID().replaceAll("-", "").slice(0, 10)}`;
+      await namedAccount(name);
+      const seeker = await onboard();
+
+      const suggested = suggestedIds(await suggest(seeker.accessToken, { q: name.slice(0, 6) }));
+      const found = idsFrom(await search(seeker.accessToken, { q: name, type: "user" }));
+
+      // The property the whole design rests on: one predicate, two surfaces.
+      for (const id of suggested) {
+        assert.ok(found.includes(id), `${id} was suggested but cannot be found`);
+      }
+    });
+  });
+
+  describe("did you mean", () => {
+    /**
+     * A name and a query far enough apart that the search itself finds nothing,
+     * and close enough that a correction is worth offering. Search retrieves at
+     * similarity 0.3; corrections are drawn from 0.15 up. Landing in that band
+     * is what makes this feature reachable at all — drawn with the search's own
+     * threshold, a correction could only ever name something already found.
+     */
+    const nameAndNearMiss = () => {
+      // Twelve random hex characters and no shared prefix. An earlier version
+      // gave every name the same `Zqab` stem, which made each test's name
+      // similar to every other test's — and the correction dutifully offered
+      // one of theirs. Two random tokens score zero against each other.
+      const name = randomUUID().replaceAll("-", "").slice(0, 12);
+
+      // Keeping four of twelve lands at similarity 0.235, whatever the token:
+      // under the 0.3 the search retrieves at, over the 0.15 a correction is
+      // drawn from.
+      return { name, nearMiss: `${name.slice(0, 4)}zzzzzzzz` };
+    };
+
+    it("offers the nearest name when the search found nothing", async () => {
+      const { name, nearMiss } = nameAndNearMiss();
+      await namedAccount(name);
+      const seeker = await onboard();
+
+      const response = await search(seeker.accessToken, { q: nearMiss });
+
+      assert.deepEqual(idsFrom(response), []);
+      assert.equal(response.json().didYouMean, name);
+    });
+
+    it("offers nothing when the search found something", async () => {
+      const { name } = nameAndNearMiss();
+      await namedAccount(name);
+      const seeker = await onboard();
+
+      const response = await search(seeker.accessToken, { q: name, type: "user" });
+
+      assert.ok(response.json().results.length > 0);
+      // A correction alongside results would suggest the results were wrong.
+      assert.equal(response.json().didYouMean, undefined);
+    });
+
+    it("never names an account the asker could not have found", async () => {
+      const { name, nearMiss } = nameAndNearMiss();
+      const account = await namedAccount(name);
+      const moderator = await onboardModerator();
+      const seeker = await onboard();
+
+      // Reachable first, so the test proves the suspension did it rather than
+      // that the correction never worked.
+      assert.equal((await search(seeker.accessToken, { q: nearMiss })).json().didYouMean, name);
+
+      await app.inject({
+        method: "PUT",
+        url: `/users/${account.userId}/suspension`,
+        headers: authed(moderator.accessToken),
+        payload: { suspended: true, reason: "integration test" },
+      });
+      await indexer.index("user", account.userId);
+
+      // Drawn from the eligible set, after eligibility. Drawn before it, this
+      // is how a withheld name reaches a stranger through a door marked "did
+      // you mean".
+      assert.equal((await search(seeker.accessToken, { q: nearMiss })).json().didYouMean, undefined);
+    });
+
+    it("never names something across a Block", async () => {
+      const { name, nearMiss } = nameAndNearMiss();
+      const account = await namedAccount(name);
+      const seeker = await onboard();
+
+      assert.equal((await search(seeker.accessToken, { q: nearMiss })).json().didYouMean, name);
+
+      await app.inject({
+        method: "POST",
+        url: `/users/${seeker.userId}/block`,
+        headers: authed(account.accessToken),
+      });
+
+      assert.equal((await search(seeker.accessToken, { q: nearMiss })).json().didYouMean, undefined);
+    });
+
+    it("never offers a caption", async () => {
+      const author = await onboard();
+      const word = randomUUID().replaceAll("-", "").slice(0, 12);
+      await recordAndIndex(author, word);
+      const nearMiss = `${word.slice(0, 4)}zzzzzzzz`;
+
+      const response = await search(author.accessToken, { q: nearMiss });
+
+      // A correction is a name-correction feature. Captions stay out of
+      // suggestion surfaces, including this one.
+      assert.notEqual(response.json().didYouMean, word);
+    });
+
+    it("offers nothing when nothing close exists", async () => {
+      const seeker = await onboard();
+
+      const response = await search(seeker.accessToken, {
+        q: randomUUID().replaceAll("-", "").slice(0, 12),
+      });
+
+      // A correction nobody can act on is noise, and inventing one would be
+      // fabricating history.
+      assert.equal(response.json().didYouMean, undefined);
+    });
+
+    it("keeps the correction out of the results", async () => {
+      const { name, nearMiss } = nameAndNearMiss();
+      await namedAccount(name);
+      const seeker = await onboard();
+
+      const response = await search(seeker.accessToken, { q: nearMiss });
+
+      // A suggestion is not a result, and merging them would let one be
+      // mistaken for the other.
+      assert.deepEqual(response.json().results, []);
+      assert.equal(response.json().didYouMean, name);
+    });
+  });
+
+  describe("how hard it may be pushed", () => {
+    it("stops somebody walking the alphabet through the suggestion box", async () => {
+      // Its own application, with a real ceiling. The suite raises the limit so
+      // every other test stays under it, so the only way to prove limiting
+      // works is to build one that does not.
+      const limited = await buildApp({
+        config,
+        dependencies: [],
+        authentication,
+        users: new UserService(database.dataSource, new UserRepository(database.dataSource), {
+          minimumAgeYears: config.minimumAgeYears,
+        }),
+        search: new SearchService(
+          new PostgresSearchRetrieval(database.dataSource),
+          new ModerationRepository(database.dataSource),
+        ),
+        searchRateLimits: {
+          searchesPerWindow: 100_000,
+          suggestionsPerWindow: 3,
+          windowMinutes: 1,
+        },
+      });
+
+      try {
+        const account = await onboard();
+        const statuses: number[] = [];
+
+        for (const letters of ["aa", "ab", "ac", "ad", "ae"]) {
+          const response = await limited.inject({
+            method: "GET",
+            url: `/search/suggestions?q=${letters}`,
+            headers: authed(account.accessToken),
+          });
+
+          statuses.push(response.statusCode);
+        }
+
+        // An enumeration surface by construction: the eligibility rule bounds
+        // what each answer contains, not how many answers somebody may collect.
+        assert.deepEqual(statuses.slice(0, 3), [200, 200, 200]);
+        assert.ok(statuses.slice(3).every((status) => status === 429), statuses.join(","));
+      } finally {
+        await limited.close();
+      }
     });
   });
 });

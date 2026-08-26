@@ -2,6 +2,8 @@ import type {
   SearchPage,
   SearchRequest,
   SearchResult,
+  SearchSuggestRequest,
+  SearchSuggestions,
   TemporalPrecision,
 } from "@chronologity/contracts";
 import { isAdult } from "../moderation/moderation.policy.js";
@@ -10,6 +12,7 @@ import { decodeSearchCursor, encodeSearchCursor } from "./search.cursor.js";
 import { interpret } from "./search.query.js";
 import { RANKING_VERSION } from "./search.ranking.js";
 import { matchReasons, snippet } from "./search.presentation.js";
+import { chooseName, correctionFor, interpretPrefix } from "./search.suggest.js";
 import type { RetrievedDocument, SearchRetrieval } from "./search.retrieval.js";
 
 /**
@@ -67,9 +70,22 @@ export class SearchService {
     const { documents, total } = await this.retrieval.retrieve(query, viewer, offset);
     const results = documents.map((document) => this.present(document, query));
 
+    // Only when nothing matched, and only from the same eligible set. A
+    // correction naming something the asker could not have found would be the
+    // leak the suggestion surface is careful to avoid, arriving by a different
+    // door.
+    const didYouMean =
+      total === 0 && query.phrase.length > 0
+        ? correctionFor(
+            total,
+            await this.retrieval.nearestTitles(query.phrase.toLowerCase(), viewer, 1),
+          )
+        : undefined;
+
     return {
       results,
       total,
+      ...(didYouMean === undefined ? {} : { didYouMean }),
       ...(query.near === undefined ? {} : { geoPrecision: query.near.tier }),
       ...(offset + documents.length >= total || documents.length === 0
         ? {}
@@ -82,6 +98,53 @@ export class SearchService {
               id: documents[documents.length - 1]?.entityId,
             }),
           }),
+    };
+  }
+
+  /**
+   * Complete a name somebody is still typing.
+   *
+   * The same eligibility as a search, applied by the same predicate. A
+   * suggestion carries a name and an identifier and nothing else — no snippet,
+   * no caption, no occurrence — because a surface that fires on every keystroke
+   * is the worst place to widen what is disclosed.
+   *
+   * Moments are not suggested at all. The product's list of what autocomplete
+   * helps locate is People, Events, Locations, and Timelines; a caption is the
+   * most sensitive text Chronologity holds, and finding a Moment is search's
+   * job.
+   *
+   * @param request - The prefix and how many to offer.
+   * @param viewerUserId - Who is asking.
+   * @returns The suggestions, in a stable order. Empty when too little has been
+   *   typed to answer: a box somebody is still typing into has not done
+   *   anything wrong, and answering one character would turn this into a
+   *   listing of everything they may see.
+   */
+  async suggest(
+    request: SearchSuggestRequest,
+    viewerUserId: string,
+  ): Promise<SearchSuggestions> {
+    const interpreted = interpretPrefix(request.q, request.limit);
+
+    if (interpreted === undefined) {
+      return { suggestions: [] };
+    }
+
+    const viewer = {
+      userId: viewerUserId,
+      isAdult: isAdult(await this.moderation.findDateOfBirth(viewerUserId), this.now()),
+    };
+
+    const candidates = await this.retrieval.suggest(
+      interpreted.prefix,
+      request.type,
+      viewer,
+      interpreted.limit,
+    );
+
+    return {
+      suggestions: candidates.map((candidate) => chooseName(candidate, interpreted.prefix)),
     };
   }
 

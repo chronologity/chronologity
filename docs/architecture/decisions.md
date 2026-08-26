@@ -3737,3 +3737,45 @@ Proximity search matches indexed cells. The radius selects a tier and a ring cou
 **Zero results returns zero results.** Nothing loosely related is substituted, the total counts eligible candidates only, and a search matching nothing offers no cursor. No result is preferable to fictional history.
 
 **A result is not a permission.** Opening one reauthorizes against current state, which the suite proves by making a Moment private between finding it and opening it. The index lags; the refusal does not.
+
+# ADR-119 — Suggestions Obey the Same Rule as Results, or They Are the Leak
+
+**Status:** Accepted
+
+## Decision
+
+Autocomplete suggests accounts, real-world Events, and Locations. Never Moments.
+
+It uses the same eligibility predicate as search — the same function, not a copy.
+
+Suggestions carry an entity type, an identifier, and a name. Nothing else.
+
+Fewer than two characters returns an empty list rather than an error. Autocomplete has a rate limit of its own, tighter than search's.
+
+"Did you mean" is offered only on a search that found nothing, drawn from names after eligibility, at a lower similarity threshold than search itself retrieves at.
+
+## Rationale
+
+**A prefix box is the worst place to widen disclosure.** `search.md:527` states the risk plainly: a private entity name must not leak because somebody typed a matching prefix. Returning "Woodward family reunion" to somebody typing "wood" discloses that the Moment exists, roughly what it is, and who it involves — without ever showing them the Moment. `search.md:301` requires autocomplete to receive the same eligibility treatment as results, "not a relaxed one".
+
+So the design decision is reuse rather than reimplementation. One `eligibleForViewer` fragment serves both surfaces. A second, looser copy written because autocomplete "only returns names" is precisely how this feature leaks.
+
+**No Moments.** The product's list of what autocomplete helps locate is People, Events, Locations, and Timelines — Moments are absent, and that reads as deliberate. A caption is the most sensitive text Chronologity holds, and finding a Moment is what search is for. The integration suite asserts the omission from the author's own account, with a perfect prefix match, so the absence is scope rather than a hole.
+
+**A floor on the prefix.** Answering one character turns autocomplete into a listing of everything the asker may see, twenty-six requests wide. Two characters is the floor, and falling below it returns an empty list rather than an error, because a box somebody is still typing into has not done anything wrong.
+
+**A rate limit, because the eligibility rule bounds the wrong thing.** Eligibility decides what each answer may contain; it says nothing about how many answers one person may collect. Autocomplete is an enumeration surface by construction, and a ceiling is the only thing that addresses that.
+
+**An alias match has to say so.** Suggesting "The Great War" for an Event recorded as "The First World War" looks like a different Event unless the response carries both.
+
+## Consequences
+
+**"Did you mean" was dead code as first written, and arithmetic proved it.** The correction drew candidates with `pg_trgm`'s `%` operator, which matches at similarity 0.3 — the same threshold the search itself retrieves at. So anything the correction could find, the search had already returned, and the correction could never appear. It now draws from 0.15, which is the band between "close enough to retrieve" and "close enough to mention". A feature that cannot fire is worse than an absent one: it looks implemented.
+
+**Corrections draw from names, not captions.** `nearestTitles` is restricted to the same three entity types autocomplete uses. Offering a caption behind a door marked "did you mean" would undo the decision that keeps captions out of suggestion surfaces, by a different route.
+
+**The rate limit broke the test suite before it protected anything.** Adding a sixty-per-minute ceiling turned a run of searches into a wall of 429s, and the symptom was `results` being undefined rather than anything mentioning limits. The limits are injected now, exactly as the authentication ones are, and the suite raises them while one test builds its own application with a real ceiling to prove limiting works.
+
+**Shared test names made a correctness test lie.** Every correction test used names with the same `Zqab` stem to control similarity — which made each test's name similar to every other test's, so the correction offered a name from a different test and the assertion failed for a reason that had nothing to do with the code. Twelve random hex characters score zero against each other; keeping four of them lands at 0.235 whatever the token. When a test needs a controlled distance, the control has to isolate it from every other test as well.
+
+**A SQL comment with backticks terminated the template literal.** Writing `` `%` `` inside a template-literal SQL string ended the string and turned the rest into arithmetic. TypeScript caught it, which is the only reason it was cheap.

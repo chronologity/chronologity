@@ -3,6 +3,7 @@ import { geohash, INDEX_VERSION } from "./search-document.js";
 import { cellsAround, TIER_LENGTH } from "./search.geo.js";
 import { eligibleForViewer } from "./search.eligibility.js";
 import type { InterpretedQuery } from "./search.query.js";
+import type { NamedCandidate } from "./search.suggest.js";
 import { occurrenceOrder, relevanceOrder, scoreExpression } from "./search.ranking.js";
 
 /** One candidate, as the store found it. */
@@ -52,10 +53,54 @@ export interface SearchRetrieval {
    * @returns The page and the eligible total.
    */
   retrieve(query: InterpretedQuery, viewer: Viewer, offset: number): Promise<Retrieved>;
+
+  /**
+   * Names to complete a prefix with.
+   *
+   * The same eligibility as `retrieve`, deliberately. `search.md:301` says
+   * autocomplete gets the same treatment as results, "not a relaxed one", and
+   * the only durable form of that is the same predicate rather than a second
+   * one written for speed.
+   *
+   * @param prefix - What has been typed, lowercased and long enough to answer.
+   * @param entityType - Restrict to one kind, or undefined for all three.
+   * @param viewer - Who is asking.
+   * @param limit - How many at most.
+   * @returns The candidates and their names.
+   */
+  suggest(
+    prefix: string,
+    entityType: string | undefined,
+    viewer: Viewer,
+    limit: number,
+  ): Promise<NamedCandidate[]>;
+
+  /**
+   * The nearest eligible titles to a phrase.
+   *
+   * Used only when a search found nothing. Eligibility is applied here rather
+   * than by the caller, so a correction cannot name something the asker could
+   * not have found.
+   *
+   * @param phrase - What was searched for, lowercased.
+   * @param viewer - Who is asking.
+   * @param limit - How many at most.
+   * @returns The closest titles, nearest first.
+   */
+  nearestTitles(phrase: string, viewer: Viewer, limit: number): Promise<string[]>;
 }
 
 /** How the query addresses the document table. */
 const DOC = "d";
+
+/**
+ * How close a name must be to be worth suggesting.
+ *
+ * Below `pg_trgm`'s own 0.3 threshold, deliberately. Search retrieves at 0.3,
+ * so anything at or above it was already found and needs no correction; this is
+ * the band where the search came back empty but something recognisable exists.
+ */
+const CORRECTION_THRESHOLD = 0.15;
 
 /** Retrieval against PostgreSQL. */
 export class PostgresSearchRetrieval implements SearchRetrieval {
@@ -225,6 +270,116 @@ export class PostgresSearchRetrieval implements SearchRetrieval {
       // reports nothing rather than how much it was not allowed to see.
       total: Number(rows[0]?.total ?? "0"),
     };
+  }
+
+  /**
+   * Names to complete a prefix with.
+   *
+   * The same eligibility fragment `retrieve` uses, applied the same way. That
+   * sameness is the feature: a suggestion path with its own looser rule is how
+   * a private name reaches somebody who typed three letters.
+   *
+   * @param prefix - What has been typed, lowercased.
+   * @param entityType - Restrict to one kind, or undefined for all three.
+   * @param viewer - Who is asking.
+   * @param limit - How many at most.
+   * @returns The candidates and their names.
+   */
+  async suggest(
+    prefix: string,
+    entityType: string | undefined,
+    viewer: Viewer,
+    limit: number,
+  ): Promise<NamedCandidate[]> {
+    const parameters: unknown[] = [];
+    const bind = (value: unknown): number => {
+      parameters.push(value);
+
+      return parameters.length;
+    };
+
+    const indexVersionParam = bind(this.indexVersion);
+    const viewerParam = bind(viewer.userId);
+    const adultParam = bind(viewer.isAdult);
+    const prefixParam = bind(prefix);
+
+    const where: string[] = [
+      `${DOC}.index_version = $${indexVersionParam}`,
+      // Moments are deliberately absent. A caption is the most sensitive text
+      // Chronologity holds, and a surface that fires on every keystroke is the
+      // worst place to put it; finding a Moment is search's job.
+      `${DOC}.entity_type IN ('user', 'event', 'location')`,
+      eligibleForViewer(DOC)
+        .replaceAll(":viewerUserId", `$${viewerParam}`)
+        .replaceAll(":viewerIsAdult", `$${adultParam}`),
+      `(
+        lower(${DOC}.title) LIKE $${prefixParam} || '%'
+        OR lower(${DOC}.aliases) LIKE $${prefixParam} || '%'
+        OR lower(${DOC}.aliases) LIKE '% ' || $${prefixParam} || '%'
+      )`,
+    ];
+
+    if (entityType !== undefined) {
+      where.push(`${DOC}.entity_type = $${bind(entityType)}`);
+    }
+
+    const limitParam = bind(limit);
+
+    const rows: { entity_type: string; entity_id: string; title: string; aliases: string }[] =
+      await this.dataSource.query(
+        `SELECT ${DOC}.entity_type, ${DOC}.entity_id, ${DOC}.title, ${DOC}.aliases
+           FROM search_documents ${DOC}
+          WHERE ${where.join("\n            AND ")}
+          ORDER BY length(${DOC}.title), lower(${DOC}.title), ${DOC}.entity_id
+          LIMIT $${limitParam}`,
+        parameters,
+      );
+
+    return rows.map((row) => ({
+      entityType: row.entity_type,
+      entityId: row.entity_id,
+      title: row.title,
+      aliases: row.aliases,
+    }));
+  }
+
+  /**
+   * The nearest eligible titles to a phrase.
+   *
+   * Eligibility first, similarity second. Drawing the nearest title before
+   * eligibility and filtering afterwards would be the same post-filtering
+   * mistake `search.md:249` warns about, in the one place where the leak is a
+   * name rather than a count.
+   *
+   * @param phrase - What was searched for, lowercased.
+   * @param viewer - Who is asking.
+   * @param limit - How many at most.
+   * @returns The closest titles, nearest first.
+   */
+  async nearestTitles(phrase: string, viewer: Viewer, limit: number): Promise<string[]> {
+    const rows: { title: string }[] = await this.dataSource.query(
+      `SELECT ${DOC}.title
+         FROM search_documents ${DOC}
+        WHERE ${DOC}.index_version = $1
+          AND ${eligibleForViewer(DOC)
+            .replaceAll(":viewerUserId", "$2")
+            .replaceAll(":viewerIsAdult", "$3")}
+          -- Names, not captions. A correction is a name-correction feature, and
+          -- putting caption text behind a door marked "did you mean" would
+          -- undo the decision that keeps captions out of suggestion surfaces.
+          AND ${DOC}.entity_type IN ('user', 'event', 'location')
+          -- A lower bar than the search itself uses. The similarity operator
+          -- matches at 0.3, so drawing corrections with it could only ever
+          -- offer something the search had already found — the correction
+          -- would be dead code. This is the band between "close enough to
+          -- retrieve" and "close enough to mention".
+          AND similarity(lower(${DOC}.title), $4) >= ${CORRECTION_THRESHOLD}
+        ORDER BY similarity(lower(${DOC}.title), $4) DESC, ${DOC}.entity_id
+        LIMIT $5`,
+      [this.indexVersion, viewer.userId, viewer.isAdult, phrase, limit],
+    );
+
+    return rows.map((row) => row.title);
   }
 }
 

@@ -964,11 +964,30 @@ the result count covers only what the asker may see.
 
 **A result is not a permission.** Opening one reauthorizes against current state.
 
-### Not yet built
+**Autocomplete suggests accounts, real-world Events, and Locations — never
+Moments.** These are the things somebody navigates to. A caption is the most
+sensitive text Chronologity holds, and a surface that answers every keystroke is
+the worst place to put it; finding a Moment is what Search is for.
 
-**Autocomplete and suggestions**, which are their own Search surface and their
-own privacy problem — a private name must not leak because somebody typed a
-matching prefix.
+**A suggestion obeys the same eligibility rule as a result**, decided by the
+same code rather than a second copy written for a lighter surface. A private
+name must not appear because somebody typed three letters that happen to match
+it.
+
+**A suggestion carries a name and an identifier and nothing else** — no snippet,
+no caption, no date. Where an alias matched, it says so and gives the name the
+thing normally goes by.
+
+**Fewer than two characters returns nothing rather than everything**, and
+autocomplete is rate limited more tightly than Search: walking the alphabet
+through a suggestion box is a way of asking what exists.
+
+**"Did you mean" appears only when a Search found nothing**, names only what the
+asker could have found on their own, and is a separate field from the results so
+one can never be mistaken for the other. It suggests names, never captions, and
+Chronologity never silently rewrites what somebody typed.
+
+### Not yet built
 
 **Facet counts**, whose leakage surface is real and which nothing day-one needs.
 

@@ -636,6 +636,14 @@ shorter one uncovered.
 matching neither is refused explicitly rather than silently restarted or
 re-ranked.
 
+**Autocomplete uses the same eligibility fragment as retrieval**, and covers
+accounts, Events, and Locations only. Suggestions carry a name and an identifier
+and nothing further.
+
+**Corrections are drawn after eligibility and at a lower similarity threshold
+than retrieval uses.** Drawn with the same threshold they could only ever name
+something already returned, which made the feature unreachable.
+
 ## Still open
 
 Everything else in the list above, and these in particular are now closer:

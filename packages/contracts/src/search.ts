@@ -109,6 +109,20 @@ export const searchPageSchema = z.object({
   results: z.array(searchResultSchema),
   total: z.number().int().min(0),
   /**
+   * The nearest thing to what was asked for, when nothing matched.
+   *
+   * Its own field rather than a result, so a suggestion can never be mistaken
+   * for something found. Only ever a name the asker could have found on their
+   * own: it is drawn from the same eligible set, after eligibility, which is
+   * what stops a correction becoming the leak the suggestion surface is
+   * careful to avoid.
+   *
+   * Absent whenever anything matched, and absent when nothing close exists —
+   * a correction nobody can act on is noise, and inventing one would be
+   * fabricating history.
+   */
+  didYouMean: z.string().optional(),
+  /**
    * How exact the proximity filter could actually be, when one was given.
    *
    * Absent when the search was not geographic.
@@ -181,3 +195,63 @@ export const searchRequestSchema = z
   );
 
 export type SearchRequest = z.infer<typeof searchRequestSchema>;
+
+/** Which kinds of thing autocomplete offers. */
+export const suggestibleEntityTypeSchema = z.enum(["user", "event", "location"]);
+
+export type SuggestibleEntityType = z.infer<typeof suggestibleEntityTypeSchema>;
+
+/** Whether a suggestion matched what the thing is called, or something it was called. */
+export const suggestionMatchSchema = z.enum(["title", "alias"]);
+
+export type SuggestionMatch = z.infer<typeof suggestionMatchSchema>;
+
+/**
+ * One thing somebody might have meant.
+ *
+ * A signpost, not a result. It carries a name and an identifier and nothing
+ * else — no snippet, no caption, no occurrence. A surface that fires on every
+ * keystroke is the worst place to widen what is disclosed, and the narrowest
+ * shape that can still be useful is the right one.
+ */
+export const searchSuggestionSchema = z.object({
+  entityType: suggestibleEntityTypeSchema,
+  entityId: identifierSchema,
+  /** What to show: the name that matched, which may be an alias. */
+  label: z.string(),
+  matchedOn: suggestionMatchSchema,
+  /**
+   * What the thing is normally called, when an alias matched instead.
+   *
+   * Suggesting "The Great War" without saying it is the First World War looks
+   * like a different Event. Absent when the title itself matched.
+   */
+  title: z.string().optional(),
+});
+
+export type SearchSuggestion = z.infer<typeof searchSuggestionSchema>;
+
+/** What autocomplete returns. */
+export const searchSuggestionsSchema = z.object({
+  suggestions: z.array(searchSuggestionSchema),
+});
+
+export type SearchSuggestions = z.infer<typeof searchSuggestionsSchema>;
+
+/**
+ * What may be asked of autocomplete.
+ *
+ * Bounded harder than search. This is an enumeration surface by construction —
+ * somebody walking the alphabet through it is asking the system to list what
+ * exists — so the prefix has a floor, the page has a low ceiling, and the route
+ * carries a rate limit of its own.
+ */
+export const searchSuggestRequestSchema = z.object({
+  /** What has been typed so far. */
+  q: z.string().trim().max(100),
+  /** Restrict to one kind of thing. Omitted suggests all three. */
+  type: suggestibleEntityTypeSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(10).default(10),
+});
+
+export type SearchSuggestRequest = z.infer<typeof searchSuggestRequestSchema>;

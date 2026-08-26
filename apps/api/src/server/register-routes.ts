@@ -7,6 +7,7 @@ import { healthRoutes } from "../features/health/index.js";
 import { moderationRoutes } from "../features/moderation/moderation.routes.js";
 import type { ModerationService } from "../features/moderation/moderation.service.js";
 import { searchRoutes } from "../features/search/search.routes.js";
+import type { SearchRateLimits } from "../features/search/search.rate-limits.js";
 import type { SearchService } from "../features/search/search.service.js";
 import { locationRoutes } from "../features/locations/location.routes.js";
 import type { LocationService } from "../features/locations/location.service.js";
@@ -60,6 +61,7 @@ import type { UserService } from "../features/users/user.service.js";
  *   only alongside users, since every report, decision, and appeal names one.
  * @param search - Finding history; mounted only alongside users, since every
  *   search resolves eligibility against a Viewer.
+ * @param searchRateLimits - How hard the Search surfaces may be pushed.
  * @returns Nothing.
  */
 export async function registerRoutes(
@@ -78,6 +80,7 @@ export async function registerRoutes(
   follows?: FollowService | undefined,
   moderation?: ModerationService | undefined,
   search?: SearchService | undefined,
+  searchRateLimits?: SearchRateLimits | undefined,
 ): Promise<void> {
   await app.register(healthRoutes);
 
@@ -125,7 +128,7 @@ export async function registerRoutes(
       }
 
       if (search !== undefined) {
-        await app.register(searchRoutes(search));
+        await app.register(searchRoutes(search, searchRateLimits));
       }
     }
   }
