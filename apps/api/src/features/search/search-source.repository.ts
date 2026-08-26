@@ -55,6 +55,8 @@ export class SearchSourceRepository {
       latitude: number | null;
       longitude: number | null;
       event_names: string[] | null;
+      significance: string | null;
+      significance_version: string | null;
     }[] = await this.dataSource.query(
       `SELECT m.moment_id, m.author_user_id, m.caption,
               m.occurrence_start, m.occurrence_end, m.occurrence_precision,
@@ -68,8 +70,18 @@ export class SearchSourceRepository {
                     ON rwe.real_world_event_id = mre.real_world_event_id
                  WHERE mre.moment_id = m.moment_id
                  ORDER BY rwe.name
-              ) AS event_names
+              ) AS event_names,
+              sig.total AS significance,
+              sig.version AS significance_version
          FROM moments m
+         LEFT JOIN LATERAL (
+           -- The global scope, summed across its dimensions. Read with its
+           -- version and never recomputed here (ADR-026); used only to order
+           -- two comparably relevant results.
+           SELECT SUM(s.value)::text AS total, MIN(s.algorithm_version) AS version
+             FROM moment_significance s
+            WHERE s.moment_id = m.moment_id AND s.scope_type = 'global'
+         ) sig ON true
          LEFT JOIN moderation_states ms
            ON ms.subject_type = 'moment' AND ms.subject_id = m.moment_id
          LEFT JOIN moment_locations mloc ON mloc.moment_id = m.moment_id
@@ -100,6 +112,10 @@ export class SearchSourceRepository {
       latitude: row.latitude ?? undefined,
       longitude: row.longitude ?? undefined,
       realWorldEventNames: row.event_names ?? [],
+      significance:
+        row.significance === null || row.significance_version === null
+          ? undefined
+          : { value: Number(row.significance), version: row.significance_version },
     };
   }
 

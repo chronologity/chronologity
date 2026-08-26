@@ -67,6 +67,11 @@ export interface MomentSource {
   readonly latitude: number | undefined;
   readonly longitude: number | undefined;
   readonly realWorldEventNames: readonly string[];
+  /**
+   * Its global-scope significance, summed across dimensions, with the version
+   * that produced it. Undefined until the worker has assessed it.
+   */
+  readonly significance: { value: number; version: string } | undefined;
 }
 
 /** An account, as the indexer read it. */
@@ -141,6 +146,9 @@ const GEOHASH_ALPHABET = "0123456789bcdefghjkmnpqrstuvwxyz";
  * @returns The geohash. Positions outside the valid range are clamped rather
  *   than rejected: a stored coordinate that is already wrong should still index
  *   somewhere approximately right instead of removing the entity from Search.
+ *   The clamp is belt and braces — the subdivision saturates at the poles and
+ *   the meridians on its own — and it is kept because relying on that would
+ *   make the intent depend on noticing it.
  */
 export function geohash(latitude: number, longitude: number, length: number): string {
   let latMin = -90;
@@ -274,12 +282,18 @@ export function permitsDocument(state: ModerationState): boolean {
  * Whether a moderation state leaves a document findable.
  *
  * @param state - What Chronologity has decided.
- * @returns Whether it may be returned by a search. False for the states that
- *   hide a subject outright and for age restriction, which is resolved against
- *   the Viewer at query time and starts from not-findable.
+ * @returns Whether it may be indexed as findable at all. This is the intrinsic
+ *   half of eligibility; who may find it is the query's half, and folding the
+ *   two together would filter the Viewer out before anybody knew who was
+ *   asking. `removed` never reaches here — it produces no document.
  */
 export function permitsSearch(state: ModerationState): boolean {
-  return state === "allowed" || state === "warned" || state === "restricted_from_amplification";
+  // Only outright withholding stops something being indexed as findable.
+  // Age restriction and audience narrowing are resolved against the Viewer at
+  // query time, which `search.md:229` puts there by name — an earlier version
+  // refused both here, which made an age-restricted Moment findable by nobody
+  // at all, adults included.
+  return state !== "temporarily_unavailable";
 }
 
 /**
@@ -389,8 +403,12 @@ export function buildMomentDocument(source: MomentSource): SearchDocumentFields 
     geohashExact: tiers.exact,
     geohashCoarse: tiers.coarse,
     geohashRegion: tiers.region,
-    significance: null,
-    significanceVersion: null,
+    // Read from the significance projection, never computed here (ADR-026), and
+    // used only to order two comparably relevant results. It is never returned
+    // to anybody: the product is explicit that a significance number must not
+    // be presented as historical truth.
+    significance: source.significance?.value ?? null,
+    significanceVersion: source.significance?.version ?? null,
     provenance: {
       title: "authored",
       body: "authored",

@@ -6,6 +6,8 @@ import type { AuthorizationService } from "../features/authorization/authorizati
 import { healthRoutes } from "../features/health/index.js";
 import { moderationRoutes } from "../features/moderation/moderation.routes.js";
 import type { ModerationService } from "../features/moderation/moderation.service.js";
+import { searchRoutes } from "../features/search/search.routes.js";
+import type { SearchService } from "../features/search/search.service.js";
 import { locationRoutes } from "../features/locations/location.routes.js";
 import type { LocationService } from "../features/locations/location.service.js";
 import { followRoutes } from "../features/social/follow.routes.js";
@@ -56,6 +58,8 @@ import type { UserService } from "../features/users/user.service.js";
  *   following is a relationship between two accounts.
  * @param moderation - Reporting, moderating, suspending, and appealing; mounted
  *   only alongside users, since every report, decision, and appeal names one.
+ * @param search - Finding history; mounted only alongside users, since every
+ *   search resolves eligibility against a Viewer.
  * @returns Nothing.
  */
 export async function registerRoutes(
@@ -73,6 +77,7 @@ export async function registerRoutes(
   momentSignificance?: MomentSignificanceService | undefined,
   follows?: FollowService | undefined,
   moderation?: ModerationService | undefined,
+  search?: SearchService | undefined,
 ): Promise<void> {
   await app.register(healthRoutes);
 
@@ -117,6 +122,10 @@ export async function registerRoutes(
 
       if (moderation !== undefined) {
         await app.register(moderationRoutes(moderation));
+      }
+
+      if (search !== undefined) {
+        await app.register(searchRoutes(search));
       }
     }
   }

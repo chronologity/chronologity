@@ -928,6 +928,53 @@ The initial release does not require:
 
 A reliable lexical and structured Search system with strong privacy semantics is preferable to an ambitious AI Search system that cannot distinguish inference from historical fact.
 
+## Established Search Decisions
+
+These were open questions. Implementation settled them (ADR-118).
+
+**One Search entry point**, over Moments, accounts, real-world Events, and
+Locations at once, with an optional filter to one kind. Every result says what
+it is; nothing is flattened into an undifferentiated list.
+
+**Three sort modes ship**: relevance, occurrence newest first, and occurrence
+oldest first. When a chronological mode is chosen, occurrence governs entirely
+and relevance plays no part.
+
+**No significance sort, and no score of any kind is returned.** Significance
+breaks ties between comparably good matches and never promotes a weak one. A
+number beside a result reads as a judgement about the past whatever it is
+labelled.
+
+**Engagement is not a ranking signal**, and the ranking code cannot reach one.
+
+**Typo tolerance retrieves rather than rewrites.** A near miss finds the thing
+meant; nothing silently corrects what somebody typed, because a historically
+unusual spelling may be the correct one.
+
+**Temporal filters overlap rather than contain.** A Moment known only as
+"summer 1998" is found by a search for 1998 and never acquires an invented date.
+
+**Proximity search is answered at the granularity the author disclosed**, and
+the response says which. A Moment shared only at city level is found by a
+city-sized search and not a street-sized one; a Moment with its place hidden is
+never a proximity match, for anybody including its author.
+
+**Zero results means zero results.** Nothing loosely related is substituted, and
+the result count covers only what the asker may see.
+
+**A result is not a permission.** Opening one reauthorizes against current state.
+
+### Not yet built
+
+**Autocomplete and suggestions**, which are their own Search surface and their
+own privacy problem — a private name must not leak because somebody typed a
+matching prefix.
+
+**Facet counts**, whose leakage surface is real and which nothing day-one needs.
+
+**Handoff into temporal zoom and historical jumps**, which runs through the feed
+aggregator and waits on that application existing.
+
 ## Open Product Questions
 
 The following questions require deliberate resolution:

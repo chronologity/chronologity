@@ -368,3 +368,19 @@ export {
   type UserProfileChangedPayload,
   type UserStatusChangedPayload,
 } from "./domain-events.js";
+export {
+  geoPrecisionSchema,
+  matchReasonSchema,
+  searchEntityTypeSchema,
+  searchPageSchema,
+  searchRequestSchema,
+  searchResultSchema,
+  searchSortSchema,
+  type GeoPrecision,
+  type MatchReason,
+  type SearchEntityType,
+  type SearchPage,
+  type SearchRequest,
+  type SearchResult,
+  type SearchSort,
+} from "./search.js";

@@ -613,6 +613,29 @@ documents are built by reading, the two produce the same result, and walking
 does not require the broker to have retained every message since the platform
 began.
 
+**Eligibility is a single SQL fragment inside the retrieval query**, never a
+filter applied to results afterwards. The Viewer is a required argument to
+retrieval, so there is no code path that retrieves without it.
+
+**Searchability and visibility stay separate.** The index records what
+moderation permits; visibility, suspension, audience, and age are resolved
+against the Viewer at query time. Folding them together would filter an author
+out of their own private history before anybody knew who was asking.
+
+**Ranking produces the SQL that orders candidates** rather than scoring them
+afterwards, because ordering has to happen in the query for pagination to be
+correct. It still imports nothing, which is what keeps engagement unreachable.
+
+**Proximity search matches indexed cells**, with the radius choosing a tier and
+a ring count, and the response reporting the tier that answered. Rings are
+sized by the shorter side of a cell — a geohash rectangle is markedly taller
+than it is wide at the finest tier, and sizing by the longer side leaves the
+shorter one uncovered.
+
+**A Search cursor carries a query fingerprint and a ranking version**, and one
+matching neither is refused explicitly rather than silently restarted or
+re-ranked.
+
 ## Still open
 
 Everything else in the list above, and these in particular are now closer:
@@ -622,7 +645,11 @@ Everything else in the list above, and these in particular are now closer:
 - what an authorization-policy change requires, which is now concretely a
   scoped rebuild but not yet a decided procedure;
 - whether Comments are indexed, which stayed unanswered because no comment
-  document type was needed to satisfy anything day-one.
+  document type was needed to satisfy anything day-one;
+- whether a dedicated Search engine is introduced, which the retrieval interface
+  now makes a second implementation rather than a rewrite;
+- whether facet counts are computed at all, which stayed unbuilt: the leakage
+  surface is real and nothing day-one needs them.
 
 # Architectural Invariants
 

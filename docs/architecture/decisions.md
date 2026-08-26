@@ -3691,3 +3691,49 @@ The Search store is PostgreSQL with `tsvector`/GIN for relevance and `pg_trgm` f
 **Nothing authoritative depends on indexing.** A Moment is recorded whether or not it is searchable yet, and the suite asserts it by recording one with no broker reachable at all. The residual exposure is indexing lag: a restriction reaches Search only when its message arrives, which is why lag is logged per message rather than assumed away.
 
 **Strict cross-topic priority is not implemented and is not claimed.** `search.md:293` asks that restriction be processed ahead of ordinary updates; Kafka has no cross-topic priority. What holds is that events about one entity are ordered by partition key, and that because documents are built from authoritative state, whichever event arrives brings eligibility fully current.
+
+# ADR-118 — Eligibility Lives in the Query, and Precision Travels With the Answer
+
+**Status:** Accepted
+
+## Decision
+
+One endpoint, `GET /search`, over all four entity types, with an optional type filter. Every result carries what it is.
+
+Eligibility is a single SQL fragment applied inside the retrieval query. Nothing is filtered out of a result set after it comes back.
+
+Searchability records what moderation permits. Visibility, suspension, audience, and age are resolved against the Viewer at query time.
+
+Three sort modes: relevance, occurrence newest, occurrence oldest. Ranking is versioned and produces the SQL that orders candidates.
+
+Search cursors carry a query fingerprint and a ranking version, and a cursor that matches neither is refused explicitly.
+
+Proximity search matches indexed cells. The radius selects a tier and a ring count, and the response reports the tier that answered.
+
+## Rationale
+
+**Filter, then rank, then paginate.** `search.md:249` is unambiguous, and the reason is that post-filtering leaks through page sizes, result counts, and pagination gaps even when the restricted thing is never displayed. A page that comes back short says something was removed; a total computed before eligibility says how much. So eligibility is a condition in the statement, the Viewer is a required argument, and there is no code path that retrieves without it.
+
+**Ranking produces SQL rather than scoring in TypeScript.** Ordering has to happen in the query for pagination to be correct. Scoring afterwards would mean fetching every eligible candidate — an unbounded scan on request — or keeping a second definition of relevance that agrees with the first until somebody edits one. The module still imports nothing, which is what keeps engagement unreachable rather than merely unused.
+
+**Two corrections to 5O-1 landed first.** `permitsSearch` refused `age_restricted` and `restricted_to_authorized_audience` at index time, which made an age-restricted Moment findable by nobody at all — adults included — and a narrowed one findable by no one. `search.md:229` puts age and audience at query time by name. Only `temporarily_unavailable` withholds outright now; `removed` still produces no document. Significance was also never populated, so the tie-breaker the ranking design depends on had nothing to read; it now comes from the `global` scope with its version, and is never returned to anybody.
+
+**A search cursor is not a Timeline cursor.** A Timeline cursor names a position in chronology and stays meaningful; a search cursor names a position in one answer to one question under one ranking. It can therefore go stale in ways the other cannot, and the honest response is to say so. Silently restarting looks like results repeating; silently re-ranking pages somebody through two orderings spliced together.
+
+**Proximity is answered at the granularity the disclosure supports, and says which.** A Moment whose author shared only the city has no finer cell stored, so a street-sized search cannot return it — the index does not hold the doorway, so no query can reach it. Reporting the tier that answered is the same treatment occurrence precision gets: the precision travels with the answer rather than being quietly rounded away.
+
+## Consequences
+
+**Ring coverage was sized by the wrong dimension, and an integration test caught it.** A geohash cell is a rectangle, and at the finest tier it spans about thirty-eight metres of longitude but only nineteen of latitude. Sizing the search by the longer side left the shorter one uncovered: a hundred-metre search looked at about twenty metres and returned nothing, rather than reporting that it could not. Rings are now sized by the shorter side, and the unit test asserts that points at the edge of the radius fall inside the cells actually searched.
+
+**The first coverage rule was backwards.** It chose the coarsest tier whose cells fit *inside* the radius, which optimises for not over-returning. What matters is that everything within the radius is looked at: cells wider than the radius return a little too much, and that is the right way to be wrong, because the alternative loses history without saying so.
+
+**A guard that could not fail was removed rather than kept.** `cellsAround` had a check against stepping past a pole. Nothing could make it fire — the geohash subdivision saturates at the poles by construction, since every comparison past ninety degrees answers the same way. A check that cannot fail is worse than none: it suggests the case is handled there when it is handled by the arithmetic. The property is now asserted directly instead, so a future encoder using modular arithmetic would break the test rather than the behaviour.
+
+**Casting typed words to `tsquery` fails on the first space.** The lexical rank cast the caller's phrase directly, which turned every multi-word search into an internal error; it parses with `plainto_tsquery` now. Words a person typed are not query syntax, and treating them as syntax makes a stray character a failure.
+
+**Breaking eligibility makes the suite slow as well as wrong.** Removing the audience clause did not just fail five tests — it made the run take minutes, because the predicate that protects people is also the one that narrows the scan. That is a coincidence rather than a design, and it is worth knowing: a sudden slowdown in Search is a reason to look at eligibility before looking at indexes.
+
+**Zero results returns zero results.** Nothing loosely related is substituted, the total counts eligible candidates only, and a search matching nothing offers no cursor. No result is preferable to fictional history.
+
+**A result is not a permission.** Opening one reauthorizes against current state, which the suite proves by making a Moment private between finding it and opening it. The index lags; the refusal does not.

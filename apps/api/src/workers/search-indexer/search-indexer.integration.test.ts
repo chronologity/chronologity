@@ -127,6 +127,14 @@ describe("search indexer", () => {
   });
 
   afterAll(async () => {
+    // Every shadow version, not only the ones the tests that created them got
+    // as far as deleting. A test that fails partway leaves its version behind,
+    // and abandoned index versions accumulate silently in a shared database —
+    // which is how sixty-seven thousand stale rows came to sit alongside the
+    // real index.
+    await database.dataSource.query(
+      "DELETE FROM search_documents WHERE index_version LIKE 'search-test-%'",
+    );
     await database.close();
   });
 

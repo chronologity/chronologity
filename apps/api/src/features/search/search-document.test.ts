@@ -38,6 +38,7 @@ const moment = (over: Partial<MomentSource> = {}): MomentSource => ({
   latitude: undefined,
   longitude: undefined,
   realWorldEventNames: [],
+  significance: undefined,
   ...over,
 });
 
@@ -133,20 +134,18 @@ describe("permitsSearch", () => {
     assert.equal(permitsSearch("restricted_from_amplification"), true);
   });
 
-  it("hides a narrowed subject", () => {
-    assert.equal(permitsSearch("restricted_to_authorized_audience"), false);
+  it("leaves a narrowed subject indexable, for query time to narrow it", () => {
+    assert.equal(permitsSearch("restricted_to_authorized_audience"), true);
   });
 
-  it("hides an age-restricted subject until the Viewer is resolved", () => {
-    assert.equal(permitsSearch("age_restricted"), false);
+  it("leaves an age-restricted subject indexable, for query time to judge age", () => {
+    assert.equal(permitsSearch("age_restricted"), true);
   });
 
   it("hides a subject withheld during review", () => {
+    // The one state that withholds outright. `removed` never reaches here,
+    // because it produces no document at all.
     assert.equal(permitsSearch("temporarily_unavailable"), false);
-  });
-
-  it("hides a removed subject", () => {
-    assert.equal(permitsSearch("removed"), false);
   });
 });
 
@@ -390,6 +389,36 @@ describe("buildMomentDocument", () => {
 
   it("keeps a warned Moment searchable", () => {
     assert.equal(buildMomentDocument(moment({ moderationState: "warned" }))?.searchable, true);
+  });
+
+  it("leaves an age-restricted Moment findable, for the Viewer to be judged", () => {
+    const document = buildMomentDocument(moment({ moderationState: "age_restricted" }));
+
+    // The index cannot know who is asking. Refusing here made it findable by
+    // nobody at all, adults included.
+    assert.equal(document?.searchable, true);
+    assert.equal(document?.moderationState, "age_restricted");
+  });
+
+  it("leaves a narrowed Moment findable, for the audience to be resolved", () => {
+    const document = buildMomentDocument(
+      moment({ moderationState: "restricted_to_authorized_audience" }),
+    );
+
+    assert.equal(document?.searchable, true);
+  });
+
+  it("carries significance for tie-breaking when it has been assessed", () => {
+    const document = buildMomentDocument(
+      moment({ significance: { value: 7, version: "significance-v1" } }),
+    );
+
+    assert.equal(document?.significance, 7);
+    assert.equal(document?.significanceVersion, "significance-v1");
+  });
+
+  it("carries no significance before it has been assessed", () => {
+    assert.equal(buildMomentDocument(moment())?.significance, null);
   });
 
   it("makes a Moment withheld during review unsearchable without deleting it", () => {

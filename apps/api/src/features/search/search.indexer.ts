@@ -108,12 +108,16 @@ export class SearchIndexer {
     entityIds: readonly string[],
   ): Promise<{ written: number; removed: number; superseded: number }> {
     const builtAt = new Date();
-    const built = await Promise.all(
-      entityIds.map(async (entityId) => ({
-        entityId,
-        fields: await this.build(entityType, entityId),
-      })),
-    );
+    const built: { entityId: string; fields: SearchDocumentFields | undefined }[] = [];
+
+    // Read one at a time. `Promise.all` over the page was the first version and
+    // it exhausted the connection pool on the first batch: five hundred reads
+    // asking for a connection at once against a pool of ten, every one of them
+    // waiting for a connection none of them would release. Batching the writes
+    // is what made the rebuild fast; fanning out the reads only made it fail.
+    for (const entityId of entityIds) {
+      built.push({ entityId, fields: await this.build(entityType, entityId) });
+    }
 
     const tally = { written: 0, removed: 0, superseded: 0 };
 

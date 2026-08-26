@@ -24,6 +24,8 @@ import { AuthorizationRepository } from "../features/authorization/authorization
 import { AuthorizationService } from "../features/authorization/authorization.service.js";
 import { LocationRepository } from "../features/locations/location.repository.js";
 import { ModerationRepository } from "../features/moderation/moderation.repository.js";
+import { PostgresSearchRetrieval } from "../features/search/search.retrieval.js";
+import { SearchService } from "../features/search/search.service.js";
 import { ModerationService } from "../features/moderation/moderation.service.js";
 import { LocationService } from "../features/locations/location.service.js";
 import { FollowRepository } from "../features/social/follow.repository.js";
@@ -189,6 +191,10 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
     ),
     locations: new LocationService(database.dataSource, locationRepository, places),
     moderation: new ModerationService(database.dataSource, moderationRepository),
+    search: new SearchService(
+      new PostgresSearchRetrieval(database.dataSource),
+      moderationRepository,
+    ),
     follows: new FollowService(
       database.dataSource,
       new FollowRepository(database.dataSource),

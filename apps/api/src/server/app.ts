@@ -17,6 +17,7 @@ import type { UploadService } from "../features/uploads/upload.service.js";
 import type { UserService } from "../features/users/user.service.js";
 import { registerPlugins } from "./register-plugins.js";
 import type { ModerationService } from "../features/moderation/moderation.service.js";
+import type { SearchService } from "../features/search/search.service.js";
 import { registerRoutes } from "./register-routes.js";
 
 declare module "fastify" {
@@ -68,6 +69,8 @@ export interface BuildAppOptions {
   follows?: FollowService | undefined;
   /** Reporting, moderating, suspending, and appealing. Mounted only alongside users. */
   moderation?: ModerationService | undefined;
+  /** Finding history. Mounted only alongside users, since every search has a Viewer. */
+  search?: SearchService | undefined;
 }
 
 /**
@@ -97,6 +100,7 @@ export async function buildApp({
   momentSignificance,
   follows,
   moderation,
+  search,
 }: BuildAppOptions): Promise<FastifyInstance> {
   // Typed explicitly: Fastify's overloads otherwise resolve a broadly-typed
   // `logger` to the HTTP/2 signature, and every later use of the instance
@@ -157,6 +161,7 @@ export async function buildApp({
     momentSignificance,
     follows,
     moderation,
+    search,
   );
 
   return app;
