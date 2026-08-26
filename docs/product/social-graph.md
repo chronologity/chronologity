@@ -847,6 +847,10 @@ These were open questions. Implementation settled them, and they are requirement
 
 **Every Follow Request is kept.** Asking again after a refusal creates a second request rather than reusing the first, so what was asked and refused survives. That is what makes a cooldown implementable when its policy is decided; the policy itself remains open.
 
+**Suspension leaves the social graph intact** (ADR-116). Follows, follow requests, and blocks all survive a suspension untouched, and reinstatement needs no repair because nothing was undone. This answers what happens to relationship history when an account is suspended: it is still there, because the account may come back.
+
+A suspended account cannot follow, request, or block while suspended — every write is refused — but nothing it established before is removed.
+
 ## Open Product Questions
 
 The following questions require deliberate resolution:

@@ -129,7 +129,17 @@ export type PublicUser = z.infer<typeof publicUserSchema>;
  * about them. Nobody else ever receives it.
  */
 export const currentUserSchema = publicUserSchema.extend({
-  status: z.enum(["active", "deactivated"]),
+  /**
+   * `active`, `deactivated`, or `suspended`.
+   *
+   * Somebody is told when their own account is suspended, and only they are:
+   * `publicUserSchema` carries no status, and a suspended profile is simply
+   * absent to everybody else. Telling them is what makes the rest of the
+   * enforcement answerable — `moderation.md:680` expects the reason for an
+   * action to reach the person it affected, and an account that could not
+   * discover its own state could not appeal.
+   */
+  status: z.enum(["active", "deactivated", "suspended"]),
   dateOfBirth: calendarDateSchema,
   preferences: preferencesSchema,
 });

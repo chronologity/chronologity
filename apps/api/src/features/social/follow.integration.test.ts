@@ -15,6 +15,7 @@ import {
   createRealWorldEvent,
 } from "../../testing/fixtures.js";
 import { LocationRepository } from "../locations/location.repository.js";
+import { ModerationRepository } from "../moderation/moderation.repository.js";
 import { MomentReactionRepository } from "../moments/moment-reaction.repository.js";
 import { MomentRepository } from "../moments/moment.repository.js";
 import { MomentService } from "../moments/moment.service.js";
@@ -144,6 +145,7 @@ describe("following", () => {
         new RealWorldEventRepository(database.dataSource),
         new FollowRepository(database.dataSource),
         new UserRepository(database.dataSource),
+        new ModerationRepository(database.dataSource),
       ),
     });
   });

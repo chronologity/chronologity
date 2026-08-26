@@ -22,6 +22,7 @@ import { FollowRepository } from "../social/follow.repository.js";
 import { FollowService } from "../social/follow.service.js";
 import { MomentCommentRepository } from "./moment-comment.repository.js";
 import { MomentCommentService } from "./moment-comment.service.js";
+import { ModerationRepository } from "../moderation/moderation.repository.js";
 import { MomentReactionRepository } from "./moment-reaction.repository.js";
 import { MomentSignificanceRepository } from "./moment-significance.repository.js";
 import { MomentSignificanceService } from "./moment-significance.service.js";
@@ -133,6 +134,7 @@ describe("moments", () => {
       new RealWorldEventRepository(database.dataSource),
       new FollowRepository(database.dataSource),
       new UserRepository(database.dataSource),
+      new ModerationRepository(database.dataSource),
     );
 
     app = await buildApp({

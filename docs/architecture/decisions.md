@@ -3581,3 +3581,65 @@ Recomputation driven by events rather than by a periodic sweep.
 **A guard test that could not fail was found by trying to break it.** Forcing every Moment at a place to count as a boundary broke nothing, because the test compared the first Moment against the middle and the first was *also* the earliest in its author's record — the record boundary hid the place rule entirely. Asserting that the middle scores exactly zero is what makes the rule testable. A comparison between two values can pass for reasons that have nothing to do with the rule under test.
 
 **The sweep is periodic rather than event-driven.** `historical-significance.md:206` permits computing asynchronously, incrementally, or periodically, and says plainly that not every causal relationship should trigger a synchronous recalculation. Nothing publishes the events that would drive this, and inventing them here would fix a shape 5Q has not decided.
+
+# ADR-116 — Moderation Decides What Chronologity Distributes, Never What Happened
+
+**Status:** Accepted
+
+## Decision
+
+All seven moderation states ship: `allowed`, `warned`, `restricted_from_amplification`, `restricted_to_authorized_audience`, `age_restricted`, `temporarily_unavailable`, `removed`.
+
+Moderation withholds and never deletes. An author always reads their own, whatever has been decided about it and whether or not they are suspended.
+
+`users.status` gains `suspended`, and a CHECK constraint it never had.
+
+Safety reports and historical-accuracy reports are separate tables with separate queues from the start.
+
+Automation computes review priority and nothing else. No classifier, no inference, no automated state.
+
+Restrictions short of suspension are restrictions on content, not partial account states.
+
+A refused moderation attempt is recorded alongside the decisions.
+
+Nothing publishes an Integration Event.
+
+## Rationale
+
+**A binary `allowed / deleted` is too coarse for a platform holding history.** `moderation.md:151` says so directly, and the middle states are what let Chronologity restrict distribution without asserting that something did not happen. The states cost almost nothing once the rest exists: age restriction needs only a threshold, because birthdates already exist for the minimum-age check, and temporary unavailability needs nothing but the state itself.
+
+**The single statement of the visibility rule is what made this tractable.** ADR-114 consolidated Moment visibility into `visibleToViewer`, used by Moment reads, relationship reads, and comment reads. Suspension, removal, temporary unavailability, audience narrowing, and the age gate all landed there, and every existing reader received them without being changed. Had the rule still existed in three copies, this phase would have been three chances to disagree.
+
+**The rule is split into a privacy half and a moderation half, because tombstones need them asked separately.** `privacy.md:158` forbids using a visible relationship to reveal an inaccessible Moment; `moderation.md:713` asks that a chain running `A → [unavailable] → C` keep its shape rather than silently become two unrelated pairs. Both are satisfiable only by distinguishing why a far end is out of reach. A tombstone stands where Chronologity removed something, and nothing stands where a person kept something private — the platform admitting its own act discloses nothing about anybody else.
+
+**Suspension hides and does not cascade.** `moderation.md:687` warns that the default "should not be an accidental cascade deletion", and `social-graph.md:486` requires that relationship history survive, because the account may come back. Reinstatement is the test that makes this real: the suite asserts the restored Moment is byte-for-byte what it was.
+
+**A suspended person keeps reading their own history, and may appeal.** `moderation.md:680` expects the reason for an action to reach the person it affected, which is worth nothing if they cannot answer. So writes are refused at one chokepoint with a one-entry allowlist — `POST /appeals` — rather than route by route. An opt-in check is one a future feature forgets and nothing notices; this way a new write endpoint is covered by having been written.
+
+**Report volume orders a queue and establishes nothing.** `moderation.md:614` is explicit. Priority is computed from report count and reason severity; one credible threat outranks fifty spam reports, and a unit test asserts exactly that. A burst flag records that reports arrived together and is deliberately not an escalation, because a burst may mean many people saw something awful at once or that a group agreed to report somebody — the flag says which question to ask and must not answer it.
+
+**Restrictions short of suspension are restrictions on content.** `users.md:897` asks what moderation can impose without full suspension, and the answer is the seven content states plus per-media moderation rather than a half-suspended account that may read but not write. Account tiers would multiply the states every future feature must reason about, and no product document asks for them.
+
+**Per-media moderation carries a cascade nobody chose.** 5H refuses removing a Moment's last medium, because a Moment without media could not have been created. So a Moment whose last medium is moderated away becomes `temporarily_unavailable`. The rule was not invented here; leaving it unstated would have produced a Moment the system says cannot exist.
+
+**No AI adjudicates anything.** `moderation.md:880` warns that AI must not silently become an authority on historical truth, and a system that cannot distinguish documentary evidence of an atrocity from an atrocity is not one to give authority to. The provenance column names `automated`; nothing infers.
+
+**Nothing publishes an Integration Event.** No domain feature does yet, and there is no consumer for a `MomentRemoved` event until the Timeline projections of phase 6. Removal reaches significance in-process, which is the one place it must reach today. Building the event now would be publishing into a void; when projections exist they will need it.
+
+## Consequences
+
+**The single-Moment path and the set path are two statements of one rule, and only proving both is proof.** Deliberately breaking the SQL so suspended authors stayed visible left all forty-nine tests passing, because every single-Moment test goes through the TypeScript twin — `get` applies the rule per row, and a set query cannot call a per-row function without breaking keyset pagination. Seven tests driving the listing endpoint were added, and the same break now fails. Two implementations of one rule need two sets of tests; a suite that exercises one of them is not evidence about the other.
+
+**`.returning()` takes property names, and column names fail silently.** `.returning(["report_id"])` wrote the row and reported every insert as a duplicate, so report prioritisation never ran and no appeal could be filed — three integration failures from one mistake. ADR-102 records the same trap in its other form, that `orIgnore` populates `identifiers` whether or not a row was written. Both are the same lesson: the insert result is only honest if it is asked correctly.
+
+**A default that was harmless became a hole.** `toStatus` in the User repository coerced anything unrecognised to `active`, which was fine while the column held two values and let a suspended account read as active the moment it held three. It now falls back to `suspended`. A fallback is a decision about the case you did not think of, and widening a vocabulary changes which case that is.
+
+**`restricted_to_authorized_audience` on a public Moment means its author alone.** Making a Moment public replaces its audience with an empty list, so narrowing a public Moment narrows it to nobody. What distinguishes the state from `private` is that it survives the author: they may still edit, and may not widen past what Chronologity decided. The integration test asserts that property rather than the vacuous one it started as.
+
+**The twin and the SQL agree on suspension only, deliberately.** `isSuspended` tests for `suspended` and not for "anything but active", because the SQL does, and because catching `deactivated` too would have changed what deactivation means as a side effect of shipping moderation.
+
+**Comment counting and comment listing became one predicate.** They stated the same rule separately and would have disagreed the moment moderation gave them a third clause. A count exceeding the comments a Viewer can read is a visible lie about how many people spoke.
+
+**A suspended account's reactions and comments stop counting.** Both are aggregated live rather than stored, so each is a clause in one query, and reinstatement restores the totals exactly. Hiding what somebody contributed while still tallying it would leave their reach intact — and significance reads reaction volume, so the account would go on amplifying content it can no longer see.
+
+**The public transparency dashboard is documentation, not an endpoint.** `moderation.md:927` asks Chronologity to explain its moderation principles publicly — what is prohibited, what restrictions exist, how reporting works, whether appeals exist. The same section says transparency does not require publishing abuse-detection thresholds or private enforcement data, and `moderation.md:941` warns that removal volume is not evidence of a good system. A metrics surface built now would publish exactly the numbers that mislead.

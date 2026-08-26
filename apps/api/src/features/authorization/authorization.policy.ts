@@ -29,10 +29,18 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
   // your profile is yours because it is yours — rather than by named
   // permissions, so there is nothing here yet.
   user: [],
-  // Empty until moderation ships. The role boundary exists now so that
-  // privileged capability has somewhere to land that is not `administrator`;
-  // the capabilities arrive with the feature that needs them.
-  moderator: [],
+  // Four capabilities rather than one, so that reviewing reports, deciding what
+  // is distributed, suspending an account, and judging appeals can be held
+  // separately. Somebody triaging a queue does not need the power to suspend,
+  // and an appeal decided by whoever made the original decision is not much of
+  // an appeal — separating them is what makes either arrangement possible
+  // later without redefining the role.
+  moderator: [
+    "moderation:report-review",
+    "moderation:content-moderate",
+    "moderation:account-suspend",
+    "moderation:appeal-review",
+  ],
   administrator: ["admin:user-role-manage"],
 };
 

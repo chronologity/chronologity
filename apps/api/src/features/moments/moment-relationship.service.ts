@@ -115,6 +115,9 @@ export class MomentRelationshipService {
         origin: "asserted",
         assertedByUserId: asserterUserId,
         createdAt: this.clock().toISOString(),
+        // Just asserted by somebody who could see both ends, so neither is
+        // being withheld from them.
+        unavailable: false,
       };
     }
 
@@ -140,10 +143,14 @@ export class MomentRelationshipService {
    *
    * @param momentId - Whose claims.
    * @param viewerUserId - Who is asking.
-   * @returns The claims whose far end this Viewer may also see. A relationship
-   *   pointing at something inaccessible is omitted entirely rather than
-   *   returned with the identifier blanked: the identifier is itself the
-   *   disclosure (`privacy.md:158`).
+   * @returns The claims whose far end this Viewer may also see, and a tombstone
+   *   for each far end moderation has withheld. The two are treated oppositely
+   *   on purpose. A relationship pointing at something *privacy* withholds is
+   *   omitted entirely rather than marked, because the identifier is itself the
+   *   disclosure (`privacy.md:158`); one pointing at something *moderation*
+   *   withheld keeps its place, because `moderation.md:713` asks that a chain
+   *   keep its shape rather than silently become two unrelated pairs, and
+   *   Chronologity admitting its own act reveals nothing about anybody else.
    * @throws {NotFoundError} If there is no such Moment, or this Viewer may not
    *   see it.
    */
@@ -154,6 +161,7 @@ export class MomentRelationshipService {
       relationships: await this.relationships.findForMoment(
         momentId,
         viewerUserId,
+        await this.moments.viewerIsAdult(viewerUserId),
         MomentRelationshipService.LIST_LIMIT,
       ),
     };

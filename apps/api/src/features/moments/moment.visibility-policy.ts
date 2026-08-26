@@ -1,4 +1,9 @@
-import type { MomentVisibility } from "@chronologity/contracts";
+import type { ModerationState, MomentVisibility } from "@chronologity/contracts";
+import {
+  hidesFromOthers,
+  narrowsToAudience,
+  requiresAdult,
+} from "../moderation/moderation.policy.js";
 
 /**
  * Who may see a Moment.
@@ -16,7 +21,14 @@ import type { MomentVisibility } from "@chronologity/contracts";
  */
 
 /** Why somebody may not see a Moment. */
-export type ViewRefusal = "blocked" | "not_in_audience" | "private" | "unknown_visibility";
+export type ViewRefusal =
+  | "blocked"
+  | "not_in_audience"
+  | "private"
+  | "unknown_visibility"
+  | "author_suspended"
+  | "moderated"
+  | "too_young";
 
 /** What the caller had to look up before the rule could be applied. */
 export interface ViewFacts {
@@ -24,21 +36,38 @@ export interface ViewFacts {
   readonly blockedEitherWay: boolean;
   /** Whether the viewer is on this Moment's list. Only consulted when restricted. */
   readonly inAudience: boolean;
+  /** Whether the Moment's author is currently suspended. */
+  readonly authorSuspended: boolean;
+  /**
+   * What Chronologity has decided about this Moment, if anything.
+   *
+   * Undefined is the ordinary case and means `allowed`: the states table is
+   * sparse, since a row per Moment saying nothing is a table the size of the
+   * platform.
+   */
+  readonly moderationState: ModerationState | undefined;
+  /** Whether the Viewer is old enough for age-restricted content. */
+  readonly viewerIsAdult: boolean;
 }
 
 /**
  * Decide whether a Viewer may see a Moment.
  *
- * Order matters. The author is answered before blocking, because a block must
- * never hide somebody's own history from them. Blocking is answered before
- * visibility, because a public Moment is still not for somebody a block
- * separates you from — which is the requirement 5I-3 could only satisfy
- * vacuously, there being no access to survive a block at the time.
+ * Order matters. The author is answered before everything, because neither a
+ * block nor a moderator's decision may hide somebody's own history from them —
+ * and somebody who cannot see what was hidden cannot meaningfully appeal it.
+ * Blocking is answered before visibility, because a public Moment is still not
+ * for somebody a block separates you from — which is the requirement 5I-3 could
+ * only satisfy vacuously, there being no access to survive a block at the time.
+ * Moderation is answered before visibility for the same reason: a decision to
+ * withhold something must not depend on what its author had chosen.
  *
  * @param viewerUserId - Who is asking.
  * @param moment - Whose it is and who it is for.
  * @param facts - What the caller looked up: whether a block separates the two,
- *   and whether the Viewer is on the Moment's list.
+ *   whether the Viewer is on the Moment's list, whether the author is
+ *   suspended, what Chronologity has decided about the Moment, and whether the
+ *   Viewer is old enough for age-restricted content.
  * @returns Why to refuse, or undefined when the Viewer may see it. Every reason
  *   is reported to the caller identically, as a Moment that does not exist; the
  *   distinction exists so the rule can be read and tested, not so it can be
@@ -55,6 +84,27 @@ export function checkVisibility(
 
   if (facts.blockedEitherWay) {
     return "blocked";
+  }
+
+  if (facts.authorSuspended) {
+    return "author_suspended";
+  }
+
+  if (facts.moderationState !== undefined) {
+    if (hidesFromOthers(facts.moderationState)) {
+      return "moderated";
+    }
+
+    if (requiresAdult(facts.moderationState) && !facts.viewerIsAdult) {
+      return "too_young";
+    }
+
+    // Narrowing overrides the author's own choice rather than deferring to it:
+    // the state exists precisely for something whose author meant it for
+    // everybody and which Chronologity has decided should reach fewer people.
+    if (narrowsToAudience(facts.moderationState) && !facts.inAudience) {
+      return "not_in_audience";
+    }
   }
 
   switch (moment.visibility) {

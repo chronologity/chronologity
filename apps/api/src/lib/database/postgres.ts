@@ -44,6 +44,13 @@ import {
   RealWorldEventAlias,
   RealWorldEventLocation,
 } from "../../features/real-world-events/real-world-event.model.js";
+import {
+  AccuracyReportRow,
+  ModerationAction,
+  ModerationAppeal,
+  ModerationReportRow,
+  ModerationStateRow,
+} from "../../features/moderation/moderation.model.js";
 import { Upload } from "../../features/uploads/upload.model.js";
 import { Handle, Preferences, RestrictedData, User } from "../../features/users/user.model.js";
 import type { HealthCheckable } from "../health.js";
@@ -112,6 +119,11 @@ const entities = [
   RealWorldEventFollow,
   LocationFollow,
   UserBlock,
+  ModerationStateRow,
+  ModerationAction,
+  ModerationReportRow,
+  AccuracyReportRow,
+  ModerationAppeal,
   OutboxMessage,
   ProjectionProcessedEvent,
   SchemaMigration,

@@ -33,7 +33,9 @@ import {
 import type { MomentRepository } from "./moment.repository.js";
 import type { UndisclosedMoment } from "./moment.types.js";
 import { disclosePlace } from "./moment.disclosure-policy.js";
-import { checkVisibility } from "./moment.visibility-policy.js";
+import { isAdult } from "../moderation/moderation.policy.js";
+import type { ModerationRepository } from "../moderation/moderation.repository.js";
+import { checkVisibility, type ViewFacts } from "./moment.visibility-policy.js";
 import { decodeCursor, encodeCursor } from "../../lib/pagination/cursor.js";
 
 /**
@@ -69,6 +71,9 @@ export class MomentService {
    * @param follows - Used to ask whether a Block separates two people, which
    *   refuses a read before visibility is even consulted.
    * @param users - Used to check that everybody named in an audience exists.
+   * @param moderation - Used to ask what Chronologity has decided about a
+   *   Moment, whether its author is suspended, and whether the Viewer is old
+   *   enough for age-restricted content.
    * @param clock - Injected so tests can move time without waiting.
    */
   constructor(
@@ -79,6 +84,7 @@ export class MomentService {
     private readonly realWorldEvents: RealWorldEventRepository,
     private readonly follows: FollowRepository,
     private readonly users: UserRepository,
+    private readonly moderation: ModerationRepository,
     private readonly clock: () => Date = () => new Date(),
   ) {}
 
@@ -623,22 +629,72 @@ export class MomentService {
     }
 
     // Looked up only when the answer could depend on them. The author's own
-    // Moment is decided by the policy before either matters.
+    // Moment is decided by the policy before any of them matters, which is what
+    // keeps a suspended person's history readable to them.
     const facts =
       moment.authorUserId === viewerUserId
-        ? { blockedEitherWay: false, inAudience: false }
-        : {
-            blockedEitherWay: await this.isBlocked(moment.authorUserId, viewerUserId),
-            inAudience:
-              moment.visibility === "restricted" &&
-              (await this.moments.isInAudience(momentId, viewerUserId)),
-          };
+        ? {
+            blockedEitherWay: false,
+            inAudience: false,
+            authorSuspended: false,
+            moderationState: undefined,
+            viewerIsAdult: true,
+          }
+        : await this.gatherViewFacts(momentId, moment.authorUserId, moment.visibility, viewerUserId);
 
     if (checkVisibility(viewerUserId, moment, facts) !== undefined) {
       throw new NotFoundError("No such moment");
     }
 
     return this.disclose(moment, viewerUserId);
+  }
+
+  /**
+   * Everything the visibility rule needs about somebody who is not the author.
+   *
+   * @param momentId - Which Moment.
+   * @param authorUserId - Who wrote it.
+   * @param visibility - What its author chose.
+   * @param viewerUserId - Who is asking.
+   * @returns The facts, each looked up only where it could change the answer.
+   *   The audience is read whenever the Moment is restricted or moderation has
+   *   narrowed it, since either can make membership decisive.
+   */
+  private async gatherViewFacts(
+    momentId: string,
+    authorUserId: string,
+    visibility: string,
+    viewerUserId: string,
+  ): Promise<ViewFacts> {
+    const state = (await this.moderation.findState("moment", momentId))?.state as
+      | ViewFacts["moderationState"]
+      | undefined;
+
+    return {
+      blockedEitherWay: await this.isBlocked(authorUserId, viewerUserId),
+      inAudience:
+        (visibility === "restricted" || state === "restricted_to_authorized_audience") &&
+        (await this.moments.isInAudience(momentId, viewerUserId)),
+      authorSuspended: await this.moderation.isSuspended(authorUserId),
+      moderationState: state,
+      viewerIsAdult: await this.viewerIsAdult(viewerUserId),
+    };
+  }
+
+  /**
+   * Whether the Viewer is old enough for age-restricted content.
+   *
+   * Public because the relationship service needs the same answer for the same
+   * Viewer, and asking the Moment service for it keeps one definition of what
+   * "old enough" means rather than two that can drift apart.
+   *
+   * @param viewerUserId - Who is asking.
+   * @returns Whether they have reached eighteen. False when no birthdate can be
+   *   found for them, since ambiguous security-sensitive state defaults to
+   *   deny.
+   */
+  async viewerIsAdult(viewerUserId: string): Promise<boolean> {
+    return isAdult(await this.moderation.findDateOfBirth(viewerUserId), this.clock());
   }
 
   /**
@@ -679,6 +735,7 @@ export class MomentService {
     const moments = await this.moments.findForAuthorAsViewer(
       authorUserId,
       viewerUserId,
+      await this.viewerIsAdult(viewerUserId),
       limit,
       decodeCursor(cursor),
     );

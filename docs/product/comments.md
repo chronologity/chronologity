@@ -911,6 +911,14 @@ The initial release does not require:
 - direct messaging derived from Comment threads; or
 - Comment reactions unless separately justified by the reaction specification.
 
+## Established Comment Decisions
+
+**A comment is a moderatable subject in its own right** (ADR-116). It can be removed or withheld during review without touching the Moment it sits under, and its author still reads it — which is what makes an appeal possible.
+
+**A suspended account's comments are hidden from everybody else, and the count follows.** This answers what suspension does to comments. The comment count and the comment list are one predicate rather than two, because a count that exceeds the comments a Viewer can actually read is a visible lie about how many people spoke.
+
+**Nothing is deleted.** Reinstating the account restores the comments and the count exactly, the same as for Moments.
+
 ## Open Product Questions
 
 The following questions require deliberate resolution:

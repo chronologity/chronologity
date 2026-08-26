@@ -23,6 +23,8 @@ import { SessionService } from "../features/authentication/session.service.js";
 import { AuthorizationRepository } from "../features/authorization/authorization.repository.js";
 import { AuthorizationService } from "../features/authorization/authorization.service.js";
 import { LocationRepository } from "../features/locations/location.repository.js";
+import { ModerationRepository } from "../features/moderation/moderation.repository.js";
+import { ModerationService } from "../features/moderation/moderation.service.js";
 import { LocationService } from "../features/locations/location.service.js";
 import { FollowRepository } from "../features/social/follow.repository.js";
 import { FollowService } from "../features/social/follow.service.js";
@@ -119,6 +121,11 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
     config.auth,
   );
 
+  // Shared rather than built twice: the Moment service asks it what
+  // Chronologity has decided about a Moment on every read, and the moderation
+  // service writes those decisions.
+  const moderationRepository = new ModerationRepository(database.dataSource);
+
   const moments = new MomentService(
     database.dataSource,
     new MomentRepository(database.dataSource),
@@ -127,6 +134,7 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
     realWorldEventRepository,
     new FollowRepository(database.dataSource),
     accounts,
+    moderationRepository,
   );
 
   const momentReactionRepository = new MomentReactionRepository(database.dataSource);
@@ -180,6 +188,7 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
       },
     ),
     locations: new LocationService(database.dataSource, locationRepository, places),
+    moderation: new ModerationService(database.dataSource, moderationRepository),
     follows: new FollowService(
       database.dataSource,
       new FollowRepository(database.dataSource),

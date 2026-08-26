@@ -41,9 +41,21 @@ export class User {
   @Column("text", { nullable: true })
   biography!: string | null;
 
-  /** Constrained to these two by the database, not by this file. */
+  /**
+   * `active`, `deactivated`, or `suspended`.
+   *
+   * Constrained to these three by the database — which became true when
+   * suspension arrived. The column carried no check constraint before that, so
+   * this file was the only thing asserting the vocabulary and nothing enforced
+   * it.
+   *
+   * Deactivation is the person's own decision and suspension is not, which is
+   * why they are separate values rather than one "inactive": moderation must
+   * never quietly overwrite somebody's own choice, and reinstating an account
+   * must not undo it.
+   */
   @Column("text", { default: "active" })
-  status!: "active" | "deactivated";
+  status!: "active" | "deactivated" | "suspended";
 
   @Column("timestamptz", { name: "created_at" })
   createdAt!: Date;

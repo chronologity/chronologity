@@ -320,6 +320,24 @@ export const momentRelationshipSchema = z.object({
   /** Whose perspective this is (`causality.md:520`). */
   assertedByUserId: identifierSchema,
   createdAt: timestampSchema,
+  /**
+   * Whether the far end has been withheld by moderation.
+   *
+   * `moderation.md:713` draws the case exactly: a chain running Moment A to
+   * Moment C through something now unavailable should keep its shape rather
+   * than quietly becoming two unrelated pairs. The relationship is still true —
+   * moderation decides what Chronologity distributes, not what happened.
+   *
+   * True carries nothing else: no title, no author, no place, no Event, no
+   * media, as `moderation.md:722` requires. It says a link continues here and
+   * refuses to say through what.
+   *
+   * Never true for a Moment privacy hides rather than moderation. Those are
+   * absent from the list entirely, because `privacy.md:158` forbids using a
+   * visible relationship to reveal an inaccessible Moment, and a marker where
+   * somebody's private history sits would do exactly that.
+   */
+  unavailable: z.boolean(),
 });
 
 export type MomentRelationship = z.infer<typeof momentRelationshipSchema>;

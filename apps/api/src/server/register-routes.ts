@@ -4,6 +4,8 @@ import type { AuthenticationWiring } from "../features/authentication/authentica
 import { authorizationRoutes } from "../features/authorization/authorization.routes.js";
 import type { AuthorizationService } from "../features/authorization/authorization.service.js";
 import { healthRoutes } from "../features/health/index.js";
+import { moderationRoutes } from "../features/moderation/moderation.routes.js";
+import type { ModerationService } from "../features/moderation/moderation.service.js";
 import { locationRoutes } from "../features/locations/location.routes.js";
 import type { LocationService } from "../features/locations/location.service.js";
 import { followRoutes } from "../features/social/follow.routes.js";
@@ -52,6 +54,8 @@ import type { UserService } from "../features/users/user.service.js";
  *   alongside the Moment service, whose visibility check bounds every mark.
  * @param follows - The follow service; mounted only alongside users, since
  *   following is a relationship between two accounts.
+ * @param moderation - Reporting, moderating, suspending, and appealing; mounted
+ *   only alongside users, since every report, decision, and appeal names one.
  * @returns Nothing.
  */
 export async function registerRoutes(
@@ -68,6 +72,7 @@ export async function registerRoutes(
   momentComments?: MomentCommentService | undefined,
   momentSignificance?: MomentSignificanceService | undefined,
   follows?: FollowService | undefined,
+  moderation?: ModerationService | undefined,
 ): Promise<void> {
   await app.register(healthRoutes);
 
@@ -108,6 +113,10 @@ export async function registerRoutes(
 
       if (follows !== undefined) {
         await app.register(followRoutes(follows));
+      }
+
+      if (moderation !== undefined) {
+        await app.register(moderationRoutes(moderation));
       }
     }
   }

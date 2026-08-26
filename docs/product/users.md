@@ -872,6 +872,16 @@ One obligation is inherited rather than open. ADR-081 requires that no authentic
 
 **Account recovery is a password reset by emailed link, and magic-link sign-in.** Both prove control of the address before granting anything.
 
+**An account is `active`, `deactivated`, or `suspended`, and the three are not interchangeable** (ADR-116). Deactivation is the person's own decision and suspension is not, which is why they are separate values rather than one "inactive": moderation must never quietly overwrite somebody's own choice, and reinstating an account must not undo it. Suspending a deactivated account is refused.
+
+**Moderation can restrict content without restricting an account.** This answers what restrictions exist short of suspension: the seven moderation states apply to Moments, comments, and individual media, and there is no partial account state that may read but not write. Account tiers would multiply the states every future feature has to reason about, and no product document asks for them.
+
+**A suspended account's contributions are hidden and nothing is deleted.** Their Moments and comments disappear for everybody else, their reactions stop counting, and reinstatement restores all of it exactly. Follows, blocks, and relationships are untouched throughout, because the account may come back and the history it was part of has to be there when it does.
+
+**A suspended person still reads their own history, and may appeal.** They are restricted, not erased. Every other write is refused; signing in is not, because somebody who could not sign in could not read the explanation or answer it.
+
+**Somebody is told when their own account is suspended, and only they are.** The public view of a User carries no status, and a suspended profile is simply absent to everybody else.
+
 ## Open Product Questions
 
 The following questions require deliberate resolution:

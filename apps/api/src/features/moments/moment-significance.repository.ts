@@ -109,6 +109,40 @@ export class MomentSignificanceRepository {
   }
 
   /**
+   * The condition a Moment must meet to count toward anybody else's significance.
+   *
+   * `moderation.md:729` requires a removal to reach "significance-derived
+   * presentation", and this is where it does: a Moment Chronologity has stopped
+   * distributing stops being evidence that a place or an Event mattered to
+   * people, and so does everything by a suspended account.
+   *
+   * Applied only where Moments are counted *across* people. A Moment's own
+   * assessment still runs while it is moderated — computing it costs nothing
+   * and reversing an appeal should not leave a stale score behind — and the
+   * author's own earliest and latest Moments still bound their own record,
+   * because that is a fact about their history rather than a claim made to
+   * anybody else.
+   *
+   * @param alias - The alias the Moment table is joined under.
+   * @returns A SQL condition taking no parameters, so it composes into the
+   *   positional queries around it without renumbering them.
+   */
+  private static distributable(alias: string): string {
+    return `${alias}.deleted_at IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM moderation_states ms
+         WHERE ms.subject_type = 'moment'
+           AND ms.subject_id = ${alias}.moment_id
+           AND ms.state IN ('removed', 'temporarily_unavailable')
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM users sig_author
+         WHERE sig_author.user_id = ${alias}.author_user_id
+           AND sig_author.status = 'suspended'
+      )`;
+  }
+
+  /**
    * Find Moments whose significance is most out of date.
    *
    * Stalest first, claimed with `FOR UPDATE SKIP LOCKED` so several workers take
@@ -286,7 +320,7 @@ export class MomentSignificanceRepository {
             WHERE mine.moment_id = $1
               AND $1 IN (
                 SELECT ml.moment_id FROM moment_locations ml
-                  JOIN moments m ON m.moment_id = ml.moment_id AND m.deleted_at IS NULL
+                  JOIN moments m ON m.moment_id = ml.moment_id AND ${MomentSignificanceRepository.distributable("m")}
                  WHERE ml.location_id = mine.location_id
                  ORDER BY m.occurrence_start ASC, m.moment_id ASC LIMIT 1
               )
@@ -299,7 +333,7 @@ export class MomentSignificanceRepository {
             WHERE mine.moment_id = $1
               AND $1 IN (
                 SELECT mre.moment_id FROM moment_real_world_events mre
-                  JOIN moments m ON m.moment_id = mre.moment_id AND m.deleted_at IS NULL
+                  JOIN moments m ON m.moment_id = mre.moment_id AND ${MomentSignificanceRepository.distributable("m")}
                  WHERE mre.real_world_event_id = mine.real_world_event_id
                  ORDER BY m.occurrence_start ASC, m.moment_id ASC LIMIT 1
               )
@@ -353,7 +387,7 @@ export class MomentSignificanceRepository {
       const rows: { count: string }[] = await this.dataSource.query(
         `SELECT COUNT(DISTINCT m.author_user_id)::int AS count
            FROM moment_real_world_events mre
-           JOIN moments m ON m.moment_id = mre.moment_id AND m.deleted_at IS NULL
+           JOIN moments m ON m.moment_id = mre.moment_id AND ${MomentSignificanceRepository.distributable("m")}
           WHERE mre.real_world_event_id = $1`,
         [eventId],
       );
@@ -365,7 +399,7 @@ export class MomentSignificanceRepository {
       const rows: { count: string }[] = await this.dataSource.query(
         `SELECT COUNT(DISTINCT m.author_user_id)::int AS count
            FROM moment_locations ml
-           JOIN moments m ON m.moment_id = ml.moment_id AND m.deleted_at IS NULL
+           JOIN moments m ON m.moment_id = ml.moment_id AND ${MomentSignificanceRepository.distributable("m")}
           WHERE ml.location_id = $1`,
         [locationId],
       );
@@ -391,7 +425,7 @@ export class MomentSignificanceRepository {
       const rows: { count: string }[] = await this.dataSource.query(
         `SELECT COUNT(*)::int AS count
            FROM moment_real_world_events mre
-           JOIN moments m ON m.moment_id = mre.moment_id AND m.deleted_at IS NULL
+           JOIN moments m ON m.moment_id = mre.moment_id AND ${MomentSignificanceRepository.distributable("m")}
           WHERE mre.real_world_event_id = $1`,
         [eventId],
       );

@@ -28,6 +28,46 @@ const EMPTY_REACTIONS: ReactionSummary = {
   yours: null,
 };
 
+/**
+ * The rule deciding whether a Viewer may read one comment, as SQL.
+ *
+ * Stated once and used by both the list and the count, which is the point: the
+ * two said the same thing separately until moderation gave them a third clause
+ * to disagree about, and a count that exceeds the comments a Viewer can
+ * actually read is a visible lie about how many people spoke.
+ *
+ * The author is admitted first, so neither a suspension nor a moderator's
+ * decision hides somebody's own words from them.
+ *
+ * Reads `:viewerUserId`, which the caller must supply.
+ *
+ * @param alias - The query-builder alias the comment table is joined under.
+ * @returns A SQL condition, true when this Viewer may read the comment.
+ */
+export function commentReadableBy(alias: string): string {
+  return `(
+    ${alias}.author_user_id = :viewerUserId
+    OR (
+      NOT EXISTS (
+        SELECT 1 FROM user_blocks b
+         WHERE (b.blocker_user_id = ${alias}.author_user_id AND b.blocked_user_id = :viewerUserId)
+            OR (b.blocker_user_id = :viewerUserId AND b.blocked_user_id = ${alias}.author_user_id)
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM users commenter
+         WHERE commenter.user_id = ${alias}.author_user_id
+           AND commenter.status = 'suspended'
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM moderation_states ms
+         WHERE ms.subject_type = 'comment'
+           AND ms.subject_id = ${alias}.comment_id
+           AND ms.state IN ('removed', 'temporarily_unavailable')
+      )
+    )
+  )`;
+}
+
 /** Reads and writes discussion about Moments. */
 export class MomentCommentRepository {
   /**
@@ -168,17 +208,10 @@ export class MomentCommentRepository {
       query.andWhere("comment.thread_comment_id = :threadCommentId", { threadCommentId });
     }
 
-    // Speech is hidden rather than deleted when a Block is made, and only from
-    // the two people involved: everybody else keeps a coherent conversation
-    // (`comments.md:459`).
-    query.andWhere(
-      `NOT EXISTS (
-         SELECT 1 FROM user_blocks b
-          WHERE (b.blocker_user_id = comment.author_user_id AND b.blocked_user_id = :viewerUserId)
-             OR (b.blocker_user_id = :viewerUserId AND b.blocked_user_id = comment.author_user_id)
-       )`,
-      { viewerUserId },
-    );
+    // Blocking hides speech rather than deleting it, and only from the two
+    // people involved: everybody else keeps a coherent conversation
+    // (`comments.md:459`). Moderation and suspension are in the same rule.
+    query.andWhere(commentReadableBy("comment"), { viewerUserId });
 
     // A deleted comment survives only as somewhere for replies to hang from.
     query.andWhere(
@@ -303,6 +336,15 @@ export class MomentCommentRepository {
       .addSelect("reaction.kind", "kind")
       .addSelect("COUNT(*)", "count")
       .where({ commentId: In([...commentIds]) })
+      // As on Moment reactions: a suspended account stops counting, nothing is
+      // deleted, and reinstatement restores the totals exactly.
+      .andWhere(
+        `NOT EXISTS (
+           SELECT 1 FROM users reactor
+            WHERE reactor.user_id = reaction.user_id
+              AND reactor.status = 'suspended'
+         )`,
+      )
       .groupBy("reaction.comment_id")
       .addGroupBy("reaction.kind")
       .getRawMany<{ commentId: string; kind: string; count: string }>();
@@ -353,14 +395,7 @@ export class MomentCommentRepository {
       .createQueryBuilder("comment")
       .where("comment.moment_id = :momentId", { momentId })
       .andWhere("comment.deleted_at IS NULL")
-      .andWhere(
-        `NOT EXISTS (
-           SELECT 1 FROM user_blocks b
-            WHERE (b.blocker_user_id = comment.author_user_id AND b.blocked_user_id = :viewerUserId)
-               OR (b.blocker_user_id = :viewerUserId AND b.blocked_user_id = comment.author_user_id)
-         )`,
-        { viewerUserId },
-      )
+      .andWhere(commentReadableBy("comment"), { viewerUserId })
       .getCount();
   }
 

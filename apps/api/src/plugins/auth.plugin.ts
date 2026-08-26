@@ -54,6 +54,15 @@ export const authPlugin = fp(async function authPlugin(
 
   app.decorate("readRoles", (userId: string) => roles.rolesFor(userId));
 
+  app.decorate("readUserStatus", async (userId: string) => {
+    const state = await accounts.findState(userId);
+
+    // An account that cannot be read is not one to let write. This is
+    // unreachable while the session's User exists, and the alternative default
+    // would let a race between deletion and a request through.
+    return state?.status ?? "suspended";
+  });
+
   // Declared here so every request object has the same shape, which keeps
   // Fastify's request allocation monomorphic. The value is only meaningful
   // once `authenticate` has run, and routes reach it through requireSession.
@@ -99,6 +108,8 @@ declare module "fastify" {
     resolveUserId(identityId: string): Promise<string | undefined>;
     /** Reads current elevated roles. Never cached across requests. */
     readRoles(userId: string): Promise<readonly Role[]>;
+    /** Reads an account's current status. Never cached across requests. */
+    readUserStatus(userId: string): Promise<"active" | "deactivated" | "suspended">;
   }
 }
 
@@ -154,6 +165,65 @@ export async function requireUser(request: FastifyRequest, reply: FastifyReply):
   }
 
   request.user = { userId: resolved };
+
+  await refuseSuspendedWrite(request);
+}
+
+/** The methods that change something. */
+const WRITE_METHODS: ReadonlySet<string> = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+/**
+ * What a suspended account may still do that changes something.
+ *
+ * Exactly one thing. An enforcement system somebody cannot answer is not one,
+ * and `moderation.md:680` expects the reason for an action to reach the person
+ * it affected — which is worth nothing if they cannot reply.
+ *
+ * Keyed by the declared route pattern rather than the resolved path, so an
+ * identifier in the URL cannot be arranged to match.
+ */
+const SUSPENDED_MAY_WRITE: ReadonlySet<string> = new Set(["/appeals"]);
+
+/**
+ * Refuse a suspended account any request that changes something.
+ *
+ * Enforced here, in the guard every authenticated route already passes through,
+ * rather than route by route. The difference matters for the routes that do not
+ * exist yet: an opt-in check is one a future feature forgets and nothing
+ * notices, and this way a new write endpoint is covered by having been written.
+ *
+ * Reads are untouched. A suspended person still sees their own history, which
+ * is what separates being restricted from being erased, and what makes it
+ * possible for them to know what they are appealing.
+ *
+ * Signing in is untouched too: authentication routes establish a Session rather
+ * than a User and never reach this guard. Somebody who could not sign in could
+ * not read the explanation or answer it.
+ *
+ * @param request - The request, with its User already resolved.
+ * @returns Nothing.
+ * @throws {UnauthorizedError} If a suspended account is trying to change
+ *   anything other than by appealing.
+ */
+async function refuseSuspendedWrite(request: FastifyRequest): Promise<void> {
+  if (!WRITE_METHODS.has(request.method)) {
+    return;
+  }
+
+  const pattern = request.routeOptions.url;
+
+  if (pattern !== undefined && SUSPENDED_MAY_WRITE.has(pattern)) {
+    return;
+  }
+
+  const status = await request.server.readUserStatus(request.user.userId);
+
+  if (status === "suspended") {
+    // Says what it is, unlike a Moment refusal. Existence hiding protects
+    // somebody else's privacy; there is nobody to protect here, and a person
+    // who cannot tell a suspension from a bug cannot act on it.
+    throw new UnauthorizedError("Your account is suspended");
+  }
 }
 
 /**

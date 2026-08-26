@@ -22,5 +22,5 @@ export interface UserState {
   readonly handle: string;
   readonly displayName: string;
   readonly biography: string | null;
-  readonly status: "active" | "deactivated";
+  readonly status: "active" | "deactivated" | "suspended";
 }

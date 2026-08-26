@@ -753,6 +753,14 @@ The initial release does not require:
 - a universal engagement score; or
 - public down-ranking or dislike mechanics.
 
+## Established Reaction Decisions
+
+**A suspended account's reactions stop counting, and come back on reinstatement** (ADR-116). This answers what suspension does to reactions, beyond the obvious refusal to accept new ones. Counts are aggregated live rather than stored, so the exclusion is a clause in one query and nothing is deleted.
+
+It matters beyond tidiness: significance scoring reads reaction volume, so an account whose reactions kept counting would go on amplifying content it can no longer see. The person still sees their own reaction, as they see the rest of their own history.
+
+**Reactions are not a moderatable subject.** A reaction is a count of one with no content to judge; what moderation acts on is the Moment or comment being reacted to, or the account doing it.
+
 ## Open Product Questions
 
 The following questions require deliberate resolution:

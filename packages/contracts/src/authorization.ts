@@ -41,7 +41,13 @@ export type GrantableRole = z.infer<typeof grantableRoleSchema>;
  * phase implementing them would want to change, and a registry prevents drift
  * whether it has one entry or forty. Each phase adds its own.
  */
-export const PERMISSIONS = ["admin:user-role-manage"] as const;
+export const PERMISSIONS = [
+  "admin:user-role-manage",
+  "moderation:report-review",
+  "moderation:content-moderate",
+  "moderation:account-suspend",
+  "moderation:appeal-review",
+] as const;
 
 export const permissionSchema = z.enum(PERMISSIONS);
 

@@ -121,6 +121,18 @@ export class MomentReactionRepository {
       .select("reaction.kind", "kind")
       .addSelect("COUNT(*)", "count")
       .where("reaction.moment_id = :momentId", { momentId })
+      // A suspended account stops counting. Hiding what somebody contributed
+      // while still tallying it would leave their reach intact — and
+      // significance scoring reads these numbers, so the account would go on
+      // amplifying content it can no longer see. Nothing is deleted: the rows
+      // stay, and reinstatement restores the totals exactly.
+      .andWhere(
+        `NOT EXISTS (
+           SELECT 1 FROM users reactor
+            WHERE reactor.user_id = reaction.user_id
+              AND reactor.status = 'suspended'
+         )`,
+      )
       .groupBy("reaction.kind")
       .getRawMany();
 

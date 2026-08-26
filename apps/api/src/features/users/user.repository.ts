@@ -36,15 +36,25 @@ export function toPublicUser(row: User): PublicUser {
 }
 
 /**
- * Read a stored status as one of the two the application recognises.
+ * Read a stored status as one of the three the application recognises.
  *
  * @param status - As stored.
- * @returns The status, treating anything unrecognised as active — the column's
- *   check constraint permits only these two, and a value outside them would be
- *   a database that no longer matches its migrations.
+ * @returns The status, treating anything unrecognised as suspended. That
+ *   default changed when suspension arrived: while there were two values,
+ *   falling back to active was harmless, and now the fallback decides whether
+ *   somebody Chronologity has restricted goes on writing. A value outside the
+ *   three would be a database that no longer matches its migrations, and the
+ *   safe reading of a database in that condition is the restrictive one.
  */
-function toStatus(status: string): "active" | "deactivated" {
-  return status === "deactivated" ? "deactivated" : "active";
+function toStatus(status: string): "active" | "deactivated" | "suspended" {
+  switch (status) {
+    case "active":
+      return "active";
+    case "deactivated":
+      return "deactivated";
+    default:
+      return "suspended";
+  }
 }
 
 /** Reads and writes accounts. */

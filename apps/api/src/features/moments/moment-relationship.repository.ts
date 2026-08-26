@@ -3,16 +3,22 @@ import type { DataSource } from "typeorm";
 import type { Transaction } from "../../lib/database/transaction.js";
 import { MomentRelationship } from "./moment-relationship.model.js";
 import { Moment as MomentRow } from "./moment.model.js";
-import { visibleToViewer } from "./moment.repository.js";
+import { moderationPermits, privacyPermits } from "./moment.repository.js";
 
 /**
  * Shape a stored relationship as the contract.
  *
  * @param row - As read from `moment_relationships`.
+ * @param unavailable - Whether moderation has withheld the far end from this
+ *   Viewer, making the claim a tombstone: the link is still true and what it
+ *   points at is not shown.
  * @returns The relationship. Carries no confidence score, deliberately
  *   (`causality.md:485`).
  */
-function toRelationship(row: MomentRelationship): MomentRelationshipContract {
+function toRelationship(
+  row: MomentRelationship,
+  unavailable: boolean,
+): MomentRelationshipContract {
   return {
     relationshipId: row.relationshipId,
     sourceMomentId: row.sourceMomentId,
@@ -21,6 +27,7 @@ function toRelationship(row: MomentRelationship): MomentRelationshipContract {
     origin: row.origin as MomentRelationshipContract["origin"],
     assertedByUserId: row.assertedByUserId,
     createdAt: row.createdAt.toISOString(),
+    unavailable,
   };
 }
 
@@ -102,7 +109,9 @@ export class MomentRelationshipRepository {
       .getRepository(MomentRelationship)
       .findOneBy({ relationshipId });
 
-    return row === null ? undefined : toRelationship(row);
+    // Read by the author of a claim to confirm what they just made, never as a
+    // Viewer read, so there is no far end being withheld from anybody here.
+    return row === null ? undefined : toRelationship(row, false);
   }
 
   /**
@@ -119,38 +128,57 @@ export class MomentRelationshipRepository {
    * @param momentId - Whose claims. The Viewer's access to this end is the
    *   caller's business, and is proven before this is called.
    * @param viewerUserId - Who is asking.
+   * @param viewerIsAdult - Whether the Viewer is old enough for age-restricted
+   *   content, which decides whether such a far end reads as a tombstone.
    * @param limit - How many at most.
    * @returns The claims, newest first.
    */
   async findForMoment(
     momentId: string,
     viewerUserId: string,
+    viewerIsAdult: boolean,
     limit: number,
   ): Promise<MomentRelationshipContract[]> {
-    const rows = await this.dataSource
-      .getRepository(MomentRelationship)
-      .createQueryBuilder("relationship")
-      // The far end, whichever end that is.
-      .innerJoin(
-        MomentRow,
-        "other",
-        `other.moment_id = CASE
-           WHEN relationship.source_moment_id = :momentId THEN relationship.target_moment_id
-           ELSE relationship.source_moment_id
-         END`,
-      )
-      .where(
-        "(relationship.source_moment_id = :momentId OR relationship.target_moment_id = :momentId)",
-        { momentId },
-      )
-      .andWhere("other.deleted_at IS NULL")
-      .andWhere(visibleToViewer("other"), { viewerUserId })
-      .orderBy("relationship.created_at", "DESC")
-      .addOrderBy("relationship.relationship_id", "DESC")
-      .take(limit)
-      .getMany();
+    // Two conditions rather than one, because the two ways a far end can be
+    // out of reach call for opposite treatment. Privacy withholding it removes
+    // the claim from the list entirely: `privacy.md:158` forbids using a
+    // visible relationship to reveal an inaccessible Moment. Moderation
+    // withholding it leaves a tombstone, because the chain of
+    // `moderation.md:713` should keep its shape and because Chronologity
+    // admitting its own act discloses nothing about anybody else.
+    const rows: { relationship: MomentRelationship; unavailable: boolean }[] =
+      await this.dataSource
+        .getRepository(MomentRelationship)
+        .createQueryBuilder("relationship")
+        // The far end, whichever end that is.
+        .innerJoin(
+          MomentRow,
+          "other",
+          `other.moment_id = CASE
+             WHEN relationship.source_moment_id = :momentId THEN relationship.target_moment_id
+             ELSE relationship.source_moment_id
+           END`,
+        )
+        .addSelect(`NOT ${moderationPermits("other")}`, "unavailable")
+        .where(
+          "(relationship.source_moment_id = :momentId OR relationship.target_moment_id = :momentId)",
+          { momentId },
+        )
+        .andWhere("other.deleted_at IS NULL")
+        .andWhere(privacyPermits("other"), { viewerUserId })
+        .setParameter("viewerIsAdult", viewerIsAdult)
+        .orderBy("relationship.created_at", "DESC")
+        .addOrderBy("relationship.relationship_id", "DESC")
+        .take(limit)
+        .getRawAndEntities()
+        .then((result) =>
+          result.entities.map((relationship, index) => ({
+            relationship,
+            unavailable: result.raw[index]?.unavailable === true,
+          })),
+        );
 
-    return rows.map(toRelationship);
+    return rows.map((row) => toRelationship(row.relationship, row.unavailable));
   }
 
   /**
