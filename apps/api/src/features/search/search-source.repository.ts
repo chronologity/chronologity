@@ -47,6 +47,7 @@ export class SearchSourceRepository {
       occurrence_end: Date;
       occurrence_precision: string;
       visibility: string;
+      discoverable: boolean;
       location_disclosure: string;
       created_at: Date;
       deleted_at: Date | null;
@@ -60,7 +61,7 @@ export class SearchSourceRepository {
     }[] = await this.dataSource.query(
       `SELECT m.moment_id, m.author_user_id, m.caption,
               m.occurrence_start, m.occurrence_end, m.occurrence_precision,
-              m.visibility, m.location_disclosure, m.created_at, m.deleted_at,
+              m.visibility, m.discoverable, m.location_disclosure, m.created_at, m.deleted_at,
               ms.state AS moderation_state,
               l.name AS place_name, l.latitude, l.longitude,
               ARRAY(
@@ -104,6 +105,7 @@ export class SearchSourceRepository {
       occurrenceEnd: row.occurrence_end,
       occurrencePrecision: row.occurrence_precision,
       visibility: row.visibility,
+      discoverable: row.discoverable,
       locationDisclosure: row.location_disclosure,
       createdAt: row.created_at,
       deletedAt: row.deleted_at,

@@ -24,6 +24,7 @@ import {
   setReactionRequestSchema,
   setReactionsEnabledRequestSchema,
   updateCaptionRequestSchema,
+  setDiscoverabilityRequestSchema,
 } from "@chronologity/contracts";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
@@ -335,6 +336,28 @@ export function momentRoutes(
 
     // Visibility and audience together, so a Moment is never briefly restricted
     // with a list left over from an earlier decision.
+    app.put(
+      "/moments/:momentId/discoverability",
+      {
+        schema: {
+          summary: "Set whether it may be recommended",
+          description:
+            "Separate from who may see it. Unlisting leaves a Moment reachable by anybody you give the link to and takes it out of every recommendation surface — Chronologity will not put it in front of somebody who did not ask. Public Moments are discoverable unless you say otherwise.",
+          params: z.object({ momentId: identifierSchema }),
+          body: setDiscoverabilityRequestSchema,
+          response: { 200: momentSchema, ...errors(400, 401, 403, 404) },
+        },
+        preHandler: requireUser,
+      },
+      async (request) =>
+        moments.setDiscoverable(
+          request.params.momentId,
+          request.user.userId,
+          request.body.discoverable,
+          request.requestContext,
+        ),
+    );
+
     app.put(
       "/moments/:momentId/visibility",
       {

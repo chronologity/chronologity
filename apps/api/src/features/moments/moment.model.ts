@@ -114,6 +114,17 @@ export class Moment {
   @Column("text", { name: "comment_policy", default: "anyone" })
   commentPolicy!: string;
 
+  /**
+   * Whether this may be offered to somebody who did not ask for it.
+   *
+   * A state of its own rather than a reading of `visibility`. Unlisting leaves
+   * a Moment reachable by anybody holding the link and takes it out of every
+   * recommendation surface — the distinction `discovery.md:123` draws between
+   * being accessible and being eligible for recommendation.
+   */
+  @Column("boolean", { default: true })
+  discoverable!: boolean;
+
   @Column("timestamptz", { name: "created_at" })
   createdAt!: Date;
 

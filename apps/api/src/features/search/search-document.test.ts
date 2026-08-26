@@ -30,6 +30,7 @@ const moment = (over: Partial<MomentSource> = {}): MomentSource => ({
   occurrenceEnd: AT,
   occurrencePrecision: "instant",
   visibility: "public",
+  discoverable: true,
   locationDisclosure: "exact",
   createdAt: AT,
   deletedAt: null,
@@ -533,6 +534,29 @@ describe("buildLocationDocument", () => {
 
   it("builds no document for a removed Location", () => {
     assert.equal(buildLocationDocument(place({ moderationState: "removed" })), undefined);
+  });
+});
+
+describe("discoverability in the document", () => {
+  it("carries an unlisted Moment as not discoverable", () => {
+    const document = buildMomentDocument(moment({ discoverable: false }));
+
+    // Still indexed, still searchable, still readable by link. What changes is
+    // whether anything may put it in front of somebody.
+    assert.equal(document?.discoverable, false);
+    assert.equal(document?.searchable, true);
+  });
+
+  it("carries a discoverable Moment as discoverable", () => {
+    assert.equal(buildMomentDocument(moment())?.discoverable, true);
+  });
+
+  it("marks an account, an Event, and a Location as not discoverable", () => {
+    // Only Moments are recommended; the flag is meaningless for the things
+    // somebody navigates to.
+    assert.equal(buildUserDocument(user())?.discoverable, false);
+    assert.equal(buildRealWorldEventDocument(event())?.discoverable, false);
+    assert.equal(buildLocationDocument(place())?.discoverable, false);
   });
 });
 

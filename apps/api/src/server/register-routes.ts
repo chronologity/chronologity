@@ -7,6 +7,8 @@ import { healthRoutes } from "../features/health/index.js";
 import { moderationRoutes } from "../features/moderation/moderation.routes.js";
 import type { ModerationService } from "../features/moderation/moderation.service.js";
 import { searchRoutes } from "../features/search/search.routes.js";
+import { discoveryRoutes } from "../features/discovery/discovery.routes.js";
+import type { DiscoveryService } from "../features/discovery/discovery.service.js";
 import type { SearchRateLimits } from "../features/search/search.rate-limits.js";
 import type { SearchService } from "../features/search/search.service.js";
 import { locationRoutes } from "../features/locations/location.routes.js";
@@ -62,6 +64,8 @@ import type { UserService } from "../features/users/user.service.js";
  * @param search - Finding history; mounted only alongside users, since every
  *   search resolves eligibility against a Viewer.
  * @param searchRateLimits - How hard the Search surfaces may be pushed.
+ * @param discovery - Recommending history; mounted only alongside users, since
+ *   every surface resolves eligibility against a Viewer.
  * @returns Nothing.
  */
 export async function registerRoutes(
@@ -81,6 +85,7 @@ export async function registerRoutes(
   moderation?: ModerationService | undefined,
   search?: SearchService | undefined,
   searchRateLimits?: SearchRateLimits | undefined,
+  discovery?: DiscoveryService | undefined,
 ): Promise<void> {
   await app.register(healthRoutes);
 
@@ -129,6 +134,10 @@ export async function registerRoutes(
 
       if (search !== undefined) {
         await app.register(searchRoutes(search, searchRateLimits));
+      }
+
+      if (discovery !== undefined) {
+        await app.register(discoveryRoutes(discovery));
       }
     }
   }

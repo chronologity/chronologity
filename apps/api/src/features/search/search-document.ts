@@ -41,6 +41,8 @@ export interface SearchDocumentFields {
   readonly searchable: boolean;
   readonly moderationState: ModerationState;
   readonly deleted: boolean;
+  /** Whether it may be offered to somebody who did not ask for it. */
+  readonly discoverable: boolean;
   readonly authorUserId: string | null;
   readonly geohashExact: string | null;
   readonly geohashCoarse: string | null;
@@ -59,6 +61,7 @@ export interface MomentSource {
   readonly occurrenceEnd: Date;
   readonly occurrencePrecision: string;
   readonly visibility: string;
+  readonly discoverable: boolean;
   readonly locationDisclosure: string;
   readonly createdAt: Date;
   readonly deletedAt: Date | null;
@@ -399,6 +402,7 @@ export function buildMomentDocument(source: MomentSource): SearchDocumentFields 
     searchable: permitsSearch(state),
     moderationState: state,
     deleted: source.deletedAt !== null,
+    discoverable: source.discoverable,
     authorUserId: source.authorUserId,
     geohashExact: tiers.exact,
     geohashCoarse: tiers.coarse,
@@ -452,6 +456,8 @@ export function buildUserDocument(source: UserSource): SearchDocumentFields | un
     searchable: permitsSearch(state),
     moderationState: state,
     deleted: false,
+    // Only Moments are recommended. The flag is meaningless here.
+    discoverable: false,
     // Itself. A suspension has to reach this row as well as everything the
     // account authored, and keying on the author is how the sweep finds both.
     authorUserId: source.userId,
@@ -498,6 +504,8 @@ export function buildRealWorldEventDocument(
     searchable: permitsSearch(state),
     moderationState: state,
     deleted: false,
+    // Only Moments are recommended. The flag is meaningless here.
+    discoverable: false,
     authorUserId: null,
     geohashExact: null,
     geohashCoarse: null,
@@ -546,6 +554,8 @@ export function buildLocationDocument(
     searchable: permitsSearch(state),
     moderationState: state,
     deleted: false,
+    // Only Moments are recommended. The flag is meaningless here.
+    discoverable: false,
     authorUserId: null,
     geohashExact: tiers.exact,
     geohashCoarse: tiers.coarse,

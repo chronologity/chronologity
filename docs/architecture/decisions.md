@@ -3779,3 +3779,45 @@ So the design decision is reuse rather than reimplementation. One `eligibleForVi
 **Shared test names made a correctness test lie.** Every correction test used names with the same `Zqab` stem to control similarity — which made each test's name similar to every other test's, so the correction offered a name from a different test and the assertion failed for a reason that had nothing to do with the code. Twelve random hex characters score zero against each other; keeping four of them lands at 0.235 whatever the token. When a test needs a controlled distance, the control has to isolate it from every other test as well.
 
 **A SQL comment with backticks terminated the template literal.** Writing `` `%` `` inside a template-literal SQL string ended the string and turned the rest into arithmetic. TypeScript caught it, which is the only reason it was cheap.
+
+# ADR-120 — Discoverability Is a State, and Three Floors No Default Can Lift
+
+**Status:** Accepted
+
+## Decision
+
+Discoverability is a state of its own: `moments.discoverable`, defaulting to true for a public Moment, with a control to unlist.
+
+Discovery eligibility is `eligibleForViewer` from Search, reused verbatim and then narrowed — never a second copy.
+
+Three floors apply regardless of the default: nothing age-restricted, nothing moderation keeps out of amplification, and nothing authored by an account under eighteen. A restricted Moment is never recommended even to its audience; a private one is never recommended even to its author.
+
+Four surfaces: Explore, history from an Event, history at or near a Location, and history related to a Moment.
+
+Explore orders by significance with per-author, per-place, and per-Event caps. No score is returned.
+
+## Rationale
+
+**Three different questions, three different answers.** Being able to see something is not permission to find it, and being able to find it is not permission to be shown it unasked. `discovery.md:159` states the rule this phase enforces: a recommendation system must never use its ability to infer that content exists as permission to expose it.
+
+**Eligibility is reused, not reimplemented.** The roadmap names the failure mode directly — Discovery must not become a path around privacy that Search already closes — and the way that happens is a Discovery query with its own copy of the access rule, written because "it only returns titles" or "it only runs on public content". One predicate, narrowed.
+
+**The default aligns the two states; the floors keep them distinct.** `discovery.md:157` says the model should not equate public accessibility with recommendation consent, and `discovery.md:926` warns against recommending sensitive personal history "merely because the underlying Moment is technically visible". A default of discoverable satisfies the first — the states exist separately and are separately controllable — and the floors are where the second actually bites. An opt-in default would have been the safer reading and would have shipped a Discovery system that recommended nothing, leaving the eligibility model untested against real content.
+
+**The author's age, not only the Viewer's.** A young person's history stays reachable by whoever they shared it with and is never put in front of strangers. This is the one floor that is about who made something rather than what it is.
+
+**Restricted is never recommended, even to its audience.** Being invited to see something is not asking to be shown it, and a recommendation would announce a Moment to somebody who had not thought about it in years. Private is excluded by the same clause, including from its own author: Discovery offers history to explore, and your own private history is not something to be offered back to you.
+
+**Diversity is a cap, not a shuffle.** `discovery.md:641` warns against diversity operating as "an unexplained randomization mechanism", so ranking's order survives and what changes is how much of a page any one author, place, or Event may occupy. Three per author rather than one, because somebody who recorded a wedding from six angles has six Moments that belong together, and a cap of one makes Discovery incoherent in the name of breadth.
+
+## Consequences
+
+**`restricted_from_amplification` finally does something.** It has existed since 5N as a state nothing acted on, and `suppressesAmplification` was unit-tested with no consumer at all. Both were built because 5N knew this phase was coming; the integration suite now asserts that a Moment in that state is findable by Search and absent from every Discovery surface, which is the entire reason the state exists.
+
+**The moderation rule exists twice, and a test holds it so.** `amplifiableStates` is the SQL twin of `suppressesAmplification`, and a unit test walks all seven states asserting the two agree. The same discipline `visibleToViewer` and `checkVisibility` follow, for the same reason: a set query cannot call a per-row function without breaking pagination.
+
+**The age floor reads `user_restricted_data`, which is the second place in the system that does.** That table is deliberately separate so no query written against `users` can return a birthdate by accident. This reads it to make a decision and returns nothing from it, which preserves the distinction — but it is worth knowing rather than discovering later. It is resolved at query time rather than indexed because a birthday changes without anything happening, and an indexed answer would leave somebody excluded until a worker noticed they had turned eighteen.
+
+**A nested template literal inside a SQL string terminated the string.** Building the moderation state list inline with `` `'${state}'` `` inside the outer template ended it and turned the rest into arithmetic — the same trap as a backtick in a SQL comment in 5O-2, one level deeper. It is hoisted out now. Both times TypeScript caught it, which is the only reason either was cheap.
+
+**Two ordering tests were conditional and proved nothing.** Asserted against Explore over ten thousand shared Moments, "the more significant one comes first" was wrapped in a check that both appeared in the first fifty — which they usually did not. Scoping them to a freshly created Event nothing else belongs to made them deterministic. A test that passes by not looking is worse than an absent one.

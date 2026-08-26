@@ -404,6 +404,24 @@ export class MomentRepository {
   }
 
   /**
+   * Set whether a Moment may be offered to somebody who did not ask.
+   *
+   * @param tx - The caller's transaction.
+   * @param momentId - Which Moment.
+   * @param discoverable - Whether it may be recommended.
+   * @param at - When.
+   * @returns Nothing.
+   */
+  async setDiscoverable(
+    tx: Transaction,
+    momentId: string,
+    discoverable: boolean,
+    at: Date,
+  ): Promise<void> {
+    await tx.update(MomentRow, { momentId }, { discoverable, updatedAt: at });
+  }
+
+  /**
    * Set who may see a Moment, and who is named on it, together.
    *
    * One statement each, in the caller's transaction, so a Moment is never

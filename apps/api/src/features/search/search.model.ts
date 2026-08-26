@@ -78,6 +78,10 @@ export class SearchDocument {
   @Column("boolean")
   deleted!: boolean;
 
+  /** Whether it may be offered to somebody who did not ask for it. */
+  @Column("boolean")
+  discoverable!: boolean;
+
   /**
    * Whose it is, where it is anybody's.
    *

@@ -905,6 +905,43 @@ export class MomentService {
   }
 
   /**
+   * Set whether a Moment may be offered to somebody who did not ask for it.
+   *
+   * Separate from visibility, and deliberately so. Unlisting leaves a Moment
+   * reachable by anybody holding the link and takes it out of every
+   * recommendation surface — `discovery.md:123` distinguishes being accessible
+   * from being eligible for recommendation, and this is the control that makes
+   * the distinction usable rather than theoretical.
+   *
+   * @param momentId - Which Moment.
+   * @param authorUserId - Who is asking. Only its author may.
+   * @param discoverable - Whether it may be recommended.
+   * @param context - The request that caused this, so the hop into
+   *   asynchronous indexing stays joined to it. Absent where no request did.
+   * @returns The Moment as it now stands.
+   * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
+   */
+  async setDiscoverable(
+    momentId: string,
+    authorUserId: string,
+    discoverable: boolean,
+    context?: RequestContext,
+  ): Promise<Moment> {
+    await this.getForAuthor(momentId, authorUserId);
+
+    await withTransaction(this.dataSource, async (tx) => {
+      await this.moments.setDiscoverable(tx, momentId, discoverable, this.clock());
+      // A revision rather than a visibility change: who may see it has not
+      // moved. What changed is whether Chronologity may put it in front of
+      // somebody, which derived state has to learn either way.
+      await this.announce(tx, "MomentRevised", momentId, authorUserId,
+        { kind: "interaction_settings", revisedAt: this.clock().toISOString() }, context);
+    });
+
+    return this.getForAuthor(momentId, authorUserId);
+  }
+
+  /**
    * Set who may see a Moment, and who is named on it.
    *
    * @param momentId - Which Moment.

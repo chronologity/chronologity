@@ -17,6 +17,7 @@ import type { UploadService } from "../features/uploads/upload.service.js";
 import type { UserService } from "../features/users/user.service.js";
 import { registerPlugins } from "./register-plugins.js";
 import type { ModerationService } from "../features/moderation/moderation.service.js";
+import type { DiscoveryService } from "../features/discovery/discovery.service.js";
 import type { SearchRateLimits } from "../features/search/search.rate-limits.js";
 import type { SearchService } from "../features/search/search.service.js";
 import { registerRoutes } from "./register-routes.js";
@@ -80,6 +81,8 @@ export interface BuildAppOptions {
    * has to stay well under it.
    */
   searchRateLimits?: SearchRateLimits | undefined;
+  /** Recommending history. Mounted only alongside users, since every surface has a Viewer. */
+  discovery?: DiscoveryService | undefined;
 }
 
 /**
@@ -111,6 +114,7 @@ export async function buildApp({
   moderation,
   search,
   searchRateLimits,
+  discovery,
 }: BuildAppOptions): Promise<FastifyInstance> {
   // Typed explicitly: Fastify's overloads otherwise resolve a broadly-typed
   // `logger` to the HTTP/2 signature, and every later use of the instance
@@ -173,6 +177,7 @@ export async function buildApp({
     moderation,
     search,
     searchRateLimits,
+    discovery,
   );
 
   return app;

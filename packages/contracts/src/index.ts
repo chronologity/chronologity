@@ -394,3 +394,19 @@ export {
   type SuggestibleEntityType,
   type SuggestionMatch,
 } from "./search.js";
+export {
+  discoverabilitySchema,
+  discoveryRequestSchema,
+  nearbyDiscoveryRequestSchema,
+  recommendationPageSchema,
+  recommendationReasonSchema,
+  recommendationSchema,
+  setDiscoverabilityRequestSchema,
+  type Discoverability,
+  type DiscoveryRequest,
+  type NearbyDiscoveryRequest,
+  type Recommendation,
+  type RecommendationPage,
+  type RecommendationReason,
+  type SetDiscoverabilityRequest,
+} from "./discovery.js";

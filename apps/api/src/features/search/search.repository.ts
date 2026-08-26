@@ -64,7 +64,7 @@ export class SearchRepository {
          index_version, entity_type, entity_id,
          title, body, aliases, search_vector,
          occurrence_start, occurrence_end, occurrence_precision, published_at,
-         visibility, searchable, moderation_state, deleted, author_user_id,
+         visibility, searchable, moderation_state, deleted, discoverable, author_user_id,
          geohash_exact, geohash_coarse, geohash_region,
          significance, significance_version, provenance,
          built_at, source_event_id, indexed_at
@@ -72,7 +72,7 @@ export class SearchRepository {
          $1, $2, $3,
          $4, $5, $6, ${lexicalVector(4, 6, 5)},
          $7, $8, $9, $10,
-         $11, $12, $13, $14, $15,
+         $11, $12, $13, $14, $24, $15,
          $16, $17, $18,
          $19, $20, $21,
          $22, $23, now()
@@ -90,6 +90,7 @@ export class SearchRepository {
          searchable = EXCLUDED.searchable,
          moderation_state = EXCLUDED.moderation_state,
          deleted = EXCLUDED.deleted,
+         discoverable = EXCLUDED.discoverable,
          author_user_id = EXCLUDED.author_user_id,
          geohash_exact = EXCLUDED.geohash_exact,
          geohash_coarse = EXCLUDED.geohash_coarse,
@@ -124,6 +125,7 @@ export class SearchRepository {
         JSON.stringify(fields.provenance),
         builtAt,
         sourceEventId ?? null,
+        fields.discoverable,
       ],
     );
 
