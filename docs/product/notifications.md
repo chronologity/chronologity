@@ -910,6 +910,59 @@ The initial release does not require:
 
 A smaller, predictable notification system is preferable to a broad engagement system that trains Users to ignore Chronologity.
 
+## Established Notification Decisions
+
+These were open questions. Implementation settled them (ADR-121).
+
+**A notification stores identifiers and nothing else.** No name, no caption, no
+comment, no thumbnail — and no column that could hold one. The wording is
+composed when somebody reads it, from what they may see then.
+
+**A notification about something you can no longer see is simply absent** —
+gone from the list and from the unread count, rather than blanked. Nothing has
+to propagate for that to happen, because nothing sensitive was ever copied out.
+
+**The unread count covers what you can see, not what exists.** A count that
+outran the list would itself say that something was there.
+
+**Unread activity of one kind on one thing is one entry.** Three people reacting
+is one notification, not three. Reading it starts a fresh one, so "what happened
+since I last looked" is what an entry means.
+
+**People are named only where you may know who they are**, at most two, and
+anybody else is counted. Somebody blocked or suspended after the fact stops
+being named without anything having to be rewritten.
+
+**Nobody is notified about their own activity.**
+
+**Whether you are entitled to know is decided before whether you want to hear
+about it.** A preference can never produce a notification you were not owed.
+
+**Moderation cannot be switched off**, and it is the only category that cannot.
+Being told what was done to your content is what makes appealing it possible.
+
+**A moderation notification never names the moderator.** It says what happened
+to your content, which is what you need in order to answer it.
+
+**Opening a notification reauthorizes.** A deep link is a pointer, never a
+permission.
+
+### Not yet built
+
+**Delivery anywhere but in the application** — email, push, device
+registration, quiet hours, digests, and send-time scheduling are the next
+sub-phase. Preferences already carry the channel dimension those need.
+
+**Security notifications**, which wait on email: an alert about a compromised
+account that appears only in the application reaches somebody who was already
+looking.
+
+**Historical and context notifications**, which this document warns require
+particular care because they concern the historical model itself and must not
+imply more certainty than the underlying relationship supports.
+
+**Retention and expiry**, which belong with privacy and deletion.
+
 ## Open Product Questions
 
 The following questions require deliberate resolution:

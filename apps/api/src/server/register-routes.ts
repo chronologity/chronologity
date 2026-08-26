@@ -8,6 +8,8 @@ import { moderationRoutes } from "../features/moderation/moderation.routes.js";
 import type { ModerationService } from "../features/moderation/moderation.service.js";
 import { searchRoutes } from "../features/search/search.routes.js";
 import { discoveryRoutes } from "../features/discovery/discovery.routes.js";
+import { notificationRoutes } from "../features/notifications/notification.routes.js";
+import type { NotificationService } from "../features/notifications/notification.service.js";
 import type { DiscoveryService } from "../features/discovery/discovery.service.js";
 import type { SearchRateLimits } from "../features/search/search.rate-limits.js";
 import type { SearchService } from "../features/search/search.service.js";
@@ -66,6 +68,8 @@ import type { UserService } from "../features/users/user.service.js";
  * @param searchRateLimits - How hard the Search surfaces may be pushed.
  * @param discovery - Recommending history; mounted only alongside users, since
  *   every surface resolves eligibility against a Viewer.
+ * @param notifications - Telling somebody something happened; mounted only
+ *   alongside users, since every notification has a recipient.
  * @returns Nothing.
  */
 export async function registerRoutes(
@@ -86,6 +90,7 @@ export async function registerRoutes(
   search?: SearchService | undefined,
   searchRateLimits?: SearchRateLimits | undefined,
   discovery?: DiscoveryService | undefined,
+  notifications?: NotificationService | undefined,
 ): Promise<void> {
   await app.register(healthRoutes);
 
@@ -138,6 +143,10 @@ export async function registerRoutes(
 
       if (discovery !== undefined) {
         await app.register(discoveryRoutes(discovery));
+      }
+
+      if (notifications !== undefined) {
+        await app.register(notificationRoutes(notifications));
       }
     }
   }

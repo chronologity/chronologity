@@ -744,7 +744,15 @@ export class ModerationService {
       // Derived state has to learn that eligibility changed. Search indexes
       // moderation state, so a decision that never reached the index would
       // leave something removed still findable.
-      await this.announceState(tx, subjectType, subjectId, request.state, actor.userId, at);
+      await this.announceState(
+        tx,
+        subjectType,
+        subjectId,
+        request.state,
+        actor.userId,
+        at,
+        owner.ownerUserId,
+      );
 
       if (orphansMoment && owner.momentId !== undefined) {
         await this.announceState(
@@ -754,6 +762,7 @@ export class ModerationService {
           "temporarily_unavailable",
           actor.userId,
           at,
+          owner.ownerUserId,
         );
       }
     });
@@ -982,6 +991,7 @@ export class ModerationService {
           "allowed",
           actor.userId,
           at,
+          action.affectedUserId,
         );
       }
     });
@@ -1006,6 +1016,8 @@ export class ModerationService {
    * @param state - What Chronologity has decided.
    * @param actorUserId - Who decided.
    * @param at - When.
+   * @param affectedUserId - Whose content it was, so whoever has to be told can
+   *   be found without walking every content table. Never the moderator.
    * @returns Nothing.
    */
   private async announceState(
@@ -1015,6 +1027,7 @@ export class ModerationService {
     state: string,
     actorUserId: string,
     at: Date,
+    affectedUserId: string | null = null,
   ): Promise<void> {
     const traceId = generateId();
 
@@ -1028,7 +1041,7 @@ export class ModerationService {
       aggregateVersion: 0,
       eventType: "ModerationStateChanged",
       eventVersion: 1,
-      payload: { subjectType, subjectId, state, changedAt: at.toISOString() },
+      payload: { subjectType, subjectId, state, affectedUserId, changedAt: at.toISOString() },
       metadata: {
         traceId,
         correlationId: traceId,

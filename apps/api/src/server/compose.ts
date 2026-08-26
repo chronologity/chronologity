@@ -25,6 +25,8 @@ import { AuthorizationService } from "../features/authorization/authorization.se
 import { LocationRepository } from "../features/locations/location.repository.js";
 import { ModerationRepository } from "../features/moderation/moderation.repository.js";
 import { DiscoveryRetrieval } from "../features/discovery/discovery.retrieval.js";
+import { NotificationRepository } from "../features/notifications/notification.repository.js";
+import { NotificationService } from "../features/notifications/notification.service.js";
 import { DiscoveryService } from "../features/discovery/discovery.service.js";
 import { PostgresSearchRetrieval } from "../features/search/search.retrieval.js";
 import { SearchService } from "../features/search/search.service.js";
@@ -200,6 +202,13 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
     discovery: new DiscoveryService(
       new DiscoveryRetrieval(database.dataSource),
       moderationRepository,
+    ),
+    notifications: new NotificationService(
+      database.dataSource,
+      new NotificationRepository(database.dataSource),
+      moments,
+      accounts,
+      new FollowRepository(database.dataSource),
     ),
     follows: new FollowService(
       database.dataSource,

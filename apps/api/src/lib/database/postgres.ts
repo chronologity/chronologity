@@ -51,6 +51,12 @@ import {
   ModerationReportRow,
   ModerationStateRow,
 } from "../../features/moderation/moderation.model.js";
+import {
+  Notification,
+  NotificationActor,
+  NotificationPreference,
+  NotificationSourceEvent,
+} from "../../features/notifications/notification.model.js";
 import { SearchDocument } from "../../features/search/search.model.js";
 import { Upload } from "../../features/uploads/upload.model.js";
 import { Handle, Preferences, RestrictedData, User } from "../../features/users/user.model.js";
@@ -126,6 +132,10 @@ const entities = [
   AccuracyReportRow,
   ModerationAppeal,
   SearchDocument,
+  Notification,
+  NotificationActor,
+  NotificationSourceEvent,
+  NotificationPreference,
   OutboxMessage,
   ProjectionProcessedEvent,
   SchemaMigration,

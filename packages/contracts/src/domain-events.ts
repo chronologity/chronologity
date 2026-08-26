@@ -251,6 +251,16 @@ export const moderationStateChangedPayloadSchema = z.object({
   subjectType: moderationSubjectTypeSchema,
   subjectId: identifierSchema,
   state: moderationStateSchema,
+  /**
+   * Whose content it was.
+   *
+   * Carried because the person affected has to be told, and a consumer should
+   * not have to walk four content tables to discover who that is. Deliberately
+   * not the moderator: reviewer identity is kept out of what the affected
+   * person sees, so a payload that carried it would put it within reach of
+   * anything that subscribes.
+   */
+  affectedUserId: identifierSchema.nullable(),
   changedAt: timestampSchema,
 });
 
@@ -261,4 +271,163 @@ export type ModerationStateChangedPayload = z.infer<
 export const moderationStateChangedEventSchema = envelopeOf(
   "ModerationStateChanged",
   moderationStateChangedPayloadSchema,
+);
+
+/** The integration boundary reaction events are published to. */
+export const REACTIONS_BOUNDARY = "domain-reactions";
+
+/** The integration boundary comment events are published to. */
+export const COMMENTS_BOUNDARY = "domain-comments";
+
+/** The integration boundary social events are published to. */
+export const SOCIAL_BOUNDARY = "domain-social";
+
+/**
+ * Somebody responded to a Moment.
+ *
+ * Carries the kind, because a consumer deciding whether to interrupt somebody
+ * may care that a reaction was `saddened` rather than `amused`. It carries
+ * nothing about the Moment: what it says, where it happened, and who else has
+ * responded are all things a consumer reads for itself, from state that still
+ * knows who may see them.
+ */
+export const momentReactedPayloadSchema = z.object({
+  momentId: identifierSchema,
+  /** Whose Moment it is. The recipient of anything this prompts. */
+  authorUserId: identifierSchema,
+  /** Who responded. */
+  actorUserId: identifierSchema,
+  kind: z.string().min(1),
+  reactedAt: timestampSchema,
+});
+
+export type MomentReactedPayload = z.infer<typeof momentReactedPayloadSchema>;
+
+export const momentReactedEventSchema = envelopeOf("MomentReacted", momentReactedPayloadSchema);
+
+/** Somebody responded to a comment. */
+export const commentReactedPayloadSchema = z.object({
+  commentId: identifierSchema,
+  momentId: identifierSchema,
+  /** Whose comment it is. */
+  authorUserId: identifierSchema,
+  actorUserId: identifierSchema,
+  kind: z.string().min(1),
+  reactedAt: timestampSchema,
+});
+
+export type CommentReactedPayload = z.infer<typeof commentReactedPayloadSchema>;
+
+export const commentReactedEventSchema = envelopeOf("CommentReacted", commentReactedPayloadSchema);
+
+/**
+ * Somebody said something about a Moment.
+ *
+ * No text. A comment is the most sensitive thing anybody writes here after a
+ * caption, and a payload carrying it would put it in a message log with its own
+ * retention, reachable by anything that subscribes.
+ */
+export const momentCommentedPayloadSchema = z.object({
+  commentId: identifierSchema,
+  momentId: identifierSchema,
+  /** Whose Moment it is. */
+  momentAuthorUserId: identifierSchema,
+  /** Who said it. */
+  actorUserId: identifierSchema,
+  commentedAt: timestampSchema,
+});
+
+export type MomentCommentedPayload = z.infer<typeof momentCommentedPayloadSchema>;
+
+export const momentCommentedEventSchema = envelopeOf(
+  "MomentCommented",
+  momentCommentedPayloadSchema,
+);
+
+/** Somebody answered a comment. */
+export const commentRepliedPayloadSchema = z.object({
+  commentId: identifierSchema,
+  momentId: identifierSchema,
+  /** The comment being answered. */
+  inReplyToCommentId: identifierSchema,
+  /** Whose comment was answered. */
+  inReplyToAuthorUserId: identifierSchema,
+  actorUserId: identifierSchema,
+  repliedAt: timestampSchema,
+});
+
+export type CommentRepliedPayload = z.infer<typeof commentRepliedPayloadSchema>;
+
+export const commentRepliedEventSchema = envelopeOf("CommentReplied", commentRepliedPayloadSchema);
+
+/**
+ * Somebody named another person in a comment.
+ *
+ * One event per person named, so a consumer never has to fan a single message
+ * out to several recipients and get the count wrong on a redelivery.
+ */
+export const commentMentionedPayloadSchema = z.object({
+  commentId: identifierSchema,
+  momentId: identifierSchema,
+  /** Who was named. */
+  mentionedUserId: identifierSchema,
+  actorUserId: identifierSchema,
+  mentionedAt: timestampSchema,
+});
+
+export type CommentMentionedPayload = z.infer<typeof commentMentionedPayloadSchema>;
+
+export const commentMentionedEventSchema = envelopeOf(
+  "CommentMentioned",
+  commentMentionedPayloadSchema,
+);
+
+/** Somebody started following an account. */
+export const userFollowedPayloadSchema = z.object({
+  /** Who is now followed. */
+  followedUserId: identifierSchema,
+  actorUserId: identifierSchema,
+  followedAt: timestampSchema,
+});
+
+export type UserFollowedPayload = z.infer<typeof userFollowedPayloadSchema>;
+
+export const userFollowedEventSchema = envelopeOf("UserFollowed", userFollowedPayloadSchema);
+
+/** Somebody asked to follow an account that approves its followers. */
+export const followRequestedPayloadSchema = z.object({
+  requestId: identifierSchema,
+  followedUserId: identifierSchema,
+  actorUserId: identifierSchema,
+  requestedAt: timestampSchema,
+});
+
+export type FollowRequestedPayload = z.infer<typeof followRequestedPayloadSchema>;
+
+export const followRequestedEventSchema = envelopeOf(
+  "FollowRequested",
+  followRequestedPayloadSchema,
+);
+
+/**
+ * A follow request was granted.
+ *
+ * The recipient is the person who asked, which is the one case in this file
+ * where the actor and the subject are the other way round from the events
+ * above: the account being followed is the one acting.
+ */
+export const followRequestAcceptedPayloadSchema = z.object({
+  requestId: identifierSchema,
+  /** Who asked, and who hears that they were accepted. */
+  requesterUserId: identifierSchema,
+  /** Who accepted. */
+  actorUserId: identifierSchema,
+  acceptedAt: timestampSchema,
+});
+
+export type FollowRequestAcceptedPayload = z.infer<typeof followRequestAcceptedPayloadSchema>;
+
+export const followRequestAcceptedEventSchema = envelopeOf(
+  "FollowRequestAccepted",
+  followRequestAcceptedPayloadSchema,
 );

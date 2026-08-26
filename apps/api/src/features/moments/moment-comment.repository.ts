@@ -400,6 +400,24 @@ export class MomentCommentRepository {
   }
 
   /**
+   * Who wrote one comment.
+   *
+   * @param tx - The caller's transaction, so this reads what the same
+   *   transaction has just written.
+   * @param commentId - Which comment.
+   * @returns Its author, or undefined when there is no such comment or it has
+   *   been withdrawn — a tombstone has nobody to answer.
+   */
+  async authorOf(tx: Transaction, commentId: string): Promise<string | undefined> {
+    const rows: { author_user_id: string }[] = await tx.query(
+      "SELECT author_user_id FROM moment_comments WHERE comment_id = $1 AND deleted_at IS NULL",
+      [commentId],
+    );
+
+    return rows[0]?.author_user_id;
+  }
+
+  /**
    * Change what a comment says.
    *
    * @param tx - The caller's transaction.

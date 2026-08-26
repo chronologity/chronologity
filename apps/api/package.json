@@ -19,6 +19,7 @@
     "spec:generate": "node dist/cli/generate-spec.js",
     "start": "node dist/main.js",
     "start:media": "node dist/workers/media/index.js",
+    "start:notification-generator": "node dist/workers/notification-generator/index.js",
     "start:outbox-publisher": "node dist/workers/outbox-publisher/index.js",
     "start:search-indexer": "node dist/workers/search-indexer/index.js",
     "start:significance": "node dist/workers/significance/index.js",

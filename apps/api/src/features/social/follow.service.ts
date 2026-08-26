@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { decodeCursor, encodeCursor } from "../../lib/pagination/cursor.js";
 import type {
   FollowList,
@@ -7,8 +8,11 @@ import type {
   FollowedEventList,
   FollowedLocationList,
 } from "@chronologity/contracts";
+import { SOCIAL_BOUNDARY } from "@chronologity/contracts";
 import type { DataSource } from "typeorm";
-import { withTransaction } from "../../lib/database/transaction.js";
+import { withTransaction, type Transaction } from "../../lib/database/transaction.js";
+import { enqueueOutboxMessage } from "../../lib/database/outbox.js";
+import { topicName } from "../../lib/messaging/topics.js";
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
 import type { LocationRepository } from "../locations/location.repository.js";
@@ -111,9 +115,14 @@ export class FollowService {
     }
 
     if (!(await this.follows.requiresApproval(followedUserId))) {
-      await withTransaction(this.dataSource, (tx) =>
-        this.follows.follow(tx, followerUserId, followedUserId, at),
-      );
+      await withTransaction(this.dataSource, async (tx) => {
+        await this.follows.follow(tx, followerUserId, followedUserId, at);
+        await this.announce(tx, "UserFollowed", followedUserId, {
+          followedUserId,
+          actorUserId: followerUserId,
+          followedAt: at.toISOString(),
+        }, followerUserId, at);
+      });
 
       return { outcome: "following", follow: { user: followed, followedAt: at.toISOString() } };
     }
@@ -144,9 +153,20 @@ export class FollowService {
       throw new NotFoundError("No such user");
     }
 
-    const opened = await withTransaction(this.dataSource, (tx) =>
-      this.follows.openRequest(tx, requesterUserId, requestedUserId, at),
-    );
+    const opened = await withTransaction(this.dataSource, async (tx) => {
+      const requestId = await this.follows.openRequest(tx, requesterUserId, requestedUserId, at);
+
+      if (requestId !== undefined) {
+        await this.announce(tx, "FollowRequested", requestedUserId, {
+          requestId,
+          followedUserId: requestedUserId,
+          actorUserId: requesterUserId,
+          requestedAt: at.toISOString(),
+        }, requesterUserId, at);
+      }
+
+      return requestId;
+    });
 
     if (opened !== undefined) {
       return { requestId: opened, requester, status: "pending", requestedAt: at.toISOString() };
@@ -164,6 +184,53 @@ export class FollowService {
       status: "pending",
       requestedAt: existing.requestedAt.toISOString(),
     };
+  }
+
+  /**
+   * Tell the rest of the system about a change in the social graph.
+   *
+   * Enqueued in the caller's transaction, so the relationship and the event
+   * commit together. Carries identifiers only: a name is a thing that changes,
+   * and copying one into a message log would leave a stale version of it
+   * somewhere with its own retention.
+   *
+   * @param tx - The caller's transaction.
+   * @param eventType - Which of the social events this is.
+   * @param subjectUserId - Who the change is about, which is what the message
+   *   is partitioned on so two changes concerning one person stay ordered.
+   * @param payload - What the event says.
+   * @param actorUserId - Who acted.
+   * @param at - When.
+   * @returns Nothing.
+   */
+  private async announce(
+    tx: Transaction,
+    eventType: string,
+    subjectUserId: string,
+    payload: Record<string, unknown>,
+    actorUserId: string,
+    at: Date,
+  ): Promise<void> {
+    const traceId = randomUUID();
+
+    await enqueueOutboxMessage(tx, {
+      topic: topicName(SOCIAL_BOUNDARY),
+      partitionKey: subjectUserId,
+      aggregateType: "user",
+      aggregateId: subjectUserId,
+      aggregateVersion: 0,
+      eventType,
+      eventVersion: 1,
+      payload,
+      metadata: {
+        traceId,
+        correlationId: traceId,
+        causationId: undefined,
+        actorUserId,
+        eventVersion: 1,
+        recordedAt: at.toISOString(),
+      },
+    });
   }
 
   /**
@@ -223,6 +290,16 @@ export class FollowService {
 
       if (decision === "accepted") {
         await this.follows.follow(tx, request.requesterUserId, request.requestedUserId, at);
+        // Only acceptance is announced. Declining deliberately produces
+        // nothing: telling somebody they were turned down is a notification
+        // nobody benefits from, and the silence is the same silence a request
+        // that is simply never answered produces.
+        await this.announce(tx, "FollowRequestAccepted", request.requesterUserId, {
+          requestId,
+          requesterUserId: request.requesterUserId,
+          actorUserId: request.requestedUserId,
+          acceptedAt: at.toISOString(),
+        }, request.requestedUserId, at);
       }
     });
 

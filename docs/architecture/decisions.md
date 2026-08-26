@@ -3821,3 +3821,47 @@ Explore orders by significance with per-author, per-place, and per-Event caps. N
 **A nested template literal inside a SQL string terminated the string.** Building the moderation state list inline with `` `'${state}'` `` inside the outer template ended it and turned the rest into arithmetic — the same trap as a backtick in a SQL comment in 5O-2, one level deeper. It is hoisted out now. Both times TypeScript caught it, which is the only reason either was cheap.
 
 **Two ordering tests were conditional and proved nothing.** Asserted against Explore over ten thousand shared Moments, "the more significant one comes first" was wrapped in a check that both appeared in the first fifty — which they usually did not. Scoping them to a freshly created Event nothing else belongs to made them deterministic. A test that passes by not looking is worse than an absent one.
+
+# ADR-121 — A Notification Stores Identifiers and Composes the Rest at Read Time
+
+**Status:** Accepted
+
+## Decision
+
+A notification record holds a recipient, a type, a category, a source, the Moment that governs access to it, and read state. It holds no name, caption, comment, excerpt, or thumbnail, and no column exists that could.
+
+The wording is composed when somebody reads it, from what they are authorised to see then.
+
+Unread activity of one kind about one thing collapses into a single entry, enforced by a partial unique index over unread rows. Reading it starts a new one.
+
+Deduplication lives on its own table, keyed by source event and recipient.
+
+Reactions, comments, replies, mentions, follows, follow requests, and acceptances publish Integration Events — none of which carry text.
+
+Social, media, and moderation notify. Moderation cannot be switched off.
+
+## Rationale
+
+**A notification travels further than the thing it describes.** `notifications.md:238` lists what one can disclose even when the underlying resource is protected — names, captions, thumbnails, comment text, Event names, Locations, relationships, and "the existence of restricted activity itself". `notifications.md:387` asks for a hybrid of stable semantics, a minimal snapshot, and current authorization; this resolves it towards the safe end by observing that the *type* is the stable part and the type is not sensitive.
+
+Two properties follow for free. A privacy change needs no propagation into notification records, because nothing sensitive was copied out — one fewer thing for 5R to erase and one fewer place for an erasure to be missed. And a notification about something the reader can no longer see does not render, so it is absent from the list and the count rather than blanked.
+
+**The unread count is computed over what renders, not with `COUNT(*)`.** A count that outran the list would say something existed that the list had already declined to show — the same disclosure the composition model exists to prevent.
+
+**Eligibility is asked before preferences, and the code is arranged so it cannot be skipped.** `notifications.md:200` says plainly that preferences cannot grant access somebody lacks. Asked in the other order, an enabled preference reads like a reason to notify and the eligibility check becomes something a later branch can bypass.
+
+**Aggregation is "until read", enforced by the database.** `notifications.md:640` leaves the window to implementation. Read state already expresses "since I last looked", so no timer, sweep, or window arithmetic is needed — and a partial unique index means two messages about one Moment handled at the same instant by two consumer instances still produce one entry. The same construction keeps one appeal open per action in 5N.
+
+**Moderation cannot be silenced.** 5N established that somebody must be told what was done to their content, because an appeal against a decision they were never told about is not a right. `notifications.md:495` asks that required notifications be narrowly defined; exactly one category qualifies, and a unit test asserts that it is exactly one.
+
+## Consequences
+
+**Deduplication could not live on the actor row, and the moderation case is what showed it.** A moderation notification has no actor — the affected person is told what happened to their content and deliberately never which moderator decided it, which is 5N's rule about reviewer identity. Keying deduplication on the actor would have meant inventing an actor for those or leaving them undeduplicated. It has its own table now, keyed by source event and recipient, which also handles one message legitimately notifying several people.
+
+**The source of a notification is not always what governs access to it, and a test found the leak.** A mention points at a *comment*; what decides whether that comment may be seen is the *Moment* it sits under. The first implementation checked only Moment-sourced notifications, so a mention survived its Moment becoming private — visible in the list and counted in the badge. Notifications now carry the governing Moment as an identifier, which costs nothing this design objects to.
+
+**Actors are selected by walking the whole list, not the first two.** Taking two and then filtering let a suspended or blocked person occupy a slot, so "three people reacted" could name nobody when it could have named somebody.
+
+**Somebody blocked or suspended after the fact is counted, never named.** This needs no reindexing or cleanup, because naming happens at read time — the same property that makes privacy changes free here.
+
+**The migration had to be reset locally when its shape changed.** The runner keys applied migrations on the full filename, and an edited-but-uncommitted migration will not re-run. Editing it was correct — it is not deployed — but the local database had to be dropped back for the change to take effect, and the version key is the filename rather than the timestamp.

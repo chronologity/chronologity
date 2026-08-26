@@ -6,8 +6,11 @@ import type {
   ReactionKind,
   SetCommentPolicyRequest,
 } from "@chronologity/contracts";
+import { COMMENTS_BOUNDARY } from "@chronologity/contracts";
 import type { DataSource } from "typeorm";
-import { withTransaction } from "../../lib/database/transaction.js";
+import { withTransaction, type Transaction } from "../../lib/database/transaction.js";
+import { enqueueOutboxMessage } from "../../lib/database/outbox.js";
+import { topicName } from "../../lib/messaging/topics.js";
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
 import { decodeCursor, encodeCursor } from "../../lib/pagination/cursor.js";
@@ -120,6 +123,15 @@ export class MomentCommentService {
 
       if (added) {
         await this.comments.addMentions(tx, commentId, mentioned, at);
+        await this.announce(tx, {
+          commentId,
+          momentId,
+          momentAuthorUserId: moment.authorUserId,
+          actorUserId: viewerUserId,
+          inReplyToCommentId,
+          mentioned,
+          at,
+        });
       }
 
       return added;
@@ -132,6 +144,106 @@ export class MomentCommentService {
     }
 
     return this.read(commentId, viewerUserId);
+  }
+
+  /**
+   * Tell the rest of the system somebody said something.
+   *
+   * Three kinds of message, because three different people may need to hear
+   * about one comment and each of them for a different reason: the Moment's
+   * author that it was discussed, whoever was answered that they were answered,
+   * and each person named that they were named.
+   *
+   * One message per person named rather than one carrying a list. A consumer
+   * fanning a single message out to several recipients has to get the count
+   * right on every redelivery, and this way the broker's own deduplication and
+   * the consumer's agree by construction.
+   *
+   * **No text.** A comment is the most sensitive thing anybody writes here
+   * after a caption, and a payload carrying it would put it in a message log
+   * with its own retention, reachable by anything that subscribes.
+   *
+   * @param tx - The caller's transaction.
+   * @param comment - What was said, by whom, about what, and to whom.
+   * @returns Nothing.
+   */
+  private async announce(
+    tx: Transaction,
+    comment: {
+      commentId: string;
+      momentId: string;
+      momentAuthorUserId: string;
+      actorUserId: string;
+      inReplyToCommentId: string | null;
+      mentioned: readonly string[];
+      at: Date;
+    },
+  ): Promise<void> {
+    const traceId = randomUUID();
+    const metadata = {
+      traceId,
+      correlationId: traceId,
+      causationId: undefined,
+      actorUserId: comment.actorUserId,
+      eventVersion: 1,
+      recordedAt: comment.at.toISOString(),
+    };
+    const envelope = {
+      topic: topicName(COMMENTS_BOUNDARY),
+      // Ordered per Moment, so a comment and the reply to it cannot be handled
+      // out of sequence.
+      partitionKey: comment.momentId,
+      aggregateType: "comment",
+      aggregateId: comment.commentId,
+      aggregateVersion: 0,
+      eventVersion: 1,
+      metadata,
+    } as const;
+
+    await enqueueOutboxMessage(tx, {
+      ...envelope,
+      eventType: "MomentCommented",
+      payload: {
+        commentId: comment.commentId,
+        momentId: comment.momentId,
+        momentAuthorUserId: comment.momentAuthorUserId,
+        actorUserId: comment.actorUserId,
+        commentedAt: comment.at.toISOString(),
+      },
+    });
+
+    if (comment.inReplyToCommentId !== null) {
+      const answered = await this.comments.authorOf(tx, comment.inReplyToCommentId);
+
+      if (answered !== undefined) {
+        await enqueueOutboxMessage(tx, {
+          ...envelope,
+          eventType: "CommentReplied",
+          payload: {
+            commentId: comment.commentId,
+            momentId: comment.momentId,
+            inReplyToCommentId: comment.inReplyToCommentId,
+            inReplyToAuthorUserId: answered,
+            actorUserId: comment.actorUserId,
+            repliedAt: comment.at.toISOString(),
+          },
+        });
+      }
+    }
+
+    for (const mentionedUserId of comment.mentioned) {
+      await enqueueOutboxMessage(tx, {
+        ...envelope,
+        eventType: "CommentMentioned",
+        payload: {
+          commentId: comment.commentId,
+          momentId: comment.momentId,
+          mentionedUserId,
+          actorUserId: comment.actorUserId,
+          mentionedAt: comment.at.toISOString(),
+        },
+      });
+    }
   }
 
   /**

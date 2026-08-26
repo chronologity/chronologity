@@ -1,10 +1,14 @@
+import { randomUUID } from "node:crypto";
 import type {
   ReactionKind,
   ReactionSummary,
   SetReactionsEnabledRequest,
 } from "@chronologity/contracts";
+import { REACTIONS_BOUNDARY } from "@chronologity/contracts";
 import type { DataSource } from "typeorm";
-import { withTransaction } from "../../lib/database/transaction.js";
+import { withTransaction, type Transaction } from "../../lib/database/transaction.js";
+import { enqueueOutboxMessage } from "../../lib/database/outbox.js";
+import { topicName } from "../../lib/messaging/topics.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
 import type { FollowRepository } from "../social/follow.repository.js";
 import {
@@ -79,9 +83,14 @@ export class MomentReactionService {
       throw new ValidationError(describeReactionRefusal(refusal), { field: "kind" });
     }
 
-    await withTransaction(this.dataSource, (tx) =>
-      this.reactions.set(tx, momentId, viewerUserId, kind, this.clock()),
-    );
+    await withTransaction(this.dataSource, async (tx) => {
+      await this.reactions.set(tx, momentId, viewerUserId, kind, this.clock());
+      // Announced whether or not it replaced an earlier reaction. Changing your
+      // mind from `amused` to `saddened` is a different thing to have said, and
+      // the author is no more notified twice for it than for anything else —
+      // the unread entry they already have absorbs it.
+      await this.announce(tx, momentId, moment.authorUserId, viewerUserId, kind);
+    });
 
     return this.reactions.summarise(momentId, viewerUserId, enabled);
   }
@@ -153,6 +162,54 @@ export class MomentReactionService {
 
     // Nothing was deleted, so re-enabling brings the same counts back.
     return this.reactions.summarise(momentId, authorUserId, request.enabled);
+  }
+
+  /**
+   * Tell the rest of the system somebody responded to a Moment.
+   *
+   * Enqueued in the caller's transaction, so the reaction and the event commit
+   * together. Carries the kind, because whether to interrupt somebody may
+   * depend on it, and carries nothing about the Moment: what it says and who
+   * else has responded are read by whoever needs them, from state that still
+   * knows who may see them.
+   *
+   * @param tx - The caller's transaction.
+   * @param momentId - What was responded to.
+   * @param authorUserId - Whose it is.
+   * @param actorUserId - Who responded.
+   * @param kind - How.
+   * @returns Nothing.
+   */
+  private async announce(
+    tx: Transaction,
+    momentId: string,
+    authorUserId: string,
+    actorUserId: string,
+    kind: string,
+  ): Promise<void> {
+    const at = this.clock();
+    const traceId = randomUUID();
+
+    await enqueueOutboxMessage(tx, {
+      topic: topicName(REACTIONS_BOUNDARY),
+      // Ordered per Moment, so two responses to one thing are handled in the
+      // order they were given.
+      partitionKey: momentId,
+      aggregateType: "moment",
+      aggregateId: momentId,
+      aggregateVersion: 0,
+      eventType: "MomentReacted",
+      eventVersion: 1,
+      payload: { momentId, authorUserId, actorUserId, kind, reactedAt: at.toISOString() },
+      metadata: {
+        traceId,
+        correlationId: traceId,
+        causationId: undefined,
+        actorUserId,
+        eventVersion: 1,
+        recordedAt: at.toISOString(),
+      },
+    });
   }
 
   /**
