@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { CreateRealWorldEventRequest, RealWorldEvent } from "@chronologity/contracts";
+import { REAL_WORLD_EVENTS_BOUNDARY } from "@chronologity/contracts";
 import type { DataSource } from "typeorm";
 import { withTransaction } from "../../lib/database/transaction.js";
+import { enqueueOutboxMessage } from "../../lib/database/outbox.js";
+import { topicName } from "../../lib/messaging/topics.js";
+import type { RequestContext } from "../../types/request-context.js";
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
 import type { LocationRepository } from "../locations/location.repository.js";
@@ -56,6 +60,8 @@ export class RealWorldEventService {
    *   over anyone else's history of it.
    * @param request - The name, other names it goes by, when it happened, and
    *   where.
+   * @param context - The request that caused this, so the hop into
+   *   asynchronous indexing stays joined to it. Absent where no request did.
    * @returns The Event as recorded.
    * @throws {ValidationError} If the occurrence ends before it starts, if an
    *   instant spans two moments, or if a place named does not exist.
@@ -63,6 +69,7 @@ export class RealWorldEventService {
   async record(
     createdByUserId: string,
     request: CreateRealWorldEventRequest,
+    context?: RequestContext,
   ): Promise<RealWorldEvent> {
     const rejection = checkOccurrence(request.occurrence);
 
@@ -84,8 +91,8 @@ export class RealWorldEventService {
     const realWorldEventId = randomUUID();
     const name = request.name.trim();
 
-    await withTransaction(this.dataSource, (tx) =>
-      this.events.insert(tx, {
+    await withTransaction(this.dataSource, async (tx) => {
+      await this.events.insert(tx, {
         realWorldEventId,
         createdByUserId,
         name,
@@ -93,8 +100,31 @@ export class RealWorldEventService {
         occurrence: request.occurrence,
         locationIds,
         createdAt: this.clock(),
-      }),
-    );
+      });
+
+      // Shared history, so the payload names nobody: an Event has no author
+      // whose privacy or suspension could decide whether it is findable.
+      const traceId = context?.traceId ?? randomUUID();
+
+      await enqueueOutboxMessage(tx, {
+        topic: topicName(REAL_WORLD_EVENTS_BOUNDARY),
+        partitionKey: realWorldEventId,
+        aggregateType: "real_world_event",
+        aggregateId: realWorldEventId,
+        aggregateVersion: 0,
+        eventType: "RealWorldEventRecorded",
+        eventVersion: 1,
+        payload: { realWorldEventId, recordedAt: this.clock().toISOString() },
+        metadata: {
+          traceId,
+          correlationId: traceId,
+          causationId: undefined,
+          actorUserId: createdByUserId,
+          eventVersion: 1,
+          recordedAt: (context?.receivedAt ?? this.clock()).toISOString(),
+        },
+      });
+    });
 
     const recorded = await this.events.findById(realWorldEventId);
 

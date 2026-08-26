@@ -51,6 +51,7 @@ import {
   ModerationReportRow,
   ModerationStateRow,
 } from "../../features/moderation/moderation.model.js";
+import { SearchDocument } from "../../features/search/search.model.js";
 import { Upload } from "../../features/uploads/upload.model.js";
 import { Handle, Preferences, RestrictedData, User } from "../../features/users/user.model.js";
 import type { HealthCheckable } from "../health.js";
@@ -124,6 +125,7 @@ const entities = [
   ModerationReportRow,
   AccuracyReportRow,
   ModerationAppeal,
+  SearchDocument,
   OutboxMessage,
   ProjectionProcessedEvent,
   SchemaMigration,

@@ -8,8 +8,12 @@ import type {
   Occurrence,
   SetMomentVisibilityRequest,
 } from "@chronologity/contracts";
+import { MOMENTS_BOUNDARY } from "@chronologity/contracts";
 import type { DataSource } from "typeorm";
-import { withTransaction } from "../../lib/database/transaction.js";
+import { withTransaction, type Transaction } from "../../lib/database/transaction.js";
+import { enqueueOutboxMessage } from "../../lib/database/outbox.js";
+import { topicName } from "../../lib/messaging/topics.js";
+import type { RequestContext } from "../../types/request-context.js";
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
 import type { LocationRepository } from "../locations/location.repository.js";
@@ -94,12 +98,18 @@ export class MomentService {
    * @param authorUserId - Who is recording it.
    * @param request - The caption, when it happened, how far from UTC they were,
    *   and the media in the order it should be shown.
+   * @param context - The request that caused this, so the hop into
+   *   asynchronous indexing stays joined to it. Absent where no request did.
    * @returns The Moment as recorded.
    * @throws {ValidationError} If the occurrence is incoherent, if there is no
    *   media or the same file appears twice, or if any file is missing, belongs
    *   to somebody else, or has not finished being checked.
    */
-  async record(authorUserId: string, request: CreateMomentRequest): Promise<Moment> {
+  async record(
+    authorUserId: string,
+    request: CreateMomentRequest,
+    context?: RequestContext,
+  ): Promise<Moment> {
     const occurrenceRejection = checkOccurrence(request.occurrence);
 
     if (occurrenceRejection !== undefined) {
@@ -119,8 +129,8 @@ export class MomentService {
 
     const momentId = randomUUID();
 
-    await withTransaction(this.dataSource, (tx) =>
-      this.moments.insert(tx, {
+    await withTransaction(this.dataSource, async (tx) => {
+      await this.moments.insert(tx, {
         momentId,
         authorUserId,
         caption: request.caption.trim(),
@@ -130,8 +140,10 @@ export class MomentService {
         visibility: request.visibility,
         locationDisclosure: request.locationDisclosure,
         createdAt: this.clock(),
-      }),
-    );
+      });
+      await this.announce(tx, "MomentRecorded", momentId, authorUserId,
+        { recordedAt: this.clock().toISOString() }, context);
+    });
 
     await this.associate(momentId, request.locationId, request.realWorldEventIds);
 
@@ -252,6 +264,8 @@ export class MomentService {
    * @param momentId - Which Moment.
    * @param viewerUserId - Who is asking. Only its author may.
    * @param locationId - Which place.
+   * @param context - The request that caused this, so the hop into
+   *   asynchronous indexing stays joined to it. Absent where no request did.
    * @returns The Moment as it now stands.
    * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
    * @throws {ValidationError} If there is no such place.
@@ -260,13 +274,16 @@ export class MomentService {
     momentId: string,
     viewerUserId: string,
     locationId: string,
+    context?: RequestContext,
   ): Promise<Moment> {
     await this.getForAuthor(momentId, viewerUserId);
     await this.checkContextExists(locationId, undefined);
 
-    await withTransaction(this.dataSource, (tx) =>
-      this.moments.setLocation(tx, momentId, locationId, this.clock()),
-    );
+    await withTransaction(this.dataSource, async (tx) => {
+      await this.moments.setLocation(tx, momentId, locationId, this.clock());
+      await this.announce(tx, "MomentRevised", momentId, viewerUserId,
+        { kind: "location", revisedAt: this.clock().toISOString() }, context);
+    });
 
     return this.getForAuthor(momentId, viewerUserId);
   }
@@ -276,14 +293,24 @@ export class MomentService {
    *
    * @param momentId - Which Moment.
    * @param viewerUserId - Who is asking. Only its author may.
+   * @param context - The request that caused this, so the hop into
+   *   asynchronous indexing stays joined to it. Absent where no request did.
    * @returns The Moment as it now stands. Removing a place a Moment never had
    *   is not an error: the caller asked for a state that already holds.
    * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
    */
-  async clearLocation(momentId: string, viewerUserId: string): Promise<Moment> {
+  async clearLocation(
+    momentId: string,
+    viewerUserId: string,
+    context?: RequestContext,
+  ): Promise<Moment> {
     await this.getForAuthor(momentId, viewerUserId);
 
-    await withTransaction(this.dataSource, (tx) => this.moments.clearLocation(tx, momentId));
+    await withTransaction(this.dataSource, async (tx) => {
+      await this.moments.clearLocation(tx, momentId);
+      await this.announce(tx, "MomentRevised", momentId, viewerUserId,
+        { kind: "location", revisedAt: this.clock().toISOString() }, context);
+    });
 
     return this.getForAuthor(momentId, viewerUserId);
   }
@@ -294,6 +321,8 @@ export class MomentService {
    * @param momentId - Which Moment.
    * @param viewerUserId - Who is asking. Only its author may.
    * @param realWorldEventId - Which occurrence.
+   * @param context - The request that caused this, so the hop into
+   *   asynchronous indexing stays joined to it. Absent where no request did.
    * @returns The Moment as it now stands. Saying it twice is the same claim
    *   made twice, and leaves one association.
    * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
@@ -303,13 +332,16 @@ export class MomentService {
     momentId: string,
     viewerUserId: string,
     realWorldEventId: string,
+    context?: RequestContext,
   ): Promise<Moment> {
     await this.getForAuthor(momentId, viewerUserId);
     await this.checkContextExists(undefined, [realWorldEventId]);
 
-    await withTransaction(this.dataSource, (tx) =>
-      this.moments.addRealWorldEvent(tx, momentId, realWorldEventId, this.clock()),
-    );
+    await withTransaction(this.dataSource, async (tx) => {
+      await this.moments.addRealWorldEvent(tx, momentId, realWorldEventId, this.clock());
+      await this.announce(tx, "MomentRevised", momentId, viewerUserId,
+        { kind: "real_world_events", revisedAt: this.clock().toISOString() }, context);
+    });
 
     return this.getForAuthor(momentId, viewerUserId);
   }
@@ -320,6 +352,8 @@ export class MomentService {
    * @param momentId - Which Moment.
    * @param viewerUserId - Who is asking. Only its author may.
    * @param realWorldEventId - Which occurrence.
+   * @param context - The request that caused this, so the hop into
+   *   asynchronous indexing stays joined to it. Absent where no request did.
    * @returns The Moment as it now stands.
    * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
    */
@@ -327,12 +361,15 @@ export class MomentService {
     momentId: string,
     viewerUserId: string,
     realWorldEventId: string,
+    context?: RequestContext,
   ): Promise<Moment> {
     await this.getForAuthor(momentId, viewerUserId);
 
-    await withTransaction(this.dataSource, (tx) =>
-      this.moments.removeRealWorldEvent(tx, momentId, realWorldEventId),
-    );
+    await withTransaction(this.dataSource, async (tx) => {
+      await this.moments.removeRealWorldEvent(tx, momentId, realWorldEventId);
+      await this.announce(tx, "MomentRevised", momentId, viewerUserId,
+        { kind: "real_world_events", revisedAt: this.clock().toISOString() }, context);
+    });
 
     return this.getForAuthor(momentId, viewerUserId);
   }
@@ -343,12 +380,19 @@ export class MomentService {
    * @param momentId - Which Moment.
    * @param viewerUserId - Who is asking. Only its author may.
    * @param caption - The corrected words.
+   * @param context - The request that caused this, so the hop into
+   *   asynchronous indexing stays joined to it. Absent where no request did.
    * @returns The Moment as it now stands. Its place in history is untouched:
    *   `moments.md:313` requires that editing descriptive text not move a Moment
    *   through chronological navigation.
    * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
    */
-  async updateCaption(momentId: string, viewerUserId: string, caption: string): Promise<Moment> {
+  async updateCaption(
+    momentId: string,
+    viewerUserId: string,
+    caption: string,
+    context?: RequestContext,
+  ): Promise<Moment> {
     const before = await this.getForAuthor(momentId, viewerUserId);
     const at = this.clock();
 
@@ -361,6 +405,8 @@ export class MomentService {
         previous: { caption: before.caption },
         at,
       });
+      await this.announce(tx, "MomentRevised", momentId, viewerUserId,
+        { kind: "caption", revisedAt: at.toISOString() }, context);
     });
 
     return this.getForAuthor(momentId, viewerUserId);
@@ -378,6 +424,8 @@ export class MomentService {
    * @param viewerUserId - Who is asking. Only its author may.
    * @param occurrence - The corrected interval and precision.
    * @param offsetMinutes - The corrected offset from UTC.
+   * @param context - The request that caused this, so the hop into
+   *   asynchronous indexing stays joined to it. Absent where no request did.
    * @returns The Moment as it now stands, in its corrected position.
    * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
    * @throws {ValidationError} If the corrected occurrence is incoherent.
@@ -387,6 +435,7 @@ export class MomentService {
     viewerUserId: string,
     occurrence: Occurrence,
     offsetMinutes: number,
+    context?: RequestContext,
   ): Promise<Moment> {
     const before = await this.getForAuthor(momentId, viewerUserId);
     const rejection = checkOccurrence(occurrence);
@@ -411,6 +460,8 @@ export class MomentService {
         },
         at,
       });
+      await this.announce(tx, "MomentRevised", momentId, viewerUserId,
+        { kind: "occurrence", revisedAt: at.toISOString() }, context);
     });
 
     return this.getForAuthor(momentId, viewerUserId);
@@ -422,6 +473,8 @@ export class MomentService {
    * @param momentId - Which Moment.
    * @param viewerUserId - Who is asking. Only its author may.
    * @param uploadIds - The media to add, appended in the order given.
+   * @param context - The request that caused this, so the hop into
+   *   asynchronous indexing stays joined to it. Absent where no request did.
    * @returns The Moment as it now stands. Its occurrence is untouched: adding
    *   media "should not automatically create a new Moment or change the
    *   existing Moment's chronological position" (`moments.md:415`).
@@ -433,6 +486,7 @@ export class MomentService {
     momentId: string,
     viewerUserId: string,
     uploadIds: readonly string[],
+    context?: RequestContext,
   ): Promise<Moment> {
     await this.getForAuthor(momentId, viewerUserId);
 
@@ -462,6 +516,8 @@ export class MomentService {
         previous: { uploadIds: present },
         at,
       });
+      await this.announce(tx, "MomentRevised", momentId, viewerUserId,
+        { kind: "media", revisedAt: at.toISOString() }, context);
     });
 
     return this.getForAuthor(momentId, viewerUserId);
@@ -473,6 +529,8 @@ export class MomentService {
    * @param momentId - Which Moment.
    * @param viewerUserId - Who is asking. Only its author may.
    * @param uploadId - Which medium.
+   * @param context - The request that caused this, so the hop into
+   *   asynchronous indexing stays joined to it. Absent where no request did.
    * @returns The Moment as it now stands, its remaining media renumbered so the
    *   order stays dense.
    * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
@@ -481,7 +539,12 @@ export class MomentService {
    *   (`moments.md:436`), and a Moment without media could not have been
    *   created.
    */
-  async removeMedium(momentId: string, viewerUserId: string, uploadId: string): Promise<Moment> {
+  async removeMedium(
+    momentId: string,
+    viewerUserId: string,
+    uploadId: string,
+    context?: RequestContext,
+  ): Promise<Moment> {
     await this.getForAuthor(momentId, viewerUserId);
 
     const present = await this.moments.findMediaOrder(momentId);
@@ -507,6 +570,8 @@ export class MomentService {
         previous: { uploadIds: present },
         at,
       });
+      await this.announce(tx, "MomentRevised", momentId, viewerUserId,
+        { kind: "media", revisedAt: at.toISOString() }, context);
     });
 
     return this.getForAuthor(momentId, viewerUserId);
@@ -518,6 +583,8 @@ export class MomentService {
    * @param momentId - Which Moment.
    * @param viewerUserId - Who is asking. Only its author may.
    * @param uploadIds - Every medium the Moment has, in the order asked for.
+   * @param context - The request that caused this, so the hop into
+   *   asynchronous indexing stays joined to it. Absent where no request did.
    * @returns The Moment as it now stands. Presentation only: reordering never
    *   moves a Moment through chronology (`moments.md:157`).
    * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
@@ -529,6 +596,7 @@ export class MomentService {
     momentId: string,
     viewerUserId: string,
     uploadIds: readonly string[],
+    context?: RequestContext,
   ): Promise<Moment> {
     await this.getForAuthor(momentId, viewerUserId);
 
@@ -550,6 +618,8 @@ export class MomentService {
         previous: { uploadIds: present },
         at,
       });
+      await this.announce(tx, "MomentRevised", momentId, viewerUserId,
+        { kind: "media", revisedAt: at.toISOString() }, context);
     });
 
     return this.getForAuthor(momentId, viewerUserId);
@@ -565,10 +635,12 @@ export class MomentService {
    *
    * @param momentId - Which Moment.
    * @param viewerUserId - Who is asking. Only its author may.
+   * @param context - The request that caused this, so the hop into
+   *   asynchronous indexing stays joined to it. Absent where no request did.
    * @returns Nothing.
    * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
    */
-  async delete(momentId: string, viewerUserId: string): Promise<void> {
+  async delete(momentId: string, viewerUserId: string, context?: RequestContext): Promise<void> {
     await this.getForAuthor(momentId, viewerUserId);
 
     const at = this.clock();
@@ -582,6 +654,8 @@ export class MomentService {
         previous: {},
         at,
       });
+      await this.announce(tx, "MomentRemoved", momentId, viewerUserId,
+        { removedAt: at.toISOString() }, context);
     });
   }
 
@@ -698,6 +772,65 @@ export class MomentService {
   }
 
   /**
+   * Tell the rest of the system that a Moment changed.
+   *
+   * Enqueued in the caller's transaction, so the event and the change it
+   * describes commit together or not at all. Nothing is published
+   * automatically: every call site constructs its own, which is what keeps the
+   * external contract a deliberate decision rather than a mirror of internal
+   * history.
+   *
+   * The payload names the Moment and nothing about it. A consumer that needs
+   * the caption reads authoritative state, which is what lets a message
+   * replayed long afterwards produce a current answer instead of resurrecting a
+   * stale one.
+   *
+   * @param tx - The caller's transaction.
+   * @param eventType - Which of the Moment events this is.
+   * @param momentId - Which Moment.
+   * @param authorUserId - Whose it is, carried so a consumer knows whom this
+   *   concerns without a read.
+   * @param extra - Anything the specific event adds beyond the two identifiers.
+   * @param context - The request that caused it, so the hop into asynchronous
+   *   processing stays joined to it. Absent where no request did — a rebuild,
+   *   or a test driving the service directly — and a trace is minted so the
+   *   message is still followable on its own.
+   * @returns Nothing.
+   */
+  private async announce(
+    tx: Transaction,
+    eventType: string,
+    momentId: string,
+    authorUserId: string,
+    extra: Record<string, unknown>,
+    context: RequestContext | undefined,
+  ): Promise<void> {
+    const at = this.clock();
+    const traceId = context?.traceId ?? randomUUID();
+
+    await enqueueOutboxMessage(tx, {
+      topic: topicName(MOMENTS_BOUNDARY),
+      // Ordered per Moment: two notes about the same history must not be
+      // handled out of sequence.
+      partitionKey: momentId,
+      aggregateType: "moment",
+      aggregateId: momentId,
+      aggregateVersion: 0,
+      eventType,
+      eventVersion: 1,
+      payload: { momentId, authorUserId, ...extra },
+      metadata: {
+        traceId,
+        correlationId: traceId,
+        causationId: undefined,
+        actorUserId: authorUserId,
+        eventVersion: 1,
+        recordedAt: (context?.receivedAt ?? at).toISOString(),
+      },
+    });
+  }
+
+  /**
    * Whether a Block separates two people, whichever of them set it.
    *
    * @param oneUserId - One of them.
@@ -777,6 +910,8 @@ export class MomentService {
    * @param momentId - Which Moment.
    * @param authorUserId - Who is asking. Only its author may.
    * @param request - The visibility, and the audience when it is restricted.
+   * @param context - The request that caused this, so the hop into
+   *   asynchronous indexing stays joined to it. Absent where no request did.
    * @returns The Moment as it now stands.
    * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
    * @throws {ValidationError} If the audience names somebody who does not
@@ -786,6 +921,7 @@ export class MomentService {
     momentId: string,
     authorUserId: string,
     request: SetMomentVisibilityRequest,
+    context?: RequestContext,
   ): Promise<Moment> {
     await this.getForAuthor(momentId, authorUserId);
 
@@ -800,9 +936,11 @@ export class MomentService {
 
     await this.checkEveryoneExists(audience);
 
-    await withTransaction(this.dataSource, (tx) =>
-      this.moments.setVisibility(tx, momentId, request.visibility, audience, this.clock()),
-    );
+    await withTransaction(this.dataSource, async (tx) => {
+      await this.moments.setVisibility(tx, momentId, request.visibility, audience, this.clock());
+      await this.announce(tx, "MomentVisibilityChanged", momentId, authorUserId,
+        { visibility: request.visibility, changedAt: this.clock().toISOString() }, context);
+    });
 
     return this.getForAuthor(momentId, authorUserId);
   }
@@ -829,6 +967,8 @@ export class MomentService {
    * @param momentId - Which Moment.
    * @param authorUserId - Who is asking. Only its author may.
    * @param disclosure - How much to tell everybody else.
+   * @param context - The request that caused this, so the hop into
+   *   asynchronous indexing stays joined to it. Absent where no request did.
    * @returns The Moment as it now stands, which for its author always carries
    *   the exact place whatever they just chose for other people.
    * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
@@ -837,12 +977,15 @@ export class MomentService {
     momentId: string,
     authorUserId: string,
     disclosure: LocationDisclosure,
+    context?: RequestContext,
   ): Promise<Moment> {
     await this.getForAuthor(momentId, authorUserId);
 
-    await withTransaction(this.dataSource, (tx) =>
-      this.moments.setLocationDisclosure(tx, momentId, disclosure, this.clock()),
-    );
+    await withTransaction(this.dataSource, async (tx) => {
+      await this.moments.setLocationDisclosure(tx, momentId, disclosure, this.clock());
+      await this.announce(tx, "MomentRevised", momentId, authorUserId,
+        { kind: "location", revisedAt: this.clock().toISOString() }, context);
+    });
 
     return this.getForAuthor(momentId, authorUserId);
   }

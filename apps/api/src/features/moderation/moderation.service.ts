@@ -21,12 +21,15 @@ import type {
   SubmitReportRequest,
   Suspension,
 } from "@chronologity/contracts";
+import { MODERATION_BOUNDARY, USERS_BOUNDARY } from "@chronologity/contracts";
 import type { DataSource } from "typeorm";
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
 import { generateId } from "../../lib/ids/generate-id.js";
 import { decodeCursor, encodeCursor } from "../../lib/pagination/cursor.js";
-import { withTransaction } from "../../lib/database/transaction.js";
+import { withTransaction, type Transaction } from "../../lib/database/transaction.js";
+import { enqueueOutboxMessage } from "../../lib/database/outbox.js";
+import { topicName } from "../../lib/messaging/topics.js";
 import type {
   AccuracyReportRow,
   ModerationAppeal,
@@ -737,6 +740,22 @@ export class ModerationService {
       // fills with work already done and every reporter's status view sits at
       // "submitted" indefinitely.
       await this.moderation.resolveOpenReportsFor(tx, subjectType, subjectId, at);
+
+      // Derived state has to learn that eligibility changed. Search indexes
+      // moderation state, so a decision that never reached the index would
+      // leave something removed still findable.
+      await this.announceState(tx, subjectType, subjectId, request.state, actor.userId, at);
+
+      if (orphansMoment && owner.momentId !== undefined) {
+        await this.announceState(
+          tx,
+          "moment",
+          owner.momentId,
+          "temporarily_unavailable",
+          actor.userId,
+          at,
+        );
+      }
     });
 
     return {
@@ -817,6 +836,30 @@ export class ModerationService {
         outcome: "success",
         reason,
         occurredAt: at,
+      });
+
+      // On the accounts topic rather than the moderation one, because what
+      // changed is the account's status. A consumer watching accounts should
+      // not have to subscribe to moderation to learn that one was suspended.
+      const traceId = generateId();
+
+      await enqueueOutboxMessage(tx, {
+        topic: topicName(USERS_BOUNDARY),
+        partitionKey: userId,
+        aggregateType: "user",
+        aggregateId: userId,
+        aggregateVersion: 0,
+        eventType: "UserStatusChanged",
+        eventVersion: 1,
+        payload: { userId, status: to, changedAt: at.toISOString() },
+        metadata: {
+          traceId,
+          correlationId: traceId,
+          causationId: undefined,
+          actorUserId: actor.userId,
+          eventVersion: 1,
+          recordedAt: at.toISOString(),
+        },
       });
     });
 
@@ -930,9 +973,71 @@ export class ModerationService {
         reason: request.resolution,
         occurredAt: at,
       });
+
+      if (action.subjectType !== "user") {
+        await this.announceState(
+          tx,
+          action.subjectType,
+          action.subjectId,
+          "allowed",
+          actor.userId,
+          at,
+        );
+      }
     });
 
     return this.getAppeal(appealId);
+  }
+
+  /**
+   * Tell the rest of the system what was decided about a subject.
+   *
+   * Enqueued in the transaction that made the decision, so a state and the
+   * announcement of it commit together. Derived state indexes moderation
+   * state, and a decision that never arrived would leave something removed
+   * still findable.
+   *
+   * Carries no reason. A moderator's words are for the person affected and for
+   * the appeal, not for every consumer of a topic.
+   *
+   * @param tx - The caller's transaction.
+   * @param subjectType - What kind of thing.
+   * @param subjectId - Which one.
+   * @param state - What Chronologity has decided.
+   * @param actorUserId - Who decided.
+   * @param at - When.
+   * @returns Nothing.
+   */
+  private async announceState(
+    tx: Transaction,
+    subjectType: string,
+    subjectId: string,
+    state: string,
+    actorUserId: string,
+    at: Date,
+  ): Promise<void> {
+    const traceId = generateId();
+
+    await enqueueOutboxMessage(tx, {
+      topic: topicName(MODERATION_BOUNDARY),
+      // Ordered per subject: two decisions about one thing must not be handled
+      // out of sequence.
+      partitionKey: subjectId,
+      aggregateType: subjectType,
+      aggregateId: subjectId,
+      aggregateVersion: 0,
+      eventType: "ModerationStateChanged",
+      eventVersion: 1,
+      payload: { subjectType, subjectId, state, changedAt: at.toISOString() },
+      metadata: {
+        traceId,
+        correlationId: traceId,
+        causationId: undefined,
+        actorUserId,
+        eventVersion: 1,
+        recordedAt: at.toISOString(),
+      },
+    });
   }
 
   /**

@@ -85,7 +85,7 @@ export function momentRoutes(
         preHandler: requireUser,
       },
       async (request, reply) => {
-        const moment = await moments.record(request.user.userId, request.body);
+        const moment = await moments.record(request.user.userId, request.body, request.requestContext);
 
         return reply.status(201).send(moment);
       },
@@ -118,7 +118,12 @@ export function momentRoutes(
         preHandler: requireUser,
       },
       async (request) =>
-        moments.updateCaption(request.params.momentId, request.user.userId, request.body.caption),
+        moments.updateCaption(
+          request.params.momentId,
+          request.user.userId,
+          request.body.caption,
+          request.requestContext,
+        ),
     );
 
     // Its own endpoint rather than part of the patch above, because correcting
@@ -144,6 +149,7 @@ export function momentRoutes(
           request.user.userId,
           request.body.occurrence,
           request.body.occurrenceOffsetMinutes,
+          request.requestContext,
         ),
     );
 
@@ -159,7 +165,12 @@ export function momentRoutes(
         preHandler: requireUser,
       },
       async (request) =>
-        moments.addMedia(request.params.momentId, request.user.userId, request.body.uploadIds),
+        moments.addMedia(
+          request.params.momentId,
+          request.user.userId,
+          request.body.uploadIds,
+          request.requestContext,
+        ),
     );
 
     app.put(
@@ -176,7 +187,12 @@ export function momentRoutes(
         preHandler: requireUser,
       },
       async (request) =>
-        moments.reorderMedia(request.params.momentId, request.user.userId, request.body.uploadIds),
+        moments.reorderMedia(
+          request.params.momentId,
+          request.user.userId,
+          request.body.uploadIds,
+          request.requestContext,
+        ),
     );
 
     app.delete(
@@ -196,6 +212,7 @@ export function momentRoutes(
           request.params.momentId,
           request.user.userId,
           request.params.uploadId,
+          request.requestContext,
         ),
     );
 
@@ -210,7 +227,7 @@ export function momentRoutes(
         preHandler: requireUser,
       },
       async (request, reply) => {
-        await moments.delete(request.params.momentId, request.user.userId);
+        await moments.delete(request.params.momentId, request.user.userId, request.requestContext);
 
         return reply.status(204).send(null);
       },
@@ -238,6 +255,7 @@ export function momentRoutes(
           request.params.momentId,
           request.user.userId,
           request.body.locationId,
+          request.requestContext,
         ),
     );
 
@@ -253,7 +271,7 @@ export function momentRoutes(
         },
         preHandler: requireUser,
       },
-      async (request) => moments.clearLocation(request.params.momentId, request.user.userId),
+      async (request) => moments.clearLocation(request.params.momentId, request.user.userId, request.requestContext),
     );
 
     app.post(
@@ -274,6 +292,7 @@ export function momentRoutes(
           request.params.momentId,
           request.user.userId,
           request.body.realWorldEventId,
+          request.requestContext,
         ),
     );
 
@@ -295,6 +314,7 @@ export function momentRoutes(
           request.params.momentId,
           request.user.userId,
           request.params.realWorldEventId,
+          request.requestContext,
         ),
     );
 
@@ -329,7 +349,12 @@ export function momentRoutes(
         preHandler: requireUser,
       },
       async (request) =>
-        moments.setVisibility(request.params.momentId, request.user.userId, request.body),
+        moments.setVisibility(
+          request.params.momentId,
+          request.user.userId,
+          request.body,
+          request.requestContext,
+        ),
     );
 
     // Its own operation, and not folded into setting the place. Moving a Moment
@@ -352,6 +377,7 @@ export function momentRoutes(
           request.params.momentId,
           request.user.userId,
           request.body.disclosure,
+          request.requestContext,
         ),
     );
 

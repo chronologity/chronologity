@@ -583,6 +583,47 @@ These should be resolved before the Search subsystem hardens privacy, identity, 
 
 ---
 
+# Settled by Implementation
+
+These were open questions above. 5O-1 settled them, and they are decisions now
+rather than possibilities (ADR-117). The rest of the list stands.
+
+**Search documents are built from authoritative state, not from event
+payloads.** An event carries the entity and the nature of the change; the
+indexer reads the database for everything else. This is what makes a replayed
+message produce a current document rather than a stale one, and it keeps a
+schema change from becoming an event-version change.
+
+**There is no `timeline` document type.** The Document Model above lists one and
+`glossary.md:477` says a Timeline "is never stored, owned, or followed
+directly" — it has no identity to key a document on. Timeline Search is served
+by Event and Location documents plus the handoff into temporal position. The
+day-one types are `moment`, `user`, `event`, and `location`; Person has no table
+yet.
+
+**Coarse geography uses truncated geohash columns**, PostGIS not being
+installed. Three tiers, and a tier finer than the author's disclosure permits is
+never stored.
+
+**Index versions live side by side in one table**, keyed on `(index_version,
+entity_type, entity_id)`, rather than in a table per version.
+
+**A rebuild walks authoritative state rather than replaying the log.** Because
+documents are built by reading, the two produce the same result, and walking
+does not require the broker to have retained every message since the platform
+began.
+
+## Still open
+
+Everything else in the list above, and these in particular are now closer:
+
+- the acceptable indexing-lag budget, which is measured per message but has no
+  agreed threshold;
+- what an authorization-policy change requires, which is now concretely a
+  scoped rebuild but not yet a decided procedure;
+- whether Comments are indexed, which stayed unanswered because no comment
+  document type was needed to satisfy anything day-one.
+
 # Architectural Invariants
 
 1. Search indexes are derived, disposable, rebuildable state.

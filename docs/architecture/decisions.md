@@ -3643,3 +3643,51 @@ Nothing publishes an Integration Event.
 **A suspended account's reactions and comments stop counting.** Both are aggregated live rather than stored, so each is a clause in one query, and reinstatement restores the totals exactly. Hiding what somebody contributed while still tallying it would leave their reach intact — and significance reads reaction volume, so the account would go on amplifying content it can no longer see.
 
 **The public transparency dashboard is documentation, not an endpoint.** `moderation.md:927` asks Chronologity to explain its moderation principles publicly — what is prohibited, what restrictions exist, how reporting works, whether appeals exist. The same section says transparency does not require publishing abuse-detection thresholds or private enforcement data, and `moderation.md:941` warns that removal volume is not evidence of a good system. A metrics surface built now would publish exactly the numbers that mislead.
+
+# ADR-117 — Events Say What Changed; the Indexer Reads the Rest
+
+**Status:** Accepted
+
+## Decision
+
+Search documents are built by reading authoritative state. An Integration Event carries the entity and the nature of the change, never a snapshot of it.
+
+Eleven event types across five topics — the first domain events the platform publishes.
+
+Four document types: `moment`, `user`, `event`, `location`. No `timeline`.
+
+Index versions live side by side in one table, keyed on `(index_version, entity_type, entity_id)`.
+
+Searchability and visibility are separate columns. Searchability records what moderation permits; visibility, suspension, and audience are resolved against the Viewer at query time.
+
+The Search store is PostgreSQL with `tsvector`/GIN for relevance and `pg_trgm` for typo tolerance. Coarse geography uses truncated geohash columns.
+
+## Rationale
+
+**A payload that describes a Moment would be a second definition of one.** `search.md:567` leaves this open; the reading indexer wins on two counts. A message replayed long after the fact produces a *current* document rather than resurrecting a stale one — the property that makes replay safe rather than merely possible. And adding a searchable field becomes a change to one builder rather than a new version of every event that could affect it. The cost is one indexed read per message, against tables the write path just touched.
+
+**One document builder, two drivers.** The worker and the rebuild call the same function, which is what makes a rebuild worth trusting. A second implementation would only prove the two agreed on the day somebody last compared them — and a rebuild is used precisely when the incremental path is suspected.
+
+**Rebuilding walks the database, not the log.** `search.md:186` says versions are built by replay. Because documents are built from authoritative state, walking the tables produces exactly what replaying every message would, and does not require the broker to have retained messages since the platform started.
+
+**No `timeline` document type.** `search.md:114` lists one; `glossary.md:477` says a Timeline "is never stored, owned, or followed directly". A document needs a stable identity and a Timeline has none. What people search for is the Historical Context — an Event or a Location — which the glossary itself says an interface may present as a Timeline. The conflict was surfaced rather than resolved silently, and the glossary won because it describes the domain.
+
+**Real-world Events and Locations have no moderation state and no author.** `moderation.md` recognises four subject types — `moment`, `comment`, `user`, `media` — and neither is among them. Shared history has nobody to hold responsible, and removing the First World War from Search is not a decision this path should be able to make.
+
+**Geohash prefixes rather than PostGIS**, which is not installed. `search.md:96` offers either. Tiers rather than points because a Viewer entitled to know somebody was in a city is not thereby entitled to the doorway, and an index holding the doorway can leak it through a sufficiently narrow query however carefully the read path is written. A tier finer than the author's disclosure permits is null, not stored-and-filtered.
+
+## Consequences
+
+**Searchability and visibility had to be separated, and the first attempt got it wrong.** Folding a private Moment's visibility into its searchability meant nobody could search their own private history: the author was filtered out at index time, before anybody knew who was asking. `search.md:243` keeps them as two dimensions for exactly this reason. Suspension moved to query time for the same reason and is resolved through the indexed `author_user_id`.
+
+**"Only these" has to mean only these.** The scoped rebuild skipped its fast path for any entity type absent from the scope and fell through to a full walk — so a request to reindex one Moment quietly rebuilt all 28,400 accounts. The integration suite went from 235 seconds to 7 once it meant what it said. A partial-scope option whose unlisted case is "do everything" is a footgun with a plausible-looking call site.
+
+**A rebuild had to be batched before it was usable.** One transaction per entity across 42,000 entities is an operational tool nobody will wait for — the same defect the significance worker had in 5M, found the same way, by a test timing out. It is now one transaction per page of 500.
+
+**A safe default hid a wrong one.** `geohashTiers` was written against an invented vocabulary — `coarse` and `region` — where the contract says `neighbourhood` and `city`. Both unrecognised values fell through to the deny-by-default arm, so nothing leaked and nothing failed; a Moment disclosed at city level simply had no geographic index at all. Deny-by-default protects against the consequences of a mistake, not against the mistake.
+
+**The geohash encoder is pinned to an external reference vector**, not to whatever this implementation produces. `57.64911, 10.40744` encodes to `u4pruydqqvj` in every correct implementation. A test asserting the code's own output would only prove it has not changed.
+
+**Nothing authoritative depends on indexing.** A Moment is recorded whether or not it is searchable yet, and the suite asserts it by recording one with no broker reachable at all. The residual exposure is indexing lag: a restriction reaches Search only when its message arrives, which is why lag is logged per message rather than assumed away.
+
+**Strict cross-topic priority is not implemented and is not claimed.** `search.md:293` asks that restriction be processed ahead of ordinary updates; Kafka has no cross-topic priority. What holds is that events about one entity are ordered by partition key, and that because documents are built from authoritative state, whichever event arrives brings eligibility fully current.

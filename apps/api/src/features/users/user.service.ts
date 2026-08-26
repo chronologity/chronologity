@@ -6,8 +6,12 @@ import type {
   UpdatePreferencesRequest,
   UpdateProfileRequest,
 } from "@chronologity/contracts";
+import { USERS_BOUNDARY } from "@chronologity/contracts";
 import type { DataSource } from "typeorm";
-import { withTransaction } from "../../lib/database/transaction.js";
+import { withTransaction, type Transaction } from "../../lib/database/transaction.js";
+import { enqueueOutboxMessage } from "../../lib/database/outbox.js";
+import { topicName } from "../../lib/messaging/topics.js";
+import type { RequestContext } from "../../types/request-context.js";
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
 import { checkAge, describeAgeRejection } from "./user.age-policy.js";
@@ -84,6 +88,8 @@ export class UserService {
    *
    * @param identityId - The authenticated Identity.
    * @param request - The chosen handle, the profile, and the date of birth.
+   * @param context - The request that caused this, so the hop into
+   *   asynchronous indexing stays joined to it. Absent where no request did.
    * @returns The new User's identifier.
    * @throws {ValidationError} If the date of birth is not a real date or the
    *   person is below the minimum age, if the handle is malformed, reserved, or
@@ -91,7 +97,11 @@ export class UserService {
    *   "held" are reported identically, since which one it is maps out the
    *   reserved list, and an age refusal never states the threshold.
    */
-  async create(identityId: string, request: CreateUserRequest): Promise<string> {
+  async create(
+    identityId: string,
+    request: CreateUserRequest,
+    context?: RequestContext,
+  ): Promise<string> {
     const at = this.clock();
     const { handle, displayName, biography, dateOfBirth } = request;
 
@@ -148,6 +158,8 @@ export class UserService {
       if (!claim.ok) {
         throw new ValidationError("That handle is not available", { field: "handle" });
       }
+      await this.announce(tx, "UserCreated", userId,
+        { createdAt: new Date().toISOString() }, context);
     });
 
     return userId;
@@ -159,12 +171,18 @@ export class UserService {
    * @param userId - Whose profile.
    * @param request - The fields to change. A biography of null clears it;
    *   undefined leaves it alone.
+   * @param context - The request that caused this, so the hop into
+   *   asynchronous indexing stays joined to it. Absent where no request did.
    * @returns Nothing.
    * @throws {NotFoundError} If there is no such User.
    * @throws {ValidationError} If the account is deactivated, or the change
    *   would alter nothing.
    */
-  async updateProfile(userId: string, request: UpdateProfileRequest): Promise<void> {
+  async updateProfile(
+    userId: string,
+    request: UpdateProfileRequest,
+    context?: RequestContext,
+  ): Promise<void> {
     const state = await this.requireActive(userId);
     const changes = profileChanges(state, request);
 
@@ -172,7 +190,11 @@ export class UserService {
       throw new ValidationError("Nothing to update");
     }
 
-    await withTransaction(this.dataSource, (tx) => this.users.updateProfile(tx, userId, changes));
+    await withTransaction(this.dataSource, async (tx) => {
+      await this.users.updateProfile(tx, userId, changes);
+      await this.announce(tx, "UserProfileChanged", userId,
+        { changedAt: new Date().toISOString() }, context);
+    });
   }
 
   /**
@@ -189,12 +211,14 @@ export class UserService {
    *
    * @param userId - Whose handle.
    * @param handle - The new one, as chosen.
+   * @param context - The request that caused this, so the hop into
+   *   asynchronous indexing stays joined to it. Absent where no request did.
    * @returns Nothing.
    * @throws {NotFoundError} If there is no such User.
    * @throws {ValidationError} If the handle is malformed, unavailable, the one
    *   already held, or the account is deactivated.
    */
-  async updateHandle(userId: string, handle: string): Promise<void> {
+  async updateHandle(userId: string, handle: string, context?: RequestContext): Promise<void> {
     const at = this.clock();
     const check = checkHandle(handle);
 
@@ -232,6 +256,9 @@ export class UserService {
       }
 
       await this.users.updateHandle(tx, userId, handle.trim());
+      // A handle is how somebody is found. Renaming changes what they match.
+      await this.announce(tx, "UserProfileChanged", userId,
+        { changedAt: at.toISOString() }, context);
 
       return true;
     });
@@ -261,20 +288,34 @@ export class UserService {
    * Deactivate an account at its owner's request.
    *
    * @param userId - Whose account.
+   * @param context - The request that caused this, so the hop into
+   *   asynchronous indexing stays joined to it. Absent where no request did.
    * @returns Nothing. Revoking the sessions that were signed in to it is the
    *   caller's next step, and deliberately not this service's: sessions belong
    *   to authentication.
    * @throws {NotFoundError} If there is no such User.
    * @throws {ValidationError} If the account is already deactivated.
    */
-  async deactivate(userId: string): Promise<void> {
+  async deactivate(userId: string, context?: RequestContext): Promise<void> {
     if (!(await this.users.exists(userId))) {
       throw new NotFoundError("No such account");
     }
 
-    const moved = await withTransaction(this.dataSource, (tx) =>
-      this.users.transitionStatus(tx, userId, "deactivated", "active"),
-    );
+    const moved = await withTransaction(this.dataSource, async (tx) => {
+      const changed = await this.users.transitionStatus(
+        tx,
+        userId,
+        "deactivated",
+        "active",
+      );
+
+      if (changed) {
+        await this.announce(tx, "UserStatusChanged", userId,
+          { status: "deactivated", changedAt: new Date().toISOString() }, context);
+      }
+
+      return changed;
+    });
 
     if (!moved) {
       throw new ValidationError("This account is already deactivated");
@@ -285,22 +326,81 @@ export class UserService {
    * Bring a deactivated account back.
    *
    * @param userId - Whose account.
+   * @param context - The request that caused this, so the hop into
+   *   asynchronous indexing stays joined to it. Absent where no request did.
    * @returns Nothing.
    * @throws {NotFoundError} If there is no such User.
    * @throws {ValidationError} If the account is already active.
    */
-  async reactivate(userId: string): Promise<void> {
+  async reactivate(userId: string, context?: RequestContext): Promise<void> {
     if (!(await this.users.exists(userId))) {
       throw new NotFoundError("No such account");
     }
 
-    const moved = await withTransaction(this.dataSource, (tx) =>
-      this.users.transitionStatus(tx, userId, "active", "deactivated"),
-    );
+    const moved = await withTransaction(this.dataSource, async (tx) => {
+      const changed = await this.users.transitionStatus(
+        tx,
+        userId,
+        "active",
+        "deactivated",
+      );
+
+      if (changed) {
+        await this.announce(tx, "UserStatusChanged", userId,
+          { status: "active", changedAt: new Date().toISOString() }, context);
+      }
+
+      return changed;
+    });
 
     if (!moved) {
       throw new ValidationError("This account is already active");
     }
+  }
+
+  /**
+   * Tell the rest of the system that an account changed.
+   *
+   * Enqueued in the caller's transaction, so the event and the change commit
+   * together. Carries no name and no handle: both are searchable and both
+   * change, and putting either in a payload would scatter copies of them
+   * across a message log with its own retention. A consumer that needs them
+   * reads authoritative state.
+   *
+   * @param tx - The caller's transaction.
+   * @param eventType - Which of the account events this is.
+   * @param userId - Whose account.
+   * @param extra - Anything the specific event adds.
+   * @param context - The request that caused it, where one did.
+   * @returns Nothing.
+   */
+  private async announce(
+    tx: Transaction,
+    eventType: string,
+    userId: string,
+    extra: Record<string, unknown>,
+    context: RequestContext | undefined,
+  ): Promise<void> {
+    const traceId = context?.traceId ?? randomUUID();
+
+    await enqueueOutboxMessage(tx, {
+      topic: topicName(USERS_BOUNDARY),
+      partitionKey: userId,
+      aggregateType: "user",
+      aggregateId: userId,
+      aggregateVersion: 0,
+      eventType,
+      eventVersion: 1,
+      payload: { userId, ...extra },
+      metadata: {
+        traceId,
+        correlationId: traceId,
+        causationId: undefined,
+        actorUserId: userId,
+        eventVersion: 1,
+        recordedAt: (context?.receivedAt ?? new Date()).toISOString(),
+      },
+    });
   }
 
   /**
