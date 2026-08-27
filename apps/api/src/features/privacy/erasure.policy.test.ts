@@ -17,13 +17,16 @@ describe("subjectKindOf", () => {
     assert.equal(subjectKindOf("moment"), "moment");
   });
 
+  it("recognises an account", () => {
+    assert.equal(subjectKindOf("account"), "account");
+  });
+
   it("leaves alone a subject this deployment cannot erase", () => {
-    // Account erasure adds a second value to a ledger this worker shares. A
-    // worker rolled out first must leave those pending rather than fail them:
-    // a pending request can still be done, a failed one needs somebody to
-    // notice.
-    assert.equal(subjectKindOf("account"), undefined);
+    // The ledger will gain further subjects. A worker rolled out before the
+    // code that handles one must leave those pending rather than fail them: a
+    // pending request can still be done, a failed one needs somebody to notice.
     assert.equal(subjectKindOf("something_invented_later"), undefined);
+    assert.equal(subjectKindOf(""), undefined);
   });
 });
 

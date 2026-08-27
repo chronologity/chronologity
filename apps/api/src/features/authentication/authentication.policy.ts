@@ -103,14 +103,15 @@ const LINK_PATHS: Record<MagicLinkPurpose, string> = {
   login: SIGN_IN_PATH,
   verify_email: "/email-verifications",
   reset_password: "/password-resets/complete",
+  confirm_deletion: "/account-deletions/confirm",
 };
 
 /**
  * Where a link of a given purpose sends someone.
  *
- * One configured base URL covers all three, because they are the same client
+ * One configured base URL covers them all, because they are the same client
  * application reached at different paths, and asking an operator to configure
- * three URLs that must agree invites them to disagree.
+ * several URLs that must agree invites them to disagree.
  *
  * The sign-in path is taken off the end and the purpose's path put in its
  * place. Only off the end: a host that happens to contain the sign-in path

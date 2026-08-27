@@ -12,6 +12,7 @@ import { z } from "zod";
 import { requireSession, requireUser } from "../../plugins/auth.plugin.js";
 import { errors } from "../../server/error-responses.js";
 import type { AuthenticationWiring } from "../authentication/authentication.types.js";
+import type { AccountDeletionService } from "../privacy/account-deletion.service.js";
 import type { UserService } from "./user.service.js";
 
 /**
@@ -27,9 +28,16 @@ import type { UserService } from "./user.service.js";
  *   deactivation reuses. Composed here rather than inside the User service:
  *   sessions belong to authentication, and a service reaching across to end
  *   them would put that ownership in two places.
+ * @param accountDeletion - Asking for the account to be deleted and confirming
+ *   it. Optional: a deployment with no erasure worker behind it should not
+ *   offer a deletion it cannot finish.
  * @returns A Fastify plugin registering the User endpoints.
  */
-export function userRoutes(users: UserService, authentication: AuthenticationWiring) {
+export function userRoutes(
+  users: UserService,
+  authentication: AuthenticationWiring,
+  accountDeletion?: AccountDeletionService,
+) {
   return async function register(instance: FastifyInstance): Promise<void> {
     const app = instance.withTypeProvider<ZodTypeProvider>();
 
@@ -168,6 +176,62 @@ export function userRoutes(users: UserService, authentication: AuthenticationWir
         return users.getAccount(request.user.userId);
       },
     );
+
+    if (accountDeletion !== undefined) {
+      app.post(
+        "/users/me/deletion",
+        {
+          schema: {
+            summary: "Ask to delete your account",
+            description: [
+              "Sends a confirmation link to your verified email address. Nothing is deleted until you use it.",
+              "",
+              "**Deletion cannot be undone.** Your Moments, their photographs and videos, your comments, and your reactions are all removed. If you only want to step away for a while, deactivate instead.",
+              "",
+              "The link exists because a signed-in session proves somebody signed in once, which an unattended laptop also proves. Using it proves you can read the mailbox now. The mail arriving is itself the protection: somebody who has taken your account over cannot delete it without this reaching you.",
+              "",
+              "Asking twice sends a second link and cancels neither \u2014 otherwise anybody who could reach this could stop your deletion by asking again.",
+            ].join("\n"),
+            response: { 202: z.null(), ...errors(400, 401, 403) },
+          },
+          preHandler: requireUser,
+        },
+        async (request, reply) => {
+          await accountDeletion.request(request.session.identityId, request.requestContext);
+
+          return reply.status(202).send(null);
+        },
+      );
+
+      app.post(
+        "/users/me/deletion/confirmation",
+        {
+          schema: {
+            summary: "Confirm that you want your account deleted",
+            description: [
+              "Takes the token from the confirmation link. Your account stops working immediately: every session ends, your addresses and password are removed, and your handle is released after a cooldown.",
+              "",
+              "What you recorded is removed afterwards rather than instantly, because a history of ten thousand Moments takes real work to erase. It is removed whether or not you are watching.",
+              "",
+              "A link issued for a different account, one already used, one that has expired, and one of another purpose all refuse identically.",
+            ].join("\n"),
+            body: z.object({ token: z.string().min(1).max(512) }),
+            response: { 204: z.null(), ...errors(400, 401, 403, 404) },
+          },
+          preHandler: requireUser,
+        },
+        async (request, reply) => {
+          await accountDeletion.confirm(
+            request.user.userId,
+            request.session.identityId,
+            request.body.token,
+            request.requestContext,
+          );
+
+          return reply.status(204).send(null);
+        },
+      );
+    }
 
     app.get(
       "/users/:handle",

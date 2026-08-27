@@ -125,8 +125,15 @@ export class ModerationReportRow {
    * `moderation.md:541` expects people to report conduct they believe breaks
    * the rules, and somebody who fears being identified for it will not.
    */
-  @Column("uuid", { name: "reporter_user_id" })
-  reporterUserId!: string;
+  /**
+   * Null once the reporter's account has been deleted.
+   *
+   * The report survives them. It is evidence about somebody who was never party
+   * to that deletion, and letting a reported person destroy the complaints
+   * against them by leaving would be a hole rather than a privacy protection.
+   */
+  @Column("uuid", { name: "reporter_user_id", nullable: true })
+  reporterUserId!: string | null;
 
   @Column("text")
   reason!: string;
@@ -170,8 +177,15 @@ export class AccuracyReportRow {
   @Column("uuid", { name: "moment_id" })
   momentId!: string;
 
-  @Column("uuid", { name: "reporter_user_id" })
-  reporterUserId!: string;
+  /**
+   * Null once the reporter's account has been deleted.
+   *
+   * The report survives them. It is evidence about somebody who was never party
+   * to that deletion, and letting a reported person destroy the complaints
+   * against them by leaving would be a hole rather than a privacy protection.
+   */
+  @Column("uuid", { name: "reporter_user_id", nullable: true })
+  reporterUserId!: string | null;
 
   @Column("text")
   reason!: string;

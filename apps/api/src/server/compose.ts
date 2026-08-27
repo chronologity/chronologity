@@ -25,6 +25,7 @@ import { AuthorizationService } from "../features/authorization/authorization.se
 import { LocationRepository } from "../features/locations/location.repository.js";
 import { ModerationRepository } from "../features/moderation/moderation.repository.js";
 import { DiscoveryRetrieval } from "../features/discovery/discovery.retrieval.js";
+import { AccountDeletionService } from "../features/privacy/account-deletion.service.js";
 import { ErasureRepository } from "../features/privacy/erasure.repository.js";
 import { NotificationDeliveryRepository } from "../features/notifications/notification.delivery.repository.js";
 import { NotificationDeliveryService } from "../features/notifications/notification.delivery.service.js";
@@ -231,6 +232,18 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
     // The HTTP process registers devices and stores delivery timing; it sends
     // nothing. Sending is the dispatcher's, so that a slow provider can never
     // hold up a request.
+    // Deleting an account stops it working and writes down what is still owed.
+    // Erasing what it recorded is unbounded work and belongs to the worker.
+    accountDeletion: new AccountDeletionService(
+      database.dataSource,
+      accounts,
+      new IdentityRepository(database.dataSource),
+      new SessionRepository(database.dataSource),
+      new PhoneRepository(database.dataSource),
+      new ErasureRepository(database.dataSource),
+      email,
+      config.auth,
+    ),
     notificationDelivery: new NotificationDeliveryService(
       database.dataSource,
       new NotificationDeliveryRepository(database.dataSource),

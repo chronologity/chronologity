@@ -1068,6 +1068,21 @@ The required operation depends on the data.
 
 Account deletion is a cross-system privacy workflow.
 
+It is also two steps rather than one. The first sends a confirmation link to the
+verified address; the second consumes it. A session proves somebody signed in
+once; consuming a link proves they can read the mailbox now, which is the
+strengthening `changePassword` gets from demanding the current password and is
+available to every account rather than only those that have one. The mail
+arriving is a control in its own right: an account that has been taken over
+cannot be quietly deleted.
+
+The synchronous half is only what must be immediate — the account stops working
+and its credentials go. Erasing what it recorded is unbounded work and is
+written down as an erasure request instead, handled by the same worker and the
+same ledger a single deleted Moment uses. Erasing an account is a coordinator:
+it hands its Moments to that path in bounded batches, and sweeps its own rows
+only once none remain.
+
 Potential steps:
 
 ```text
@@ -1105,6 +1120,21 @@ anonymous/deleted attribution
 only if this is explicitly allowed by product/privacy policy.
 
 It must not be assumed.
+
+It is not assumed here, and the decision went the other way for content: a
+deleted account's Moments, media, comments, and reactions are erased rather than
+kept under anonymous attribution.
+
+What survives is narrower than that, and structural. The `users` row is
+tombstoned — no handle, no display name, no biography, a `deleted` status — so
+that the thirty-nine references pointing at it stay valid. Two of those are the
+reason: `locations.recorded_by_user_id` and `real_world_events.created_by_user_id`
+are shared reference data other people's Moments name, and both columns are
+`NOT NULL`. Removing the row would mean either loosening shared attribution or
+destroying history belonging to everybody else.
+
+The tombstone preserves no content and no attribution. It preserves the ability
+of other people's history to keep working.
 
 ---
 

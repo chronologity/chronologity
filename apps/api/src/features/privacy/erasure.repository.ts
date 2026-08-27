@@ -133,6 +133,27 @@ export class ErasureRepository {
   }
 
   /**
+   * Put a request back in the queue without treating the run as a failure.
+   *
+   * What a coordinator needs. Erasing an account is not one unit of work — it
+   * hands its Moments to the Moment path in batches — so a run that made
+   * progress and has more to do is neither finished nor failed. Rescheduling
+   * says exactly that: the attempt count is left alone, because nothing went
+   * wrong, and only the due time moves.
+   *
+   * @param tx - The caller's transaction.
+   * @param requestId - Which one.
+   * @param dueAt - When to continue.
+   * @returns Nothing.
+   */
+  async reschedule(tx: Transaction, requestId: string, dueAt: Date): Promise<void> {
+    await tx.query(
+      `UPDATE erasure_requests SET due_at = $2 WHERE request_id = $1 AND state = 'pending'`,
+      [requestId, dueAt],
+    );
+  }
+
+  /**
    * Record that an attempt failed.
    *
    * @param tx - The caller's transaction.

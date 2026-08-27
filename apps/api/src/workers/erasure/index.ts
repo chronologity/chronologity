@@ -5,7 +5,9 @@ import "reflect-metadata";
 
 import { ConfigurationError } from "@chronologity/config";
 import { loadConfig } from "../../config/app-config.js";
+import { MomentCommentRepository } from "../../features/moments/moment-comment.repository.js";
 import { MomentRepository } from "../../features/moments/moment.repository.js";
+import { AccountErasureRepository } from "../../features/privacy/account-erasure.repository.js";
 import { ErasureRepository } from "../../features/privacy/erasure.repository.js";
 import { INDEX_VERSION } from "../../features/search/search-document.js";
 import { SearchRepository } from "../../features/search/search.repository.js";
@@ -81,6 +83,8 @@ async function main(): Promise<void> {
       dataSource: database.dataSource,
       erasures: new ErasureRepository(database.dataSource),
       moments: new MomentRepository(database.dataSource),
+      comments: new MomentCommentRepository(database.dataSource),
+      accounts: new AccountErasureRepository(database.dataSource),
       uploads,
       documents: new SearchRepository(database.dataSource),
       indexVersion: INDEX_VERSION,

@@ -18,6 +18,7 @@ import type { UserService } from "../features/users/user.service.js";
 import { registerPlugins } from "./register-plugins.js";
 import type { ModerationService } from "../features/moderation/moderation.service.js";
 import type { DiscoveryService } from "../features/discovery/discovery.service.js";
+import type { AccountDeletionService } from "../features/privacy/account-deletion.service.js";
 import type { NotificationDeliveryService } from "../features/notifications/notification.delivery.service.js";
 import type { NotificationService } from "../features/notifications/notification.service.js";
 import type { SearchRateLimits } from "../features/search/search.rate-limits.js";
@@ -88,6 +89,7 @@ export interface BuildAppOptions {
   /** Telling somebody something happened. Mounted only alongside users. */
   notifications?: NotificationService | undefined;
   notificationDelivery?: NotificationDeliveryService | undefined;
+  accountDeletion?: AccountDeletionService | undefined;
 }
 
 /**
@@ -122,6 +124,7 @@ export async function buildApp({
   discovery,
   notifications,
   notificationDelivery,
+  accountDeletion,
 }: BuildAppOptions): Promise<FastifyInstance> {
   // Typed explicitly: Fastify's overloads otherwise resolve a broadly-typed
   // `logger` to the HTTP/2 signature, and every later use of the instance
@@ -187,6 +190,7 @@ export async function buildApp({
     discovery,
     notifications,
     notificationDelivery,
+    accountDeletion,
   );
 
   return app;

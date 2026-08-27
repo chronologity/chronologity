@@ -193,7 +193,14 @@ export const moderationReportSchema = z.object({
   reportId: identifierSchema,
   subjectType: moderationSubjectTypeSchema,
   subjectId: identifierSchema,
-  reporterUserId: identifierSchema,
+  /**
+   * Null once the reporter's account has been deleted.
+   *
+   * The report survives them. It is evidence about somebody who was never party
+   * to that deletion, and a reported person able to erase the complaints
+   * against them by leaving would be a hole rather than a protection.
+   */
+  reporterUserId: identifierSchema.nullable(),
   reason: reportReasonSchema,
   detail: z.string().nullable(),
   status: reportStatusSchema,
@@ -257,7 +264,14 @@ export type SubmitAccuracyReportRequest = z.infer<typeof submitAccuracyReportReq
 export const accuracyReportSchema = z.object({
   reportId: identifierSchema,
   momentId: identifierSchema,
-  reporterUserId: identifierSchema,
+  /**
+   * Null once the reporter's account has been deleted.
+   *
+   * The report survives them. It is evidence about somebody who was never party
+   * to that deletion, and a reported person able to erase the complaints
+   * against them by leaving would be a hole rather than a protection.
+   */
+  reporterUserId: identifierSchema.nullable(),
   reason: accuracyReportReasonSchema,
   detail: z.string(),
   status: reportStatusSchema,

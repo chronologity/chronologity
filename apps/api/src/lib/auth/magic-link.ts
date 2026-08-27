@@ -19,7 +19,27 @@ import { hashToken } from "./tokens.js";
  * sent to verify an address cannot be redeemed to set a new password. Without
  * it, one link type would be a skeleton key for the others.
  */
-export type MagicLinkPurpose = "login" | "verify_email" | "reset_password";
+/**
+ * What a link is for.
+ *
+ * A link is only ever accepted for the purpose it was issued with, so these are
+ * not interchangeable: a verification link cannot delete an account and a
+ * deletion link cannot sign anybody in. The column carries no check constraint,
+ * because this type is the vocabulary and the database has no opinion about it.
+ */
+export type MagicLinkPurpose =
+  | "login"
+  | "verify_email"
+  | "reset_password"
+  /**
+   * Proving current control of the address before an account is deleted.
+   *
+   * A live session proves somebody signed in once, which an unattended laptop
+   * also proves. Consuming one of these proves they can read the mailbox now —
+   * and the mail arriving is itself the control, because somebody who has taken
+   * an account over cannot quietly delete it without the owner seeing this.
+   */
+  | "confirm_deletion";
 
 export interface IssuedMagicLink {
   /** Sent to the address. Never stored, never logged. */

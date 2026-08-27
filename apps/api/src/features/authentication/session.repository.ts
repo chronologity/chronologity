@@ -224,6 +224,30 @@ export class SessionRepository {
   }
 
   /**
+   * Remove every Session an Identity has, rather than revoking them.
+   *
+   * Revocation is the right answer everywhere else: a revoked Session is a
+   * record that somebody was signed in and is not any more, which an
+   * investigation may need. This is the one case where the rows must go — a
+   * Session row carries a refresh-token hash, which is a credential, and an
+   * account that has been deleted should leave none behind.
+   *
+   * @param tx - The caller's transaction.
+   * @param identityId - Whose.
+   * @returns How many were removed, so a caller can report it.
+   */
+  async eraseAllForIdentity(tx: Transaction, identityId: string): Promise<number> {
+    const rows: { count: number }[] = await tx.query(
+      `WITH erased AS (
+          DELETE FROM sessions WHERE identity_id = $1 RETURNING 1
+       ) SELECT COUNT(*)::int AS count FROM erased`,
+      [identityId],
+    );
+
+    return rows[0]?.count ?? 0;
+  }
+
+  /**
    * The Sessions an Identity currently has open.
    *
    * @param identityId - Whose Sessions.

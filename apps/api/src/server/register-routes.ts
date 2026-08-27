@@ -9,6 +9,7 @@ import type { ModerationService } from "../features/moderation/moderation.servic
 import { searchRoutes } from "../features/search/search.routes.js";
 import { discoveryRoutes } from "../features/discovery/discovery.routes.js";
 import { notificationRoutes } from "../features/notifications/notification.routes.js";
+import type { AccountDeletionService } from "../features/privacy/account-deletion.service.js";
 import type { NotificationDeliveryService } from "../features/notifications/notification.delivery.service.js";
 import type { NotificationService } from "../features/notifications/notification.service.js";
 import type { DiscoveryService } from "../features/discovery/discovery.service.js";
@@ -73,6 +74,8 @@ import type { UserService } from "../features/users/user.service.js";
  *   alongside users, since every notification has a recipient.
  * @param notificationDelivery - Devices and delivery timing; mounted only
  *   alongside notifications, since there is nothing to carry without them.
+ * @param accountDeletion - Asking for an account to be deleted, and confirming
+ *   it; mounted only alongside users, since it deletes one.
  * @returns Nothing.
  */
 export async function registerRoutes(
@@ -95,6 +98,7 @@ export async function registerRoutes(
   discovery?: DiscoveryService | undefined,
   notifications?: NotificationService | undefined,
   notificationDelivery?: NotificationDeliveryService | undefined,
+  accountDeletion?: AccountDeletionService | undefined,
 ): Promise<void> {
   await app.register(healthRoutes);
 
@@ -105,7 +109,7 @@ export async function registerRoutes(
       // Mounted only alongside authentication: every User route needs an
       // authenticated caller, and account creation needs the Identity that
       // authentication establishes.
-      await app.register(userRoutes(users, authentication));
+      await app.register(userRoutes(users, authentication, accountDeletion));
 
       if (authorization !== undefined) {
         await app.register(authorizationRoutes(authorization));

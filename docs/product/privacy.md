@@ -714,20 +714,52 @@ half-finished.
 
 Account deletion requires its own explicit lifecycle.
 
-Chronologity must eventually define what happens to:
+### What deleting an account does
 
-- Moments created by the user;
-- media;
-- comments;
-- reactions;
-- relationships;
-- shared Event participation;
-- tags involving other users;
-- notifications;
-- security records; and
-- derived data.
+Deletion takes two steps, and the second proves current control of the address.
+A signed-in session shows somebody signed in once, which an unattended laptop
+also shows; using a fresh link shows they can read the mailbox now. The mail
+arriving is itself the protection — somebody who has taken an account over
+cannot delete it without the real owner seeing the request.
 
-This should be specified before launch rather than delegated to ad hoc cleanup code.
+Deactivation remains the reversible option. Deletion is not, and there is no
+grace period: two reversible-looking paths would make the irreversible one less
+clear rather than safer.
+
+Confirming stops the account working immediately. Every session ends, the
+addresses and password are removed, the phone is removed, the profile is erased,
+and the handle is released under the cooldown that already applies when somebody
+changes theirs.
+
+What the account recorded is removed afterwards, by the same worker that erases
+a single deleted Moment, because a history of ten thousand Moments is real work:
+
+- **Moments created by the user** are erased, each with its media, its comments,
+  its reactions, and its Search document.
+- **Media** goes with them, derived copies included.
+- **Comments** they left on other people's Moments are removed. Those Moments
+  are untouched, and the rest of their discussion stands.
+- **Reactions, mentions, audience memberships, and personal significance** are
+  removed.
+- **Relationships** — follows, follow requests, and blocks — are removed in both
+  directions.
+- **Shared Event participation** thins out, but the Event survives. A real-world
+  Event and a Location are shared history: somebody who first recorded a concert
+  did not thereby own it, and erasing it would delete other people's Moments'
+  context.
+- **Notifications**, devices, deliveries, and preferences are removed.
+- **Security records** are the one category that survives. The audit trail names
+  an Identity by an opaque identifier and records that an account was deleted,
+  which is the narrowly required retention this document allows for. Reports the
+  account filed about *other people* also survive, with the reporter erased:
+  a report is evidence about somebody who was never party to the deletion, and
+  letting a reported person destroy the complaints against them by leaving is a
+  hole rather than a privacy protection.
+- **Derived data** — Search documents — goes with the Moments it describes.
+
+The account row itself remains as a tombstone holding nothing: no name, no
+handle, no biography. It exists so that shared history other people depend on
+keeps working, and it says nothing about anybody.
 
 ## Retention
 
@@ -887,7 +919,6 @@ The following questions should be resolved deliberately:
 - What information, if any, should appear when a historical jump lands in a period containing only inaccessible Moments?
 - Which temporal aggregates are safe to expose at broader zoom levels?
 - What data export capabilities belong in the initial release?
-- What happens to shared-history participation when an account is deleted?
 - Which data categories require retention for security or legal reasons?
 - Should Chronologity ever use facial recognition?
 - Which future AI processing capabilities require separate opt-in?

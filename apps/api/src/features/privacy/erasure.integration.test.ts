@@ -26,6 +26,7 @@ import { FollowRepository } from "../social/follow.repository.js";
 import { UploadRepository } from "../uploads/upload.repository.js";
 import { UploadService } from "../uploads/upload.service.js";
 import { UserRepository } from "../users/user.repository.js";
+import { AccountErasureRepository } from "./account-erasure.repository.js";
 import { ErasureRepository } from "./erasure.repository.js";
 import { uploadPrefix } from "../uploads/upload.storage-key.js";
 
@@ -81,6 +82,8 @@ describe("erasure", () => {
   let momentRepository: MomentRepository;
   let documents: SearchRepository;
   let uploads: UploadService;
+  let commentRepository: MomentCommentRepository;
+  let accountErasure: AccountErasureRepository;
 
   /** Set to make the next object-storage removal fail. */
   let storageRefuses: Error | undefined;
@@ -120,7 +123,8 @@ describe("erasure", () => {
       {},
     );
 
-    const commentRepository = new MomentCommentRepository(database.dataSource);
+    commentRepository = new MomentCommentRepository(database.dataSource);
+    accountErasure = new AccountErasureRepository(database.dataSource);
 
     moments = new MomentService(
       database.dataSource,
@@ -195,6 +199,8 @@ describe("erasure", () => {
       dataSource: database.dataSource,
       erasures,
       moments: momentRepository,
+      comments: commentRepository,
+      accounts: accountErasure,
       uploads,
       documents,
       indexVersion: INDEX_VERSION,
@@ -205,6 +211,8 @@ describe("erasure", () => {
         dataSource: database.dataSource,
         erasures,
         moments: momentRepository,
+        comments: commentRepository,
+        accounts: accountErasure,
         uploads,
         documents,
         indexVersion: INDEX_VERSION,
@@ -667,6 +675,8 @@ describe("erasure", () => {
         dataSource: database.dataSource,
         erasures,
         moments: momentRepository,
+        comments: commentRepository,
+        accounts: accountErasure,
         uploads,
         documents,
         indexVersion: INDEX_VERSION,
@@ -692,6 +702,8 @@ describe("erasure", () => {
           dataSource: database.dataSource,
           erasures,
           moments: momentRepository,
+        comments: commentRepository,
+        accounts: accountErasure,
           uploads,
           documents,
           indexVersion: INDEX_VERSION,

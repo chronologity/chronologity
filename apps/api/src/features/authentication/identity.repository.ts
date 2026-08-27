@@ -134,6 +134,30 @@ export class IdentityRepository {
   }
 
   /**
+   * Remove everything that lets an Identity authenticate.
+   *
+   * Called when an account is deleted. Addresses and the password hash are both
+   * credentials and both personal data, and once they are gone there is no
+   * proof anybody can offer that this Identity is theirs — which is what
+   * `architecture/privacy.md:1061` means by stopping authentication as a step
+   * of deletion rather than as a consequence of it.
+   *
+   * The `identities` row itself stays. It holds an opaque identifier and a
+   * creation time and nothing else, and removing it would take the audit trail
+   * with it — the one category of record `product/privacy.md:618` allows to
+   * survive a deletion.
+   *
+   * @param tx - The caller's transaction, so credentials cannot outlive the
+   *   decision to remove them.
+   * @param identityId - Whose.
+   * @returns Nothing. An Identity with neither is left exactly as asked.
+   */
+  async eraseCredentials(tx: Transaction, identityId: string): Promise<void> {
+    await tx.query(`DELETE FROM identity_emails WHERE identity_id = $1`, [identityId]);
+    await tx.query(`DELETE FROM identity_passwords WHERE identity_id = $1`, [identityId]);
+  }
+
+  /**
    * Record that an address has been proven.
    *
    * @param tx - The caller's transaction.

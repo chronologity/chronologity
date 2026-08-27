@@ -106,6 +106,49 @@ export class UserRepository {
   }
 
   /**
+   * Erase the profile and mark the account deleted.
+   *
+   * A tombstone rather than a removal, and the reason is other people's
+   * history. Twenty-four foreign keys point at this row, and two of them —
+   * Locations and real-world Events this account was first to record — are
+   * shared reference data that other people's Moments name. Both columns are
+   * `NOT NULL`, so removing the row would mean either loosening shared
+   * attribution or destroying history belonging to everybody else.
+   *
+   * What survives says nothing about anybody: an opaque identifier, a status,
+   * and timestamps. `architecture/privacy.md:1105` contemplates exactly this —
+   * a tombstone and a hard delete are both required, in different places.
+   *
+   * @param tx - The caller's transaction.
+   * @param userId - Whose account.
+   * @param at - When.
+   * @returns The normalised handle it held, so the caller can release it, or
+   *   undefined when there was no such account or it was already deleted.
+   *   Returned rather than looked up separately because after this statement
+   *   there is nothing left to look it up from.
+   */
+  async tombstone(tx: Transaction, userId: string, at: Date): Promise<string | undefined> {
+    const held: { normalized_handle: string }[] = await tx.query(
+      `SELECT normalized_handle FROM user_handles
+        WHERE user_id = $1 AND released_at IS NULL`,
+      [userId],
+    );
+
+    const rows: { user_id: string }[] = await tx.query(
+      `WITH erased AS (
+          UPDATE users
+             SET status = 'deleted', handle = '', display_name = '', biography = NULL,
+                 updated_at = $2
+           WHERE user_id = $1 AND status <> 'deleted'
+       RETURNING user_id
+       ) SELECT * FROM erased`,
+      [userId, at],
+    );
+
+    return rows.length === 0 ? undefined : (held[0]?.normalized_handle ?? "");
+  }
+
+  /**
    * The Identity an account signs in with.
    *
    * The reverse of `findIdForIdentity`, and needed wherever something has to
@@ -169,11 +212,18 @@ export class UserRepository {
       .getRepository(User)
       .findOne({ where: { userId }, relations: { preferences: true } });
 
-    // Preferences are written with the account and never removed, so their
-    // absence means the account is not fully created. Reported as absent rather
-    // than filled in with defaults, which would present an account that does
-    // not exist as one that does.
-    if (row === null || row.preferences === undefined) {
+    // Preferences are written with the account, so their absence means one of
+    // two things and neither is an account anybody can read: it was never
+    // finished, or it has been deleted and erasure has swept them. Reported as
+    // absent rather than filled in with defaults, which would present an
+    // account that does not exist as one that does.
+    //
+    // Compared loosely on purpose. An unloaded relation is `undefined` and a
+    // missing one is `null`, and until account deletion existed no row could
+    // reach here with the second — so a strict check against `undefined` was
+    // correct and silently stopped being so. It surfaced as a crash reading a
+    // property of null, three features away, while notifying somebody.
+    if (row === null || row.preferences == null) {
       return undefined;
     }
 

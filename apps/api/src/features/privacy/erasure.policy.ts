@@ -12,7 +12,7 @@
  */
 
 /** What kind of thing an erasure request concerns. */
-export type ErasureSubject = "moment";
+export type ErasureSubject = "moment" | "account";
 
 /** How an erasure attempt ended. */
 export type ErasureFailure = "transient" | "permanent";
@@ -60,13 +60,13 @@ export const DEFAULT_LEASE_MS = 5 * 60 * 1_000;
  *
  * @param subjectType - What the request names.
  * @returns The subject, or undefined for one this deployment cannot erase.
- *   Undefined rather than an error: the ledger is shared, account erasure will
- *   add a second value, and a worker rolled out before the code that handles it
- *   should leave those requests alone rather than failing them. A request left
- *   pending can still be done; one marked failed needs somebody to notice.
+ *   Undefined rather than an error: the ledger is shared, it will gain further
+ *   subjects, and a worker rolled out before the code that handles one should
+ *   leave those requests alone rather than failing them. A request left pending
+ *   can still be done; one marked failed needs somebody to notice.
  */
 export function subjectKindOf(subjectType: string): ErasureSubject | undefined {
-  return subjectType === "moment" ? "moment" : undefined;
+  return subjectType === "moment" || subjectType === "account" ? subjectType : undefined;
 }
 
 /**

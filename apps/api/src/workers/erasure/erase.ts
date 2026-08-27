@@ -1,5 +1,7 @@
 import type { DataSource } from "typeorm";
+import type { MomentCommentRepository } from "../../features/moments/moment-comment.repository.js";
 import type { MomentRepository } from "../../features/moments/moment.repository.js";
+import type { AccountErasureRepository } from "../../features/privacy/account-erasure.repository.js";
 import {
   classifyFailure,
   erasableUploads,
@@ -17,6 +19,7 @@ import type {
 import type { SearchRepository } from "../../features/search/search.repository.js";
 import type { UploadService } from "../../features/uploads/upload.service.js";
 import { withTransaction } from "../../lib/database/transaction.js";
+import { generateId } from "../../lib/ids/generate-id.js";
 import type { Logger } from "../../lib/logger/logger.js";
 
 /**
@@ -47,6 +50,8 @@ export interface ErasureOptions {
   readonly dataSource: DataSource;
   readonly erasures: ErasureRepository;
   readonly moments: MomentRepository;
+  readonly comments: MomentCommentRepository;
+  readonly accounts: AccountErasureRepository;
   readonly uploads: UploadService;
   readonly documents: SearchRepository;
   /** Which index generation to remove documents from. */
@@ -56,6 +61,13 @@ export interface ErasureOptions {
   readonly backoffMs?: number;
   /** How long a claimed request is left alone before another worker may take it. */
   readonly leaseMs?: number;
+  /**
+   * How many of an account's Moments to hand to the Moment path per run.
+   *
+   * Bounded so that erasing a history of ten thousand Moments is many short
+   * runs rather than one that holds a lease for an hour.
+   */
+  readonly momentsPerRun?: number;
   readonly now?: () => Date;
   readonly logger?: Logger;
 }
@@ -64,6 +76,8 @@ export interface ErasureResult {
   readonly erased: number;
   /** Requests for subjects this deployment does not know how to erase. */
   readonly skipped: number;
+  /** Requests that made progress and have more to do. */
+  readonly continuing: number;
   /** Failed this time, and still owed. Counted apart from the two that stop. */
   readonly retrying: number;
   /** Refused in a way that trying again cannot fix. */
@@ -80,6 +94,15 @@ export interface ErasureResult {
 }
 
 const DEFAULT_BATCH_SIZE = 20;
+
+/**
+ * How many of an account's Moments one run hands onward.
+ *
+ * Small, because each becomes a request of its own and the point is to keep any
+ * single run short rather than to finish quickly. A history of ten thousand
+ * drains over many passes and holds no lease for long.
+ */
+const DEFAULT_MOMENTS_PER_RUN = 50;
 
 /**
  * Erase one batch of requests that have come due.
@@ -107,10 +130,18 @@ export async function eraseDueRequests(options: ErasureOptions): Promise<Erasure
   );
 
   if (claimed.length === 0) {
-    return { erased: 0, skipped: 0, retrying: 0, failed: 0, abandoned: 0, reachedEnd: true };
+    return {
+      erased: 0,
+      skipped: 0,
+      continuing: 0,
+      retrying: 0,
+      failed: 0,
+      abandoned: 0,
+      reachedEnd: true,
+    };
   }
 
-  const tally = { erased: 0, skipped: 0, retrying: 0, failed: 0, abandoned: 0 };
+  const tally = { erased: 0, skipped: 0, continuing: 0, retrying: 0, failed: 0, abandoned: 0 };
 
   for (const request of claimed) {
     tally[await eraseOne(options, request, at)] += 1;
@@ -131,7 +162,7 @@ async function eraseOne(
   options: ErasureOptions,
   request: ClaimedErasure,
   at: Date,
-): Promise<"erased" | "skipped" | "retrying" | "failed" | "abandoned"> {
+): Promise<"erased" | "skipped" | "continuing" | "retrying" | "failed" | "abandoned"> {
   const kind = subjectKindOf(request.subjectType);
 
   if (kind === undefined) {
@@ -148,7 +179,23 @@ async function eraseOne(
   }
 
   try {
-    await eraseMoment(options, request.subjectId);
+    if (kind === "account") {
+      const finished = await eraseAccount(options, request.subjectId, at);
+
+      if (!finished) {
+        // Progress was made and more remains. Due again at once rather than
+        // when the lease expires, and without touching the attempt count:
+        // nothing failed, so counting this towards the ceiling would abandon
+        // the erasure of a long history for being long.
+        await withTransaction(options.dataSource, (tx) =>
+          options.erasures.reschedule(tx, request.requestId, at),
+        );
+
+        return "continuing";
+      }
+    } else {
+      await eraseMoment(options, request.subjectId);
+    }
 
     await withTransaction(options.dataSource, (tx) =>
       options.erasures.complete(tx, request.requestId, at),
@@ -192,6 +239,76 @@ async function eraseOne(
     // object store having a bad minute look like data nobody erased.
     return state === "pending" ? "retrying" : state;
   }
+}
+
+/**
+ * Erase what an account recorded, a bounded step at a time.
+ *
+ * A coordinator rather than one enormous unit of work. An account may hold ten
+ * thousand Moments, and each one needs its media swept out of object storage —
+ * so this hands them to the Moment path in batches and says whether there is
+ * more to do. The Moment path is unchanged: a Moment belonging to a departing
+ * account is erased exactly as one deleted on its own would be.
+ *
+ * The sweeps wait until every Moment has gone. That ordering matters for a
+ * reason worth stating: a Moment still standing holds media, comments,
+ * reactions and audience rows, and sweeping those tables first would race the
+ * Moment path for the same rows and leave whichever lost with nothing to erase.
+ *
+ * @param options - Repositories and settings.
+ * @param userId - Whose account.
+ * @param at - The instant this pass began.
+ * @returns Whether the account is finished. False means progress was made and
+ *   the request should come round again.
+ * @throws {Error} If a store refused, for the caller to classify and record.
+ */
+async function eraseAccount(
+  options: ErasureOptions,
+  userId: string,
+  at: Date,
+): Promise<boolean> {
+  const perRun = options.momentsPerRun ?? DEFAULT_MOMENTS_PER_RUN;
+  const pending = await options.accounts.nextMoments(userId, perRun);
+
+  if (pending.length > 0) {
+    for (const momentId of pending) {
+      // The same two statements deleting a Moment performs, for the same
+      // reason: what waits in the queue should be structure rather than
+      // anybody's words. Nothing is announced — the Search document is removed
+      // by the erasure itself, and there is nobody left to notify.
+      await withTransaction(options.dataSource, async (tx) => {
+        await options.moments.markDeleted(tx, momentId, at);
+        await options.comments.blankAllForMoment(tx, momentId, at);
+        await options.erasures.request(tx, {
+          requestId: generateId(),
+          subjectType: "moment",
+          subjectId: momentId,
+          at,
+        });
+      });
+    }
+
+    return false;
+  }
+
+  // Every Moment is gone. Anything still in object storage belonged to no
+  // Moment — a file uploaded and never used, or one whose Moment has just been
+  // erased — and nothing else will ever come for it.
+  const orphans = await options.accounts.orphanedUploads(userId, perRun);
+
+  for (const uploadId of orphans) {
+    await options.uploads.erase(uploadId);
+  }
+
+  if (orphans.length === perRun) {
+    // A full batch almost certainly means more. Come round again rather than
+    // sweeping while uploads remain.
+    return false;
+  }
+
+  await withTransaction(options.dataSource, (tx) => options.accounts.sweep(tx, userId));
+
+  return true;
 }
 
 /**

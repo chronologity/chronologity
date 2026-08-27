@@ -3985,3 +3985,53 @@ Nothing had been erased. The caption was still in the row, the comments other pe
 **Adding a required constructor argument to `MomentService` touched eleven call sites.** It was made required rather than optional on purpose: an optional dependency that silently skips blanking comments is a guard nobody can prove.
 
 **ClickHouse is absent from the erasure path** because no Timeline projections exist yet. When they arrive they must join it, and that obligation belongs to the phase that builds them: a projection erasure cannot reach is not ready to hold personal history.
+
+---
+
+# ADR-124 — An Account Is Tombstoned, and Its Content Is Erased
+
+## Status
+
+Accepted.
+
+## Decision
+
+Deleting an account erases everything about the person and everything they authored, and leaves an anonymous row behind.
+
+**Two steps.** `POST /users/me/deletion` sends a confirmation link to the verified address; `POST /users/me/deletion/confirmation` consumes it. Both require a session.
+
+**The synchronous half is only what must be immediate**: the account is tombstoned, the handle released under its existing cooldown, and the addresses, password, phone, and Session rows removed. Everything else becomes an `account` erasure request.
+
+**Account erasure is a coordinator.** It hands the account's Moments to the Moment path in bounded batches and sweeps its own rows only once none remain.
+
+**What an account owns is a table, not a procedure** — `ACCOUNT_SWEEPS`, beside `DELIBERATELY_KEPT` and its reasons.
+
+**Reports the account filed about other people survive with the reporter erased.** Two foreign keys changed from `CASCADE` to `SET NULL` to permit it.
+
+## Rationale
+
+**The tombstone is forced by shared reference data, not chosen for convenience.** Thirty-nine foreign keys point at `users`, and twenty-four of them block a delete. Two — `locations.recorded_by_user_id` and `real_world_events.created_by_user_id` — are shared history that other people's Moments name, and both columns are `NOT NULL`. Removing the row means either loosening shared attribution or deleting a Location somebody else's Moment depends on. `architecture/privacy.md:1105` says a tombstone and a hard delete may both be required; this is where. What survives holds no name, no handle, no biography, and no content — only the ability of other people's history to keep working.
+
+**The second step proves current control, which a session does not.** A signed-in session shows somebody signed in once, which is what an unattended laptop also shows. Consuming a fresh link shows they can read the mailbox now. It is the strengthening `changePassword` gets from demanding the current password, available to every account rather than only those that have one — and the mail arriving is itself the control, because an account that has been taken over cannot then be quietly deleted.
+
+**There is no grace period, deliberately.** Deactivation already exists and is reversible. Two reversible-looking paths would make the irreversible one less clear rather than safer.
+
+**Letting a departing account destroy the reports it filed is a hole, not a privacy protection.** A report is evidence about somebody who was never party to the deletion, and a reported person could otherwise erase the complaints against them by leaving. `product/privacy.md:618` names retaining narrowly required safety records as a deletion concept distinct from removing content from ordinary access; this is that narrow case, and the reporter goes while the report stays.
+
+**Session rows are deleted rather than revoked, which is the opposite of everywhere else.** A revoked Session is a record that somebody was signed in and is not any more, which an investigation may want. But the row carries a refresh-token hash, and an account that has been deleted should leave no credential behind.
+
+**Writing what an account owns as data rather than as code is what makes it checkable.** An integration test reads `pg_constraint`, finds every reference into `users`, and asserts each is either swept or named as deliberately kept. A table added later that points at an account fails the suite until somebody decides which it is. Written as a long function, its omissions would be invisible — and an omission here is somebody's data surviving a request to remove it, with nothing saying so.
+
+## Consequences
+
+**A test that proves a row survived does not prove erasure meant it to.** "Keeps a Location it recorded" passed while a deliberately broken sweep was trying to delete that Location and being refused by a foreign key: a failed delete leaves the row exactly as a correct decision does. The fix was to make the helper assert the run reported no failure, after which the break bit immediately. This is the second time in this phase that a guard proved unfalsifiable until it was deliberately broken, and both times the test had looked entirely convincing.
+
+**The handle survives, and only in `user_handles`.** Releasing it under a cooldown means remembering which name is reserved and for how long, so the text remains in the table that holds the reservation. The sweep test asserts exactly that — the caption and display name appear nowhere, and the handle appears in those two columns and no others — rather than quietly excluding it.
+
+**Inserting a method above another displaced its documentation.** The lint rule caught it; the JSDoc that belonged to `listOpen` had silently become the doc for the method inserted before it. Worth noting because the code still compiled and the tests still passed.
+
+**The audit trail outlives the account by design.** It names an Identity by an opaque identifier whose row survives holding nothing but a creation time, and records that an account was deleted and when. That is the clearest instance of the narrowly required security record the product document allows.
+
+**A strict equality check silently stopped being correct.** `findAccount` guarded with `row.preferences === undefined`, which was right while preferences could never be removed — an unloaded relation is `undefined`. Erasure made a missing one possible, and a missing relation is `null`. The guard stopped matching, and the failure surfaced three features away as a crash reading a property of null while notifying somebody. Two lessons: the comparison is now loose on purpose, and a comment records that the strictness was correct rather than careless when it was written. The reporter columns going nullable was caught the other way round, by a suite that reads `information_schema` and asserts the entities agree with it — which found the drift the same minute it appeared.
+
+**Making a column nullable changed a published contract.** `moderationReportSchema.reporterUserId` is now nullable, because a moderator reading a report from a departed account has to be shown that there is nobody to follow up with. Worth noting as a consequence rather than a detail: a privacy decision about erasure propagated all the way out to the API surface, which is the sort of thing that is cheap now and expensive after clients exist.

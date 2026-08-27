@@ -30,7 +30,19 @@ export type AuthAuditEventType =
   | "session_refreshed"
   | "session_refresh_rejected"
   | "session_revoked"
-  | "all_sessions_revoked";
+  | "all_sessions_revoked"
+  /** Somebody asked to delete an account, and was sent a link to confirm it. */
+  | "account_deletion_requested"
+  /**
+   * An account was deleted.
+   *
+   * The audit trail outlives the account deliberately. It names an Identity by
+   * an opaque identifier whose row survives holding nothing, and
+   * `product/privacy.md:618` allows narrowly required security records to
+   * survive a deletion — of which "this account was deleted, at this time, by
+   * somebody who could read its mail" is the clearest example.
+   */
+  | "account_deleted";
 
 export type AuthAuditOutcome = "success" | "failure";
 
