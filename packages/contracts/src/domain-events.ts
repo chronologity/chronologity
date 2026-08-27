@@ -431,3 +431,64 @@ export const followRequestAcceptedEventSchema = envelopeOf(
   "FollowRequestAccepted",
   followRequestAcceptedPayloadSchema,
 );
+
+/**
+ * The integration boundary account-security events are published to.
+ *
+ * Its own boundary rather than a corner of `domain-users`. What these describe
+ * is the Identity that signs in, not the User everybody else sees, and the two
+ * are deliberately separate everywhere else in this system. Keeping them apart
+ * here means a consumer that wants profile changes does not have to read past
+ * credential changes to find them.
+ */
+export const SECURITY_BOUNDARY = "domain-security";
+
+/**
+ * Something changed about how an account is secured.
+ *
+ * One event with a `change` rather than six, following `ModerationStateChanged`
+ * above: the payload is identical for every one of them, the notification type
+ * maps straight from the field, and a seventh security fact later is an
+ * additive enum value rather than a new topic for every consumer to subscribe
+ * to.
+ *
+ * These exist to be told to the account owner. Each one is a step somebody
+ * taking over an account has to perform, so each is a chance for the real owner
+ * to notice — which is the whole reason `architecture/notifications.md:749`
+ * lets security email past a preference that would otherwise silence it.
+ *
+ * **Nothing here is a credential.** No password, no hash, no token, no phone
+ * number, and no email address: a consumer that needs to reach somebody reads
+ * the address from authoritative state, where erasure can still reach it.
+ */
+export const accountSecurityChangeSchema = z.enum([
+  "password_set",
+  "password_changed",
+  "phone_claimed",
+  "phone_removed",
+  "email_verified",
+  "sessions_revoked",
+]);
+
+export type AccountSecurityChange = z.infer<typeof accountSecurityChangeSchema>;
+
+export const accountSecurityChangedPayloadSchema = z.object({
+  identityId: identifierSchema,
+  /**
+   * The account this Identity signs in to, where there is one.
+   *
+   * Null during registration, which happens before a User exists. The fact is
+   * still published — it is a fact about this system's history either way — and
+   * a consumer with nobody to tell does nothing with it.
+   */
+  userId: identifierSchema.nullable(),
+  change: accountSecurityChangeSchema,
+  changedAt: timestampSchema,
+});
+
+export type AccountSecurityChangedPayload = z.infer<typeof accountSecurityChangedPayloadSchema>;
+
+export const accountSecurityChangedEventSchema = envelopeOf(
+  "AccountSecurityChanged",
+  accountSecurityChangedPayloadSchema,
+);

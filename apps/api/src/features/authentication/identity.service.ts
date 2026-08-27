@@ -15,6 +15,8 @@ import { withTransaction } from "../../lib/database/transaction.js";
 import { UnauthenticatedError } from "../../lib/errors/unauthorized-error.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
 import type { RequestContext } from "../../types/request-context.js";
+import type { UserRepository } from "../users/user.repository.js";
+import { announceSecurityChange } from "./security-events.js";
 import { linkLifetimeMinutes, linkUrlFor, normalizeEmail } from "./authentication.policy.js";
 import type { IdentityRepository } from "./identity.repository.js";
 import type { SessionService } from "./session.service.js";
@@ -48,6 +50,8 @@ export class IdentityService {
    * @param email - Sends links. Read back from Mailpit in tests, so delivery is
    *   never stubbed.
    * @param config - Link lifetimes, hashing cost, and password policy.
+   * @param accounts - Resolves an Identity to the account it signs in to, so a
+   *   security announcement can name who it concerns.
    * @param clock - Injected so tests can move time without waiting.
    */
   constructor(
@@ -56,6 +60,7 @@ export class IdentityService {
     private readonly sessions: SessionService,
     private readonly email: EmailClient,
     private readonly config: AuthConfig,
+    private readonly accounts: UserRepository,
     private readonly clock: () => Date = () => new Date(),
   ) {}
 
@@ -252,6 +257,17 @@ export class IdentityService {
         traceId: context.traceId,
       });
 
+      // Announced even though registration precedes the account, so nobody is
+      // told yet. The event describes a fact about this system's history either
+      // way, and an Identity that already existed without a password — one
+      // created by a magic link — reaches this path with an account behind it.
+      await announceSecurityChange(tx, this.accounts, {
+        identityId: identity.identityId,
+        change: "password_set",
+        at,
+        traceId: context.traceId,
+      });
+
       // Issued in the same transaction as the Identity it belongs to, so a
       // registration never commits without the link that completes it.
       return issueMagicLink(tx, {
@@ -322,6 +338,13 @@ export class IdentityService {
         eventType: "email_verified",
         outcome: "success",
         identityId: verified,
+        traceId: context.traceId,
+      });
+
+      await announceSecurityChange(tx, this.accounts, {
+        identityId: verified,
+        change: "email_verified",
+        at,
         traceId: context.traceId,
       });
 
@@ -519,6 +542,12 @@ export class IdentityService {
 
     const passwordHash = await hashPassword(this.config.passwordHashing, password);
 
+    // Asked before the write, because afterwards there is no way to tell.
+    // Somebody who signed in by link and is now setting a password for the
+    // first time should be told that one was set, not that theirs was changed —
+    // the two mean different things to whoever reads the message.
+    const hadPassword = (await this.identities.findPasswordHash(identityId)) !== undefined;
+
     await withTransaction(this.dataSource, async (tx) => {
       await this.identities.writePasswordHash(tx, identityId, passwordHash);
       await this.identities.markEmailVerified(tx, normalizedEmail, at);
@@ -527,6 +556,13 @@ export class IdentityService {
         eventType: "password_reset_completed",
         outcome: "success",
         identityId,
+        traceId: context.traceId,
+      });
+
+      await announceSecurityChange(tx, this.accounts, {
+        identityId,
+        change: hadPassword ? "password_changed" : "password_set",
+        at,
         traceId: context.traceId,
       });
     });
@@ -563,6 +599,7 @@ export class IdentityService {
     context: RequestContext,
   ): Promise<number> {
     const { identityId, currentSessionId, currentPassword, newPassword } = input;
+    const at = this.clock();
     const storedHash = await this.identities.findPasswordHash(identityId);
 
     if (storedHash === undefined || !(await verifyPassword(storedHash, currentPassword))) {
@@ -597,6 +634,13 @@ export class IdentityService {
         outcome: "success",
         identityId,
         sessionId: currentSessionId,
+        traceId: context.traceId,
+      });
+
+      await announceSecurityChange(tx, this.accounts, {
+        identityId,
+        change: "password_changed",
+        at,
         traceId: context.traceId,
       });
     });

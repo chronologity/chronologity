@@ -25,6 +25,9 @@ import { AuthorizationService } from "../features/authorization/authorization.se
 import { LocationRepository } from "../features/locations/location.repository.js";
 import { ModerationRepository } from "../features/moderation/moderation.repository.js";
 import { DiscoveryRetrieval } from "../features/discovery/discovery.retrieval.js";
+import { NotificationDeliveryRepository } from "../features/notifications/notification.delivery.repository.js";
+import { NotificationDeliveryService } from "../features/notifications/notification.delivery.service.js";
+import { StoredRecipientDirectory } from "../features/notifications/notification.recipients.js";
 import { NotificationRepository } from "../features/notifications/notification.repository.js";
 import { NotificationService } from "../features/notifications/notification.service.js";
 import { DiscoveryService } from "../features/discovery/discovery.service.js";
@@ -148,6 +151,11 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
 
   const momentSignificanceRepository = new MomentSignificanceRepository(database.dataSource);
 
+  // Shared, because both halves of notifications read preferences through it:
+  // the service that lists them and the service that decides which channels
+  // carry them.
+  const notificationRepository = new NotificationRepository(database.dataSource);
+
   const app = await buildApp({
     config,
     dependencies,
@@ -158,6 +166,7 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
         sessions,
         email,
         config.auth,
+        accounts,
       ),
       sessions,
       phones: new PhoneService(
@@ -168,6 +177,7 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
         createSmsClient(),
         email,
         config.auth,
+        accounts,
       ),
       config: config.auth,
       dataSource: database.dataSource,
@@ -205,10 +215,20 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
     ),
     notifications: new NotificationService(
       database.dataSource,
-      new NotificationRepository(database.dataSource),
+      notificationRepository,
       moments,
       accounts,
       new FollowRepository(database.dataSource),
+    ),
+    // The HTTP process registers devices and stores delivery timing; it sends
+    // nothing. Sending is the dispatcher's, so that a slow provider can never
+    // hold up a request.
+    notificationDelivery: new NotificationDeliveryService(
+      database.dataSource,
+      new NotificationDeliveryRepository(database.dataSource),
+      notificationRepository,
+      accounts,
+      new StoredRecipientDirectory(accounts, new IdentityRepository(database.dataSource)),
     ),
     follows: new FollowService(
       database.dataSource,

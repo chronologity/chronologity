@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import {
+  aggregates,
   aggregationKey,
   categoryOf,
   describeActors,
   isRequired,
   permits,
   recipientOf,
+  urgencyOf,
   type NotificationCategory,
   type NotificationType,
 } from "./notification.policy.js";
@@ -23,6 +25,12 @@ const TYPES: NotificationType[] = [
   "upload_ready",
   "upload_rejected",
   "content_moderated",
+  "password_set",
+  "password_changed",
+  "phone_claimed",
+  "phone_removed",
+  "email_verified",
+  "sessions_revoked",
 ];
 
 describe("categoryOf", () => {
@@ -47,12 +55,20 @@ describe("categoryOf", () => {
     assert.equal(categoryOf("content_moderated"), "moderation");
   });
 
+  it("sorts a change to how the account is secured into security", () => {
+    assert.equal(categoryOf("password_changed"), "security");
+    assert.equal(categoryOf("phone_claimed"), "security");
+    assert.equal(categoryOf("sessions_revoked"), "security");
+  });
+
   it("places a type it does not know nowhere", () => {
     // A topic gains event types over time. A consumer that dies on the first
     // one it has not been taught about turns an additive change into an outage.
     assert.equal(categoryOf("something_nobody_has_written_yet"), undefined);
   });
 });
+
+const CATEGORIES: NotificationCategory[] = ["social", "media", "moderation", "security"];
 
 describe("isRequired", () => {
   it("requires moderation", () => {
@@ -61,17 +77,51 @@ describe("isRequired", () => {
     assert.equal(isRequired("moderation"), true);
   });
 
+  it("requires security", () => {
+    // Every security message describes a step somebody taking over an account
+    // has to perform. A preference that could silence them would be the first
+    // thing an attacker turned off.
+    assert.equal(isRequired("security"), true);
+  });
+
   it("requires nothing else", () => {
     assert.equal(isRequired("social"), false);
     assert.equal(isRequired("media"), false);
   });
 
-  it("requires exactly one of the three", () => {
-    const categories: NotificationCategory[] = ["social", "media", "moderation"];
+  it("requires neither category that carries engagement", () => {
+    // Narrowly defined, as the document asks. The warning it gives is against
+    // labelling engagement as required in order to bypass preferences, and
+    // social and media are where engagement lives.
+    assert.equal(CATEGORIES.filter(isRequired).length, 2);
+    assert.equal(isRequired("social"), false);
+    assert.equal(isRequired("media"), false);
+  });
+});
 
-    // Narrowly defined, as the document asks. A second required category is a
-    // decision somebody should have to argue for.
-    assert.equal(categories.filter(isRequired).length, 1);
+describe("urgencyOf", () => {
+  it("lets security wait for nothing", () => {
+    assert.equal(urgencyOf("security"), "immediate");
+  });
+
+  it("keeps moderation out of a digest but lets it wait out quiet hours", () => {
+    // The two required categories differ only here. Both always arrive; one
+    // arrives now and one arrives at eight.
+    assert.equal(urgencyOf("moderation"), "prompt");
+  });
+
+  it("lets everything else be scheduled freely", () => {
+    assert.equal(urgencyOf("social"), "ordinary");
+    assert.equal(urgencyOf("media"), "ordinary");
+  });
+
+  it("never digests anything that cannot be switched off", () => {
+    // The property that matters, stated over the pair rather than case by case:
+    // being told what was done to your content must not wait for tomorrow's
+    // summary.
+    for (const category of CATEGORIES.filter(isRequired)) {
+      assert.notEqual(urgencyOf(category), "ordinary", category);
+    }
   });
 });
 
@@ -167,6 +217,27 @@ describe("aggregationKey", () => {
 
     assert.equal(once, aggregationKey("sam", "moment_reacted", "moment-1"));
     assert.equal(once.includes(String(new Date().getUTCFullYear())), false);
+  });
+});
+
+describe("aggregates", () => {
+  it("collapses ordinary activity", () => {
+    assert.equal(aggregates("social"), true);
+    assert.equal(aggregates("media"), true);
+  });
+
+  it("keeps every required notification separate", () => {
+    // Not about presentation. A delivery is opened once per notification per
+    // channel, so a second one collapsing into a standing entry would be
+    // announced to nobody — the first email having already gone.
+    assert.equal(aggregates("moderation"), false);
+    assert.equal(aggregates("security"), false);
+  });
+
+  it("collapses exactly what may be switched off", () => {
+    for (const category of CATEGORIES) {
+      assert.equal(aggregates(category), !isRequired(category), category);
+    }
   });
 });
 

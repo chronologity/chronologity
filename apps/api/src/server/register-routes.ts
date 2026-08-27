@@ -9,6 +9,7 @@ import type { ModerationService } from "../features/moderation/moderation.servic
 import { searchRoutes } from "../features/search/search.routes.js";
 import { discoveryRoutes } from "../features/discovery/discovery.routes.js";
 import { notificationRoutes } from "../features/notifications/notification.routes.js";
+import type { NotificationDeliveryService } from "../features/notifications/notification.delivery.service.js";
 import type { NotificationService } from "../features/notifications/notification.service.js";
 import type { DiscoveryService } from "../features/discovery/discovery.service.js";
 import type { SearchRateLimits } from "../features/search/search.rate-limits.js";
@@ -70,6 +71,8 @@ import type { UserService } from "../features/users/user.service.js";
  *   every surface resolves eligibility against a Viewer.
  * @param notifications - Telling somebody something happened; mounted only
  *   alongside users, since every notification has a recipient.
+ * @param notificationDelivery - Devices and delivery timing; mounted only
+ *   alongside notifications, since there is nothing to carry without them.
  * @returns Nothing.
  */
 export async function registerRoutes(
@@ -91,6 +94,7 @@ export async function registerRoutes(
   searchRateLimits?: SearchRateLimits | undefined,
   discovery?: DiscoveryService | undefined,
   notifications?: NotificationService | undefined,
+  notificationDelivery?: NotificationDeliveryService | undefined,
 ): Promise<void> {
   await app.register(healthRoutes);
 
@@ -146,7 +150,7 @@ export async function registerRoutes(
       }
 
       if (notifications !== undefined) {
-        await app.register(notificationRoutes(notifications));
+        await app.register(notificationRoutes(notifications, notificationDelivery));
       }
     }
   }

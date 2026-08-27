@@ -27,7 +27,7 @@ export class Notification {
   @Column("text")
   type!: string;
 
-  /** `social`, `media`, or `moderation`. Constrained by the database. */
+  /** `social`, `media`, `moderation`, or `security`. Constrained by the database. */
   @Column("text")
   category!: string;
 
@@ -127,12 +127,151 @@ export class NotificationPreference {
   @PrimaryColumn("text")
   category!: string;
 
-  /** `in_app`, `email`, or `push`. Only the first is delivered yet. */
+  /** `in_app`, `email`, or `push`. */
   @PrimaryColumn("text")
   channel!: string;
 
   @Column("boolean")
   enabled!: boolean;
+
+  @Column("timestamptz", { name: "updated_at" })
+  updatedAt!: Date;
+}
+
+/**
+ * A device push can reach.
+ *
+ * The token column is the only place in this system a provider credential
+ * lives, which is deliberate: one place to erase, and no join path from
+ * anything a client reads. Nothing that returns a device to a caller carries
+ * it, because no outbound contract has a field it could occupy.
+ */
+@Entity("notification_devices")
+@Index("notification_devices_active_idx", ["userId"], { where: "status = 'active'" })
+export class NotificationDevice {
+  @PrimaryColumn("uuid", { name: "device_id" })
+  deviceId!: string;
+
+  @Column("uuid", { name: "user_id" })
+  userId!: string;
+
+  /** `ios`, `android`, or `web`. Constrained by the database. */
+  @Column("text")
+  platform!: string;
+
+  /**
+   * The provider's credential for this installation.
+   *
+   * Never logged and never returned. Anybody holding it can send to that
+   * device, which is what makes it a credential rather than an identifier.
+   */
+  @Column("text")
+  token!: string;
+
+  /** Cosmetic. Never used to decide where anything goes. */
+  @Column("text", { nullable: true })
+  label!: string | null;
+
+  /** `active` or `invalidated`. Retired rather than deleted. */
+  @Column("text")
+  status!: string;
+
+  @Column("timestamptz", { name: "registered_at" })
+  registeredAt!: Date;
+
+  /** Moved forward whenever the same token is registered again. */
+  @Column("timestamptz", { name: "last_seen_at" })
+  lastSeenAt!: Date;
+
+  @Column("timestamptz", { name: "invalidated_at", nullable: true })
+  invalidatedAt!: Date | null;
+}
+
+/**
+ * One notification's journey down one channel.
+ *
+ * `dueAt` carries the whole of quiet hours and digests, resolved once when the
+ * delivery is created. The dispatcher only ever asks whether that instant has
+ * passed — it never reads a time zone, and so cannot get one wrong.
+ */
+@Entity("notification_deliveries")
+export class NotificationDelivery {
+  @PrimaryColumn("uuid", { name: "delivery_id" })
+  deliveryId!: string;
+
+  @Column("uuid", { name: "notification_id" })
+  notificationId!: string;
+
+  /** Denormalised so a digest can be gathered by recipient without a join. */
+  @Column("uuid", { name: "recipient_user_id" })
+  recipientUserId!: string;
+
+  /** `email` or `push`. There is no `in_app`: the notification row is that. */
+  @Column("text")
+  channel!: string;
+
+  /**
+   * `immediate` or `digest`, decided when the delivery was created.
+   *
+   * Recorded rather than inferred at send time, so two immediate notifications
+   * landing in the same second are not silently merged into a digest nobody
+   * asked for.
+   */
+  @Column("text")
+  mode!: string;
+
+  /** `pending`, `sent`, `failed`, `abandoned`, or `cancelled`. */
+  @Column("text")
+  status!: string;
+
+  @Column("timestamptz", { name: "due_at" })
+  dueAt!: Date;
+
+  @Column("int")
+  attempts!: number;
+
+  /** `transient` is retried; `permanent` is not. */
+  @Column("text", { name: "error_category", nullable: true })
+  errorCategory!: string | null;
+
+  @Column("text", { name: "last_error", nullable: true })
+  lastError!: string | null;
+
+  @Column("timestamptz", { name: "created_at" })
+  createdAt!: Date;
+
+  @Column("timestamptz", { name: "completed_at", nullable: true })
+  completedAt!: Date | null;
+}
+
+/**
+ * When a channel delivers, as opposed to whether it delivers at all.
+ *
+ * Two questions that look alike and are not. A preference says whether to tell
+ * somebody; this says when, and can only ever delay. There is no time zone
+ * column — it is read from `user_preferences`, because a time zone stored twice
+ * is a time zone that will disagree with itself the first time somebody moves.
+ */
+@Entity("notification_delivery_settings")
+export class NotificationDeliverySetting {
+  @PrimaryColumn("uuid", { name: "user_id" })
+  userId!: string;
+
+  @PrimaryColumn("text")
+  channel!: string;
+
+  @Column("text")
+  mode!: string;
+
+  @Column("int", { name: "digest_hour" })
+  digestHour!: number;
+
+  /** Local hours. Both set or both null; the database refuses one alone. */
+  @Column("int", { name: "quiet_from", nullable: true })
+  quietFrom!: number | null;
+
+  @Column("int", { name: "quiet_until", nullable: true })
+  quietUntil!: number | null;
 
   @Column("timestamptz", { name: "updated_at" })
   updatedAt!: Date;

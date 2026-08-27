@@ -1,3 +1,5 @@
+import type { Urgency } from "./notification.schedule.js";
+
 /**
  * Who hears about what, and what may be turned off.
  *
@@ -28,10 +30,16 @@ export type NotificationType =
   | "follow_request_accepted"
   | "upload_ready"
   | "upload_rejected"
-  | "content_moderated";
+  | "content_moderated"
+  | "password_set"
+  | "password_changed"
+  | "phone_claimed"
+  | "phone_removed"
+  | "email_verified"
+  | "sessions_revoked";
 
 /** Which family a notification belongs to. */
-export type NotificationCategory = "social" | "media" | "moderation";
+export type NotificationCategory = "social" | "media" | "moderation" | "security";
 
 /** Where a notification can be delivered. */
 export type NotificationChannel = "in_app" | "email" | "push";
@@ -52,6 +60,12 @@ const CATEGORIES: Readonly<Record<NotificationType, NotificationCategory>> = {
   upload_ready: "media",
   upload_rejected: "media",
   content_moderated: "moderation",
+  password_set: "security",
+  password_changed: "security",
+  phone_claimed: "security",
+  phone_removed: "security",
+  email_verified: "security",
+  sessions_revoked: "security",
 };
 
 /**
@@ -70,20 +84,30 @@ export function categoryOf(type: string): NotificationCategory | undefined {
 /**
  * Whether a category may be switched off.
  *
- * Moderation may not. 5N established that somebody must be told what was done
- * to their content, because an appeal against a decision they were never told
- * about is not a right they have — and a preference that could silence it would
- * hand people a way to opt out of being answerable to.
+ * Two may not, and both for the same reason: switching them off would let
+ * somebody opt out of being told something that exists for their protection
+ * rather than for their interest.
+ *
+ * Moderation, because 5N established that somebody must be told what was done
+ * to their content — an appeal against a decision they were never told about is
+ * not a right they have.
+ *
+ * Security, because every one of those messages describes a step somebody
+ * taking over an account has to perform, and a preference that could silence
+ * them would be the first thing an attacker turned off.
+ * `architecture/notifications.md:696` names account security alongside severe
+ * moderation as a mandatory example.
  *
  * `notifications.md:495` asks that required notifications be narrowly defined
- * and warns against labelling engagement as required to bypass preferences. One
- * category qualifies.
+ * and warns against labelling engagement as required to bypass preferences.
+ * Social and media are the categories that carry engagement, and neither
+ * qualifies.
  *
  * @param category - The family.
  * @returns Whether it is delivered regardless of preference.
  */
 export function isRequired(category: NotificationCategory): boolean {
-  return category === "moderation";
+  return category === "moderation" || category === "security";
 }
 
 /**
@@ -101,6 +125,30 @@ export function permits(
   enabled: boolean | undefined,
 ): boolean {
   return isRequired(category) || (enabled ?? true);
+}
+
+/**
+ * How much a category is allowed to wait before it is delivered.
+ *
+ * Separate from `isRequired`, and the pair is the whole of the distinction
+ * between the two categories nobody can switch off. Both always arrive; they
+ * differ only in whether they arrive now.
+ *
+ * Security waits for nothing, because by morning the account may be gone.
+ * Moderation waits out a quiet window, because the decision will still be there
+ * at eight and appealing it is no more possible at three — and waking somebody
+ * for it teaches them to silence the device, which silences the security alert
+ * too. The cost of over-rating moderation is paid by security.
+ *
+ * @param category - The family.
+ * @returns What the delivery schedule may do with it.
+ */
+export function urgencyOf(category: NotificationCategory): Urgency {
+  if (category === "security") {
+    return "immediate";
+  }
+
+  return category === "moderation" ? "prompt" : "ordinary";
 }
 
 /** What one message says happened. */
@@ -157,6 +205,30 @@ export function aggregationKey(
   sourceId: string,
 ): string {
   return `${recipientUserId}:${type}:${sourceId}`;
+}
+
+/**
+ * Whether unread activity of this kind collapses into one entry.
+ *
+ * Everything ordinary does: three people reacting to a Moment is one entry, not
+ * three, and that is what keeps a list readable.
+ *
+ * Nothing required does, and the reason is delivery rather than presentation. A
+ * delivery is opened once per notification per channel, so a second thing
+ * collapsing into a standing entry would be announced to nobody — the first
+ * email having already gone. Somebody whose password is changed twice must hear
+ * about it twice, and somebody who receives a second moderation decision must
+ * be told about that one too, because each carries its own right of appeal.
+ *
+ * The rule follows `isRequired` exactly rather than listing categories again: a
+ * category that must be delivered is a category whose instances must each be
+ * delivered.
+ *
+ * @param category - The family.
+ * @returns Whether two of these about one thing become one entry.
+ */
+export function aggregates(category: NotificationCategory): boolean {
+  return !isRequired(category);
 }
 
 /**

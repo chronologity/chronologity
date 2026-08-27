@@ -8,6 +8,7 @@ import {
   COMMENTS_BOUNDARY,
   MODERATION_BOUNDARY,
   REACTIONS_BOUNDARY,
+  SECURITY_BOUNDARY,
   SOCIAL_BOUNDARY,
 } from "@chronologity/contracts";
 import { loadConfig } from "../../config/app-config.js";
@@ -15,11 +16,15 @@ import { LocationRepository } from "../../features/locations/location.repository
 import { ModerationRepository } from "../../features/moderation/moderation.repository.js";
 import { MomentRepository } from "../../features/moments/moment.repository.js";
 import { MomentService } from "../../features/moments/moment.service.js";
+import { NotificationDeliveryRepository } from "../../features/notifications/notification.delivery.repository.js";
+import { NotificationDeliveryService } from "../../features/notifications/notification.delivery.service.js";
 import { NotificationGenerator } from "../../features/notifications/notification.generator.js";
+import { StoredRecipientDirectory } from "../../features/notifications/notification.recipients.js";
 import { NotificationRepository } from "../../features/notifications/notification.repository.js";
 import { RealWorldEventRepository } from "../../features/real-world-events/real-world-event.repository.js";
 import { FollowRepository } from "../../features/social/follow.repository.js";
 import { UploadRepository } from "../../features/uploads/upload.repository.js";
+import { IdentityRepository } from "../../features/authentication/identity.repository.js";
 import { UserRepository } from "../../features/users/user.repository.js";
 import { connectDatabase, createDatabase } from "../../lib/database/postgres.js";
 import { createEventConsumer } from "../../lib/messaging/consumer.js";
@@ -69,10 +74,23 @@ async function main(): Promise<void> {
     new ModerationRepository(database.dataSource),
   );
 
+  const accounts = new UserRepository(database.dataSource);
+  const notifications = new NotificationRepository(database.dataSource);
+
   const generator = new NotificationGenerator(
     database.dataSource,
-    new NotificationRepository(database.dataSource),
+    notifications,
     moments,
+    // Deliveries are opened in the same transaction as the notification they
+    // carry. Sending them is somebody else's job entirely: this process decides
+    // that a message should go, and the dispatcher finds out whether it can.
+    new NotificationDeliveryService(
+      database.dataSource,
+      new NotificationDeliveryRepository(database.dataSource),
+      notifications,
+      accounts,
+      new StoredRecipientDirectory(accounts, new IdentityRepository(database.dataSource)),
+    ),
   );
 
   const consumer = createEventConsumer({
@@ -83,6 +101,7 @@ async function main(): Promise<void> {
       topicName(COMMENTS_BOUNDARY),
       topicName(SOCIAL_BOUNDARY),
       topicName(MODERATION_BOUNDARY),
+      topicName(SECURITY_BOUNDARY),
     ],
     handler: (event) => notifyFromEvent(generator, event),
   });

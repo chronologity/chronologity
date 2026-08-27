@@ -881,14 +881,26 @@ describe("authentication", () => {
       assert.ok(!JSON.stringify(audit).includes(strongPassword));
       assert.ok(!JSON.stringify(audit).includes(stored[0]?.password_hash ?? "never"));
 
-      // The outbox is append-only and feeds Kafka, so nothing erasable may
-      // reach it (ADR-095). Authentication publishes nothing at all, which is
-      // the strongest form of that.
-      const published = await database.dataSource.query(
-        `SELECT payload, metadata FROM outbox_messages WHERE aggregate_id = $1`,
-        [identityId],
+      // The outbox is append-only and feeds Kafka, so nothing erasable and no
+      // secret may reach it (ADR-095). Authentication publishes only that
+      // something about this account's security changed — identifiers and the
+      // fact of a change, which is precisely what that ADR permits.
+      const published: { event_type: string; payload: unknown; metadata: unknown }[] =
+        await database.dataSource.query(
+          `SELECT event_type, payload, metadata FROM outbox_messages WHERE aggregate_id = $1`,
+          [identityId],
+        );
+
+      assert.deepEqual(
+        [...new Set(published.map((one) => one.event_type))],
+        ["AccountSecurityChanged"],
       );
-      assert.equal(published.length, 0);
+
+      const outbound = JSON.stringify(published);
+
+      assert.ok(!outbound.includes(strongPassword), "no password");
+      assert.ok(!outbound.includes(stored[0]?.password_hash ?? "never"), "no hash");
+      assert.ok(!outbound.includes(email), "no address");
 
       // That a password was set is recorded; what it is, is not.
       assert.ok(audit.length > 0);

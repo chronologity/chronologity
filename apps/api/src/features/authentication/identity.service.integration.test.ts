@@ -107,6 +107,7 @@ describe("identities", () => {
       sessions,
       recordingEmail,
       settings,
+      new UserRepository(database.dataSource),
     );
   }
 

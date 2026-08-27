@@ -21,8 +21,15 @@ import type { NotificationRepository, NotificationWithActors } from "./notificat
 /** How many unread entries are counted before the count is reported as "many". */
 const UNREAD_CEILING = 100;
 
-/** The categories a preference screen can show. */
-const CATEGORIES: NotificationCategory[] = ["social", "media", "moderation"];
+/**
+ * The categories a preference screen can show.
+ *
+ * Every one of them, including the two that cannot be switched off. Those are
+ * returned with `required` naming them rather than left out, so an interface can
+ * show the control as fixed instead of appearing to offer a choice, or worse,
+ * silently omitting a whole category of messages somebody receives.
+ */
+const CATEGORIES: NotificationCategory[] = ["social", "media", "moderation", "security"];
 
 /**
  * Reading what happened.

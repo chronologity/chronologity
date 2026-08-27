@@ -3865,3 +3865,65 @@ Two properties follow for free. A privacy change needs no propagation into notif
 **Somebody blocked or suspended after the fact is counted, never named.** This needs no reindexing or cleanup, because naming happens at read time — the same property that makes privacy changes free here.
 
 **The migration had to be reset locally when its shape changed.** The runner keys applied migrations on the full filename, and an edited-but-uncommitted migration will not re-run. Editing it was correct — it is not deployed — but the local database had to be dropped back for the change to take effect, and the version key is the filename rather than the timestamp.
+
+---
+
+# ADR-122 — A Delivery Is a Row With a Due Time, and Nothing Sending Blocks Anything Happening
+
+## Status
+
+Accepted.
+
+## Context
+
+5Q-1 decided that a notification exists and who may see it. Nothing carried it anywhere: somebody learned their upload had failed only by opening the application, which is backwards for the one category where being told is the point.
+
+The mistakes available in this half are not the mistakes the first half could make. Those were privacy mistakes. These are a provider holding up a reaction, a retry loop that never stops, a credential in a log file, and arithmetic that wakes somebody at three in the morning because a time zone was read as a fixed offset.
+
+## Decision
+
+**A delivery is a row.** One per notification per channel, carrying a status, an attempt count, a last error, and — the part that does the work — an instant it becomes due. The service that causes a notification writes the row inside the transaction that records the notification, and returns.
+
+**The whole of quiet hours and digests is resolved once, when the delivery is created, in a pure function with no database in it.** What is stored is an instant. The only question the dispatcher ever asks afterwards is whether that instant has passed, so a dispatcher that never reads a time zone cannot get one wrong.
+
+**Composition happens at send time, from current authorization**, through the same `NotificationService.open` the in-app list reads by.
+
+**Three urgencies, not two.** `immediate` waits for nothing, `prompt` skips a digest but waits out a quiet window, `ordinary` is everything else. Security is immediate; moderation is prompt.
+
+**Security joins moderation as a category that cannot be switched off**, and neither aggregates.
+
+**Push has the full shape and no provider.** Registration, tokens, retirement, scheduling, and retries are real; the adapter records what it would have sent, following `sms-client.ts`.
+
+## Rationale
+
+**A row in a table is what makes `architecture/notifications.md:840` true.** It requires that provider delivery never block a reaction, a Moment, a moderation decision, or a session revocation. Nothing else guarantees it: an in-process send is one slow provider away from a request timing out, and a queue that the writer waits on is the same thing with extra steps. If every provider is down, the rows are simply still there.
+
+**Time zones are where this kind of code goes wrong, so that part has no infrastructure in it.** `Intl` turns instants into clock readings and offers no way back, so the inverse is computed by measuring the offset at a first guess and again at the result. The second pass is what makes the day clocks move come out right, and it is not decorative: without it a quiet window ending at one o'clock on the night one o'clock is skipped resolves an hour early — inside the window it was meant to end. The unit tests cover both transitions in two hemispheres of rule, a zone with a half-hour offset, the hour that never happens, and the hour that happens twice.
+
+**Security ignores quiet hours and moderation does not, and the second half of that is the interesting one.** A password changed at three in the morning is worth waking somebody for, because by morning the account may be gone. A moderation decision will still be there at eight, and appealing it is no more possible at three — waking somebody for it teaches them to silence the device, and that silences the security alert too. Over-rating moderation is paid for by security.
+
+**Nothing required aggregates, and the reason is delivery rather than presentation.** A delivery is opened once per notification per channel. A second password change collapsing into a standing unread entry would be announced to nobody, because the first email had already gone — and the second is the message somebody most needs to see. The rule follows `isRequired` exactly rather than listing categories again.
+
+**Email names people and push counts them.** `product/notifications.md:289` requires stricter defaults outside the application, because a lock screen is visible to whoever is standing nearby. Both draw on a rendered notification, which has no field for a caption or a comment, so the privacy of the text is a property of the input rather than a rule anybody has to remember.
+
+**Security events are published, not invented.** Every one — password set or changed, phone claimed or removed, email verified, sessions revoked — is already an audit record. The audit trail is the evidence and the notification is the message; one is for whoever investigates afterwards and the other for the owner at the time. Each describes a step somebody taking over an account has to perform, which is why they are worth sending and why the preference that would silence them does not exist.
+
+## Consequences
+
+**Registering a device read back through the DataSource and found nothing**, because the row it had just written had not committed. Both statements return their row instead — and both are wrapped in a `WITH`, because a bare `UPDATE … RETURNING` through this driver hands back `[rows, count]` rather than rows. That shape is wrong in a way types cannot catch: every column reads as `undefined` rather than the call failing. The repositories beside this one wrap for the same reason.
+
+**A `CASE` whose other arm is `NULL` gives the planner nothing to infer a parameter's type from.** It settles on text, and the column refuses it at run time. Cast explicitly.
+
+**The contract refused an account with no quiet hours at all.** The rule that a window's ends must differ was written as `from !== until` and `null !== null` is false, so the ordinary case — no quiet hours, which is what most accounts have — could not be expressed. Two nulls are not a window whose ends meet; they are no window.
+
+**Switching a category off in-app silences its email and push too**, because the notification row *is* the in-app notification and there is nothing left for the other channels to carry. The reverse does not hold. This is an interaction worth stating rather than discovering.
+
+**A test that hands the code a double proves nothing about the code it replaced.** "No device token appears in a log" passed while the adapter logged the token, because the integration suite used a recording double and never ran the adapter. It now delegates to the real one, and the adapter has its own unit test. Deliberately breaking the guard is what found it; the test had looked entirely convincing.
+
+**Asserting on the dispatcher's own totals is asserting on the whole database.** The dispatcher claims every due delivery, so `result.sent` counts other tests' rows. Every assertion is scoped to the account under test instead.
+
+**Anything that claims a bounded batch must be drained in a test, not called once.** Three failures appeared only in the full integration run and never in isolation, and both causes were the same shape: the dispatcher takes fifty deliveries from a table that by then holds other suites' rows, and the outbox drain takes five hundred messages from a backlog every earlier suite has been adding to since the run began. Each looked like a scheduling bug and was a test that stopped one batch short.
+
+**A test fixture's alphabet is part of its isolation.** Two search suites generated "rare" words as `zq` plus ten hexadecimal characters. Sixteen symbols and a shared prefix leave enough trigrams in common that two such words reach similarity 0.3 — exactly the threshold search retrieves at — so one test's word matched another test's Moment and an exact-result assertion failed. Measured rather than guessed: three colliding pairs in two hundred words. Over twenty-six letters, four hundred words peak at 0.200 and nothing collides. The flake predated this sub-phase and surfaced twice, in a different test each time.
+
+**The push provider, new-device sign-in alerts, and localisation are deliberately absent.** A provider needs credentials and a device, and a test for it would have to mock the boundary under test. A sign-in alert needs a notion of a recognised device that does not exist, and one that fires on every sign-in is one people learn to ignore — which would make the category worthless. Localisation and template versioning want a template system, and there is one locale.

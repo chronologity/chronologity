@@ -54,6 +54,9 @@ import {
 import {
   Notification,
   NotificationActor,
+  NotificationDelivery,
+  NotificationDeliverySetting,
+  NotificationDevice,
   NotificationPreference,
   NotificationSourceEvent,
 } from "../../features/notifications/notification.model.js";
@@ -136,6 +139,9 @@ const entities = [
   NotificationActor,
   NotificationSourceEvent,
   NotificationPreference,
+  NotificationDevice,
+  NotificationDelivery,
+  NotificationDeliverySetting,
   OutboxMessage,
   ProjectionProcessedEvent,
   SchemaMigration,

@@ -9,6 +9,7 @@ import { UnauthenticatedError } from "../../lib/errors/unauthorized-error.js";
 import type { RequestContext } from "../../types/request-context.js";
 import type { UserRepository } from "../users/user.repository.js";
 import { classifyRefreshFailure, endsSession, isUsable } from "./authentication.policy.js";
+import { announceSecurityChange, announcesRevocation } from "./security-events.js";
 import type { SessionRepository } from "./session.repository.js";
 
 /**
@@ -294,6 +295,19 @@ export class SessionService {
         traceId: context.traceId,
         context: { revoked: revoked.length },
       });
+
+      // Only a deliberate "sign out everywhere". Revocation also follows a
+      // password change and an account deactivation, and both of those already
+      // produce their own message — announcing this as well would send two
+      // about one action, which is how people learn to ignore the category.
+      if (announcesRevocation(reason)) {
+        await announceSecurityChange(tx, this.accounts, {
+          identityId,
+          change: "sessions_revoked",
+          at,
+          traceId: context.traceId,
+        });
+      }
 
       return revoked.length;
     });

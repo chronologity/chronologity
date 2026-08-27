@@ -42,6 +42,27 @@ export function candidateFrom(event: ConsumedEvent): Candidate | undefined {
       return build("follow_requested", text("actorUserId"), text("followedUserId"), "user", text("actorUserId"), undefined);
     case "FollowRequestAccepted":
       return build("follow_request_accepted", text("actorUserId"), text("requesterUserId"), "user", text("actorUserId"), undefined);
+    case "AccountSecurityChanged": {
+      // The recipient is the account itself. There is no actor: whoever
+      // performed the change is exactly what this system cannot know during a
+      // takeover, and naming the account as its own actor would assert
+      // something untrue at the one moment it matters.
+      const userId = text("userId");
+      const change = text("change");
+
+      // Null during registration, which happens before a User exists. Nobody to
+      // tell, which is an ordinary outcome rather than a failure.
+      return userId === undefined || change === undefined
+        ? undefined
+        : {
+            type: change,
+            actorUserId: undefined,
+            subjectUserId: userId,
+            sourceType: "user",
+            sourceId: userId,
+            viaMomentId: undefined,
+          };
+    }
     case "ModerationStateChanged": {
       // Only content states reach somebody. A suspension is announced through
       // the account itself, and 5N already tells people what was done to them

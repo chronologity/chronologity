@@ -106,6 +106,24 @@ export class UserRepository {
   }
 
   /**
+   * The Identity an account signs in with.
+   *
+   * The reverse of `findIdForIdentity`, and needed wherever something has to
+   * reach a person outside the application: an account holds no address of its
+   * own, because addresses belong to the Identity that proves who is asking.
+   *
+   * @param userId - The account.
+   * @returns Its Identity, or undefined when there is no such account.
+   */
+  async findIdentityForId(userId: string): Promise<string | undefined> {
+    const row = await this.dataSource
+      .getRepository(User)
+      .findOne({ where: { userId }, select: { identityId: true } });
+
+    return row?.identityId;
+  }
+
+  /**
    * Whether an account exists at all.
    *
    * Unlike `findPublic` this does not exclude deactivated accounts. Granting or

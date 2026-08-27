@@ -3,12 +3,14 @@ import { generateId } from "../../lib/ids/generate-id.js";
 import { withTransaction } from "../../lib/database/transaction.js";
 import type { MomentService } from "../moments/moment.service.js";
 import {
+  aggregates,
   aggregationKey,
   categoryOf,
   permits,
   recipientOf,
   type NotificationSourceType,
 } from "./notification.policy.js";
+import type { NotificationDeliveryService } from "./notification.delivery.service.js";
 import type { NotificationRepository } from "./notification.repository.js";
 
 /** What one message says happened, once it has been read. */
@@ -60,12 +62,17 @@ export class NotificationGenerator {
    * @param moments - Used to ask whether the recipient may see the Moment the
    *   activity concerns. The Moment visibility rule, reused rather than
    *   restated.
+   * @param deliveries - Opens the deliveries that carry a notification out of
+   *   the application. Optional, and absent it records notifications and
+   *   carries them nowhere — which is what 5Q-1 did, and is still the correct
+   *   behaviour for a process that has no way to send.
    * @param now - Reads the clock, injected so ordering can be tested.
    */
   constructor(
     private readonly dataSource: DataSource,
     private readonly notifications: NotificationRepository,
     private readonly moments: MomentService,
+    private readonly deliveries?: NotificationDeliveryService,
     private readonly now: () => Date = () => new Date(),
   ) {}
 
@@ -97,6 +104,14 @@ export class NotificationGenerator {
       return "not_eligible";
     }
 
+    // The in-app preference decides whether the notification exists at all,
+    // because the notification row is the in-app notification
+    // (`architecture/notifications.md:727`). Switching a category off in-app
+    // therefore silences its email and push as well — there is nothing left for
+    // them to carry — while switching off email or push leaves the in-app
+    // entry standing, which is the asymmetry the document asks for. A required
+    // category is unaffected: `permits` returns true for one whatever is
+    // stored.
     const preference = await this.notifications.preferenceFor(
       recipientUserId,
       category,
@@ -107,23 +122,46 @@ export class NotificationGenerator {
       return "suppressed";
     }
 
-    const recorded = await withTransaction(this.dataSource, (tx) =>
-      this.notifications.record(tx, {
+    const at = this.now();
+
+    // Required notifications do not collapse. A delivery is opened once per
+    // notification per channel, so a second password change folding into a
+    // standing unread entry would be announced to nobody — and the message
+    // somebody most needs is the one saying it has happened again.
+    const key = aggregationKey(recipientUserId, candidate.type, candidate.sourceId);
+    const collapsesInto = aggregates(category) ? key : `${key}:${sourceEventId}`;
+
+    // One transaction for the notification and everything that will carry it.
+    // Recording first and scheduling afterwards would be a dual write whose
+    // failure mode is a notification nobody is ever told about.
+    const notificationId = await withTransaction(this.dataSource, async (tx) => {
+      const recorded = await this.notifications.record(tx, {
         notificationId: generateId(),
         recipientUserId,
         type: candidate.type,
         category,
         sourceType: candidate.sourceType,
         sourceId: candidate.sourceId,
-        aggregationKey: aggregationKey(recipientUserId, candidate.type, candidate.sourceId),
+        aggregationKey: collapsesInto,
         viaMomentId: candidate.viaMomentId,
         actorUserId: candidate.actorUserId,
         sourceEventId,
-        at: this.now(),
-      }),
-    );
+        at,
+      });
 
-    return recorded ? "notified" : "duplicate";
+      if (recorded !== undefined) {
+        await this.deliveries?.schedule(tx, {
+          notificationId: recorded,
+          recipientUserId,
+          category,
+          at,
+        });
+      }
+
+      return recorded;
+    });
+
+    return notificationId !== undefined ? "notified" : "duplicate";
   }
 
   /**

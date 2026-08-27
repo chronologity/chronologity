@@ -35,9 +35,13 @@ export class NotificationRepository {
    *
    * @param tx - The caller's transaction.
    * @param entry - The notification to open or add to.
-   * @returns Whether this actually recorded something. False means the same
-   *   message had already been handled for this person, which is the ordinary
-   *   consequence of at-least-once delivery rather than a failure.
+   * @returns The notification this landed on — which is the standing entry
+   *   where one was open, not necessarily the identifier that was passed in —
+   *   or undefined when the same message had already been handled for this
+   *   person. Undefined is the ordinary consequence of at-least-once delivery
+   *   rather than a failure. The identifier is returned rather than a flag
+   *   because the caller has to open deliveries against it in this same
+   *   transaction.
    */
   async record(
     tx: Transaction,
@@ -55,7 +59,7 @@ export class NotificationRepository {
       sourceEventId: string;
       at: Date;
     },
-  ): Promise<boolean> {
+  ): Promise<string | undefined> {
     // Deduplication first, and on its own row. The same message redelivered
     // gets no further than here, whether or not the notification it produced
     // has since been read — which is what a key on the actor could not have
@@ -67,7 +71,7 @@ export class NotificationRepository {
     );
 
     if (first.length === 0) {
-      return false;
+      return undefined;
     }
 
     // Reuse the unread entry if there is one, and open a new one otherwise.
@@ -109,7 +113,7 @@ export class NotificationRepository {
     if (notificationId === undefined) {
       // The entry was read between the insert and the lookup. Nothing to add
       // to; the next message about this will open a fresh one.
-      return false;
+      return undefined;
     }
 
     if (entry.actorUserId !== undefined) {
@@ -120,7 +124,7 @@ export class NotificationRepository {
       );
     }
 
-    return true;
+    return notificationId;
   }
 
   /**

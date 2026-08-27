@@ -1394,11 +1394,20 @@ Do not use priority as an engagement-ranking system.
 
 # Quiet Hours
 
-User-configurable quiet hours may apply to normal push notifications.
+User-configurable quiet hours apply per channel, as local hours in the account's
+own time zone, and they affect delivery time only.
 
-Critical security notifications may bypass them according to policy.
+Security notifications bypass them. Moderation notifications do not: both are
+mandatory, and whether each waits is the only way they differ.
 
-This is a product preference decision.
+Quiet hours are resolved once, when the delivery is created, and stored as an
+instant on the delivery row. The dispatcher asks only whether that instant has
+passed, so it never reads a time zone.
+
+The opening hour is quiet and the closing hour is not. A window may run past
+midnight. A window whose ends meet is refused by the contract and by the
+database rather than interpreted, because it reads equally well as no quiet
+hours and as a whole day of them.
 
 ---
 
@@ -1642,7 +1651,6 @@ current Timeline context
 - Which categories can Users disable?
 - Which channels can be disabled?
 - Which security/moderation types are mandatory?
-- Are quiet hours supported at launch?
 
 ## Push Provider
 

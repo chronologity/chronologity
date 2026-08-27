@@ -953,7 +953,7 @@ describe("notifications", () => {
       });
 
       assert.equal(preferences.statusCode, 200, preferences.body);
-      assert.deepEqual(preferences.json().required, ["moderation"]);
+      assert.ok(preferences.json().required.includes("moderation"));
 
       await app.inject({
         method: "PUT",
@@ -1008,8 +1008,12 @@ describe("notifications", () => {
         headers: authed(account.accessToken),
       });
 
-      assert.equal(response.json().preferences.length, 9);
-      assert.deepEqual(response.json().required, ["moderation"]);
+      // Four categories on three channels. Security joined the list when
+      // delivery arrived, and it is shown rather than hidden: a category
+      // somebody receives messages from and cannot see in their settings is
+      // worse than one they cannot change.
+      assert.equal(response.json().preferences.length, 12);
+      assert.deepEqual([...response.json().required].sort(), ["moderation", "security"]);
 
       for (const preference of response.json().preferences) {
         // Absence means yes: somebody who has never opened the settings has not

@@ -10,9 +10,11 @@ import { UnauthenticatedError } from "../../lib/errors/unauthorized-error.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
 import { normalizePhone } from "../../lib/phone/normalize-phone.js";
 import type { RequestContext } from "../../types/request-context.js";
+import type { UserRepository } from "../users/user.repository.js";
 import type { IdentityRepository } from "./identity.repository.js";
 import { checkPhoneSignIn } from "./phone.policy.js";
 import type { PhoneRepository } from "./phone.repository.js";
+import { announceSecurityChange } from "./security-events.js";
 import type { SessionService } from "./session.service.js";
 
 /**
@@ -49,6 +51,8 @@ export class PhoneService {
    *   exists.
    * @param email - Sends the notices that make a phone sign-in visible.
    * @param config - Code lifetime.
+   * @param accounts - Resolves an Identity to the account it signs in to, so a
+   *   security announcement can name who it concerns.
    * @param clock - Injected so tests can move time without waiting.
    */
   constructor(
@@ -59,6 +63,7 @@ export class PhoneService {
     private readonly sms: SmsClient,
     private readonly email: EmailClient,
     private readonly config: AuthConfig,
+    private readonly accounts: UserRepository,
     private readonly clock: () => Date = () => new Date(),
   ) {}
 
@@ -165,6 +170,16 @@ export class PhoneService {
 
       if (consumed) {
         await this.phones.markVerified(tx, held.normalizedPhone, at);
+
+        // Announced on confirmation rather than on the claim. An unproven
+        // number is somebody typing digits; a proven one is a second way into
+        // the account, which is what makes it worth telling them about.
+        await announceSecurityChange(tx, this.accounts, {
+          identityId,
+          change: "phone_claimed",
+          at,
+          traceId: context.traceId,
+        });
       }
 
       return consumed;
@@ -184,6 +199,8 @@ export class PhoneService {
    *   asked for, not an error.
    */
   async remove(identityId: string, context: RequestContext): Promise<void> {
+    const at = this.clock();
+
     await withTransaction(this.dataSource, async (tx) => {
       const removed = await this.phones.remove(tx, identityId);
 
@@ -192,6 +209,15 @@ export class PhoneService {
           eventType: "phone_removed",
           outcome: "success",
           identityId,
+          traceId: context.traceId,
+        });
+
+        // Removing the second factor is a step towards taking an account over,
+        // so it is announced for the same reason adding one is.
+        await announceSecurityChange(tx, this.accounts, {
+          identityId,
+          change: "phone_removed",
+          at,
           traceId: context.traceId,
         });
       }
