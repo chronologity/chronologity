@@ -479,9 +479,15 @@ message contains the raw sensitive value
 ```
 
 The consumer then reads what it needs from PostgreSQL, which can be corrected,
-erased, or refused. This is why authentication publishes nothing at all: its
-accountability requirement is met by a relational audit trail that erasure can
-reach.
+erased, or refused.
+
+Authentication follows this rather than being exempt from it. It publishes one
+event — that something about an account's security changed — carrying the
+Identity, the account, which change, and when. No password, no hash, no token,
+no phone number, and no address: anything a consumer needs in order to reach
+somebody is read from authoritative state, where erasure can still reach it.
+The accountability requirement is met by a relational audit trail, which the
+event does not duplicate.
 
 where erasure may be required.
 
