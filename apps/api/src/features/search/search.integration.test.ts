@@ -117,7 +117,18 @@ const uniqueEmail = () => `person-${randomUUID()}@example.test`;
 const uniqueHandle = () => `h${randomUUID().replaceAll("-", "").slice(0, 12)}`;
 
 /** A word nothing else in the shared database will contain. */
-const rareWord = () => `zq${randomUUID().replaceAll("-", "").slice(0, 10)}`;
+/**
+ * A word no real caption contains.
+ *
+ * Letters rather than hexadecimal, and the reason is measurable. Hex has
+ * sixteen symbols, so two of these share enough trigrams to reach similarity
+ * 0.3 — which is exactly the threshold search retrieves at, so one test's word
+ * matched another test's Moment and an exact-result assertion failed. Three
+ * pairs in two hundred words. Over twenty-six letters, four hundred words peak
+ * at 0.200 and nothing collides.
+ */
+const rareWord = () =>
+  `zq${Array.from({ length: 12 }, () => "abcdefghijklmnopqrstuvwxyz"[Math.floor(Math.random() * 26)]).join("")}`;
 
 describe("search", () => {
   let app: FastifyInstance;
