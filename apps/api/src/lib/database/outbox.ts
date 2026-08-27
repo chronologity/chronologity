@@ -284,18 +284,26 @@ export async function sweepPublishedOutbox(
   // `DELETE ... RETURNING` run through the driver yields the rows and the row
   // count together, so measuring the result is measuring the wrong thing — it
   // is two either way.
+  //
+  // `AS MATERIALIZED` is what makes the batch a batch. Without it the planner
+  // may inline the subquery into the `IN` and evaluate it more than once,
+  // applying `LIMIT` afresh each time — this swept three messages with a batch
+  // of two, having done so latently since it was written and surfaced only when
+  // another suite changed the table enough to change the plan. Naming the
+  // primary key rather than `ctid` does not help: the hazard is the
+  // re-evaluation, not the identifier.
   const counted: { removed: number }[] = await dataSource.query(
-    `WITH swept AS (
+    `WITH doomed AS MATERIALIZED (
+       SELECT id
+         FROM outbox_messages
+        WHERE published_at IS NOT NULL
+          AND published_at < $1
+        ORDER BY published_at
+        LIMIT $2
+          FOR UPDATE SKIP LOCKED
+     ), swept AS (
        DELETE FROM outbox_messages
-        WHERE id IN (
-          SELECT id
-            FROM outbox_messages
-           WHERE published_at IS NOT NULL
-             AND published_at < $1
-           ORDER BY published_at
-           LIMIT $2
-             FOR UPDATE SKIP LOCKED
-        )
+        WHERE id IN (SELECT id FROM doomed)
         RETURNING id
      )
      SELECT count(*)::int AS removed FROM swept`,
