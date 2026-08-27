@@ -19,6 +19,26 @@ import type { DataSource } from "typeorm";
  */
 
 /**
+ * A run of lowercase letters.
+ *
+ * Used wherever a fixture needs a name nothing else will look like. Letters
+ * rather than hexadecimal because trigram search cannot tell two hexadecimal
+ * tokens apart reliably enough: sixteen symbols leave enough trigrams in common
+ * that one fixture's name is offered as a correction for another suite's query.
+ *
+ * @param length - How many letters.
+ * @returns The run.
+ */
+function randomLetters(length: number): string {
+  const alphabet = "abcdefghijklmnopqrstuvwxyz";
+
+  return Array.from(
+    { length },
+    () => alphabet[Math.floor(Math.random() * alphabet.length)],
+  ).join("");
+}
+
+/**
  * An Identity with nothing attached: no address, no password, no Session.
  *
  * @param dataSource - The database under test.
@@ -168,7 +188,13 @@ export async function createLocation(
      ) VALUES ($1, $2, $3, 40.7505, -73.9934, 'exact', 'explicit-selection',
                'Midtown', 'New York City', 'New York', 'United States', 'US',
                now(), now())`,
-    [locationId, recordedByUserId, `Somewhere ${locationId.slice(0, 8)}`],
+    // Letters rather than the identifier's hexadecimal. Search corrections are
+    // drawn at trigram similarity 0.15, and a hexadecimal name shares enough
+    // trigrams with the hexadecimal tokens other suites search for to be
+    // offered as "did you mean" — measured at 0.174 for a real collision, and
+    // 0.000 once the alphabet is twenty-six letters. This fixture is shared, so
+    // a name generated here pollutes every suite that searches.
+    [locationId, recordedByUserId, `Somewhere ${randomLetters(8)}`],
   );
 
   return locationId;
