@@ -6824,6 +6824,884 @@
         }
       }
     },
+    "/users/me/export": {
+      "post": {
+        "summary": "Ask for a copy of your history",
+        "tags": [
+          "Users"
+        ],
+        "description": "Sends a confirmation link to your verified email address. Nothing is prepared until you use it.\n\nThe link exists for the same reason deletion has one: an export is everything you have, and a signed-in session only shows that somebody signed in once. Using it shows you can read the mailbox now, and the mail arriving means a stranger holding your session cannot quietly take a copy of your history.",
+        "responses": {
+          "202": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "nullable": true,
+                  "enum": [
+                    null
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation. `details` names the field where it can.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "The request failed validation. `details` names the field where it can."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required, or the session can no longer authenticate a request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authentication is required, or the session can no longer authenticate a request."
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted. `ONBOARDING_REQUIRED` means the caller has an Identity but has not finished creating an account, and should be sent to onboarding rather than to sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authenticated, but not permitted. `ONBOARDING_REQUIRED` means the caller has an Identity but has not finished creating an account, and should be sent to onboarding rather than to sign in again."
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push."
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller."
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Where your export is",
+        "tags": [
+          "Users"
+        ],
+        "description": "Reports how far along your export is and, once it is ready, where to fetch it.\n\n**Every link in the manifest is signed when you ask and lives for minutes.** A link signed when the export was built would still work days later, which is the same as having no expiry at all.\n\nYour photographs and videos are not copied to prepare an export — the manifest points at the originals. Media for a Moment you have since deleted is absent, because the manifest is built from what you have now rather than from what you had then.\n\nA prepared export is removed after a few days.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "ready",
+                        "failed",
+                        "abandoned",
+                        "expired"
+                      ]
+                    },
+                    "requestedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "completedAt": {
+                      "nullable": true,
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "expiresAt": {
+                      "nullable": true,
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "manifest": {
+                      "type": "object",
+                      "properties": {
+                        "preparedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        },
+                        "parts": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "url": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "url"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "media": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "uploadId": {
+                                "type": "string",
+                                "format": "uuid",
+                                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                              },
+                              "kind": {
+                                "type": "string"
+                              },
+                              "contentType": {
+                                "nullable": true,
+                                "type": "string"
+                              },
+                              "byteSize": {
+                                "nullable": true,
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "url": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "uploadId",
+                              "kind",
+                              "contentType",
+                              "byteSize",
+                              "url"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "preparedAt",
+                        "expiresAt",
+                        "parts",
+                        "media"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "requestedAt",
+                    "completedAt",
+                    "expiresAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation. `details` names the field where it can.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "The request failed validation. `details` names the field where it can."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required, or the session can no longer authenticate a request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authentication is required, or the session can no longer authenticate a request."
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted. `ONBOARDING_REQUIRED` means the caller has an Identity but has not finished creating an account, and should be sent to onboarding rather than to sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authenticated, but not permitted. `ONBOARDING_REQUIRED` means the caller has an Identity but has not finished creating an account, and should be sent to onboarding rather than to sign in again."
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push."
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/me/export/confirmation": {
+      "post": {
+        "summary": "Confirm that you want your history prepared",
+        "tags": [
+          "Users"
+        ],
+        "description": "Takes the token from the confirmation link and starts the work. A large history takes a while; check back with the endpoint below. Confirming while one is already being prepared changes nothing.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  }
+                },
+                "required": [
+                  "token"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "nullable": true,
+                  "enum": [
+                    null
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation. `details` names the field where it can.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "The request failed validation. `details` names the field where it can."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required, or the session can no longer authenticate a request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authentication is required, or the session can no longer authenticate a request."
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted. `ONBOARDING_REQUIRED` means the caller has an Identity but has not finished creating an account, and should be sent to onboarding rather than to sign in again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authenticated, but not permitted. `ONBOARDING_REQUIRED` means the caller has an Identity but has not finished creating an account, and should be sent to onboarding rather than to sign in again."
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push."
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/users/{handle}": {
       "get": {
         "summary": "Read somebody's public profile",

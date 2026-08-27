@@ -1292,6 +1292,24 @@ If Chronologity provides User data export, the export should include data the Us
 - secrets;
 - operational-only identifiers.
 
+Those four exclusions are enforced in two places rather than one, because a leak
+can be introduced in either. The shaping is a set of pure builders that
+construct every field explicitly and never spread a row, tested by handing them
+records full of addresses and identifiers and searching the output. The reads
+are keyed on the account and select only what may travel, tested by fetching a
+prepared export through its own signed links and searching the artefact for
+every address and Identity in the database.
+
+The queries are the isolation story. Nothing selects by anything but the
+account, so no result can belong to somebody else; the one place other people
+appear is as the authors of comments and reactions on the account's own Moments,
+joined for a handle and a display name and nothing more.
+
+An export is prepared asynchronously and written in parts. Media is never
+copied: the manifest points at the originals, signed for minutes at the moment
+somebody asks, so the only new copy preparing an export creates is the data
+itself — and that copy expires.
+
 ---
 
 # Privacy Preferences

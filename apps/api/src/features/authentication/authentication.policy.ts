@@ -104,6 +104,7 @@ const LINK_PATHS: Record<MagicLinkPurpose, string> = {
   verify_email: "/email-verifications",
   reset_password: "/password-resets/complete",
   confirm_deletion: "/account-deletions/confirm",
+  confirm_export: "/data-exports/confirm",
 };
 
 /**

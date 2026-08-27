@@ -775,6 +775,43 @@ Users should eventually be able to obtain a meaningful export of their Chronolog
 
 An export should preserve enough context to remain useful outside the application, including occurrence semantics and relationships where appropriate.
 
+### How an export works
+
+**Asking for one takes two steps.** A confirmation link is sent to the verified
+address, exactly as deletion requires, because an export is everything somebody
+has and a signed-in session only shows that somebody signed in once. The mail
+arriving is itself a protection: a stranger holding a stolen session cannot
+quietly take a copy of somebody's history.
+
+**It is prepared rather than returned.** A history may run to thousands of
+Moments, so the work happens in the background and the result is written in
+parts described by a manifest.
+
+**Media is not copied.** The manifest points at the originals, signed for
+minutes when somebody asks. Preparing an export therefore duplicates no
+photographs or videos at all — the only new copy it makes is the data itself.
+
+**Every link is signed when it is asked for and lives for minutes.** A link
+signed when the export was built would still work days later, which is the same
+as no expiry for anybody who kept the manifest.
+
+**It contains what the person could already see.** Their account and
+preferences; their Moments with occurrence, precision, place and media; comments
+and reactions, theirs and other people's, attributed by handle and display name
+as the application shows them; who they follow, who follows them, and who they
+have blocked; and the moderation decisions made about their own content.
+
+**It contains nothing they could not.** No email address, no Identity, no
+session, no device token, no storage key, no account identifier belonging to
+somebody else, and never the reporter of a report about them — reporting is safe
+only if it stays that way, and an export would be the easiest way around it.
+Who blocked *them* is absent too: that is somebody else's decision about their
+own safety.
+
+**A prepared export is removed after a few days.** It is a second copy of
+somebody's history, and the only thing that stops it being permanent is
+something deciding it should not be.
+
 The exact export formats and day-one scope remain product decisions.
 
 Exportability reinforces the principle that Chronologity is preserving a user's history rather than trapping it inside an interface.
@@ -918,7 +955,6 @@ The following questions should be resolved deliberately:
 - How should shared Event contexts represent private participation?
 - What information, if any, should appear when a historical jump lands in a period containing only inaccessible Moments?
 - Which temporal aggregates are safe to expose at broader zoom levels?
-- What data export capabilities belong in the initial release?
 - Which data categories require retention for security or legal reasons?
 - Should Chronologity ever use facial recognition?
 - Which future AI processing capabilities require separate opt-in?

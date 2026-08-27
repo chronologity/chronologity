@@ -18,6 +18,7 @@ import type {
 } from "../../features/privacy/erasure.repository.js";
 import type { SearchRepository } from "../../features/search/search.repository.js";
 import type { UploadService } from "../../features/uploads/upload.service.js";
+import type { StorageClient } from "../../integrations/storage/storage-client.js";
 import { withTransaction } from "../../lib/database/transaction.js";
 import { generateId } from "../../lib/ids/generate-id.js";
 import type { Logger } from "../../lib/logger/logger.js";
@@ -52,6 +53,8 @@ export interface ErasureOptions {
   readonly moments: MomentRepository;
   readonly comments: MomentCommentRepository;
   readonly accounts: AccountErasureRepository;
+  /** Used to remove what a prepared export left behind. */
+  readonly storage: StorageClient;
   readonly uploads: UploadService;
   readonly documents: SearchRepository;
   /** Which index generation to remove documents from. */
@@ -304,6 +307,15 @@ async function eraseAccount(
     // A full batch almost certainly means more. Come round again rather than
     // sweeping while uploads remain.
     return false;
+  }
+
+  // Before the sweep, because the sweep deletes the rows that say where these
+  // are. A copy of somebody's whole history left in storage with nothing
+  // pointing at it is worse than one nobody has got round to removing.
+  for (const prefix of await options.accounts.exportPrefixes(userId)) {
+    for (const key of await options.storage.list(prefix)) {
+      await options.storage.remove(key);
+    }
   }
 
   await withTransaction(options.dataSource, (tx) => options.accounts.sweep(tx, userId));

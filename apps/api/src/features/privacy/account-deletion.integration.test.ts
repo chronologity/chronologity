@@ -6,7 +6,10 @@ import type { AppConfig } from "../../config/app-config.js";
 import { migrate } from "../../lib/database/migrations.js";
 import { connectDatabase, createDatabase, type Database } from "../../lib/database/postgres.js";
 import { createEmailClient } from "../../integrations/email/email-client.js";
-import { createStorageClient } from "../../integrations/storage/storage-client.js";
+import {
+  createStorageClient,
+  type StorageClient,
+} from "../../integrations/storage/storage-client.js";
 import { buildApp } from "../../server/app.js";
 import { createTestAuthentication, type TestAuthentication } from "../../testing/authentication.js";
 import { eraseDueRequests } from "../../workers/erasure/erase.js";
@@ -127,6 +130,7 @@ describe("account deletion", () => {
   let accountErasure: AccountErasureRepository;
   let documents: SearchRepository;
   let uploads: UploadService;
+  let storage: StorageClient;
   let mail: ReturnType<typeof createEmailClient>;
 
   beforeAll(async () => {
@@ -138,7 +142,8 @@ describe("account deletion", () => {
     mail = createEmailClient(config.email);
 
     const accounts = new UserRepository(database.dataSource);
-    const storage = createStorageClient(config.storage);
+
+    storage = createStorageClient(config.storage);
     const moderationRepository = new ModerationRepository(database.dataSource);
 
     momentRepository = new MomentRepository(database.dataSource);
@@ -321,6 +326,7 @@ describe("account deletion", () => {
         moments: momentRepository,
         comments: commentRepository,
         accounts: accountErasure,
+        storage,
         uploads,
         documents,
         indexVersion: INDEX_VERSION,
@@ -728,6 +734,38 @@ describe("account deletion", () => {
       assert.equal(await countWhere("notifications", "recipient_user_id", leaver.userId), 0);
     });
 
+    it("removes an export it had prepared, objects and all", async () => {
+      const account = await onboard();
+      const requestId = randomUUID();
+      const prefix = `exports/${account.userId}/${requestId}`;
+
+      // The row and the objects an export leaves, written directly: what is
+      // under test is that erasure reaches them, not how they got there.
+      await database.dataSource.query(
+        `INSERT INTO export_requests
+           (request_id, user_id, state, attempts, due_at, storage_prefix, part_count,
+            expires_at, requested_at, completed_at)
+         VALUES ($1, $2, 'ready', 1, now(), $3, 1, now() + interval '3 days', now(), now())`,
+        [requestId, account.userId, prefix],
+      );
+      await storage.put(
+        `${prefix}/moments-0001.json`,
+        new TextEncoder().encode('{"account":{}}'),
+        "application/json",
+      );
+
+      assert.equal((await storage.list(prefix)).length, 1, "written");
+
+      await deleteAccount(account);
+      await erase();
+
+      // A copy of somebody's entire history must not outlive the account it
+      // belongs to. The row going alone would leave the objects in storage
+      // with nothing left pointing at them.
+      assert.deepEqual(await storage.list(prefix), []);
+      assert.equal(await countWhere("export_requests", "user_id", account.userId), 0);
+    });
+
     it("finishes an account with more Moments than one run takes", async () => {
       const account = await onboard();
 
@@ -746,6 +784,7 @@ describe("account deletion", () => {
           moments: momentRepository,
           comments: commentRepository,
           accounts: accountErasure,
+          storage,
           uploads,
           documents,
           indexVersion: INDEX_VERSION,

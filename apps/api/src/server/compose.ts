@@ -27,6 +27,9 @@ import { ModerationRepository } from "../features/moderation/moderation.reposito
 import { DiscoveryRetrieval } from "../features/discovery/discovery.retrieval.js";
 import { AccountDeletionService } from "../features/privacy/account-deletion.service.js";
 import { ErasureRepository } from "../features/privacy/erasure.repository.js";
+import { ExportSourceRepository } from "../features/privacy/export-source.repository.js";
+import { ExportRepository } from "../features/privacy/export.repository.js";
+import { ExportService } from "../features/privacy/export.service.js";
 import { NotificationDeliveryRepository } from "../features/notifications/notification.delivery.repository.js";
 import { NotificationDeliveryService } from "../features/notifications/notification.delivery.service.js";
 import { StoredRecipientDirectory } from "../features/notifications/notification.recipients.js";
@@ -241,6 +244,17 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
       new SessionRepository(database.dataSource),
       new PhoneRepository(database.dataSource),
       new ErasureRepository(database.dataSource),
+      email,
+      config.auth,
+    ),
+    // Asking for an export and finding out where it is. Preparing one is the
+    // worker's: assembling a large history would not fit in a request.
+    dataExport: new ExportService(
+      database.dataSource,
+      new ExportRepository(database.dataSource),
+      new IdentityRepository(database.dataSource),
+      new ExportSourceRepository(database.dataSource),
+      storage,
       email,
       config.auth,
     ),

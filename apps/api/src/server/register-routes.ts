@@ -10,6 +10,7 @@ import { searchRoutes } from "../features/search/search.routes.js";
 import { discoveryRoutes } from "../features/discovery/discovery.routes.js";
 import { notificationRoutes } from "../features/notifications/notification.routes.js";
 import type { AccountDeletionService } from "../features/privacy/account-deletion.service.js";
+import type { ExportService } from "../features/privacy/export.service.js";
 import type { NotificationDeliveryService } from "../features/notifications/notification.delivery.service.js";
 import type { NotificationService } from "../features/notifications/notification.service.js";
 import type { DiscoveryService } from "../features/discovery/discovery.service.js";
@@ -76,6 +77,8 @@ import type { UserService } from "../features/users/user.service.js";
  *   alongside notifications, since there is nothing to carry without them.
  * @param accountDeletion - Asking for an account to be deleted, and confirming
  *   it; mounted only alongside users, since it deletes one.
+ * @param dataExport - Asking for a copy of an account's history; mounted only
+ *   alongside users, since it exports one.
  * @returns Nothing.
  */
 export async function registerRoutes(
@@ -99,6 +102,7 @@ export async function registerRoutes(
   notifications?: NotificationService | undefined,
   notificationDelivery?: NotificationDeliveryService | undefined,
   accountDeletion?: AccountDeletionService | undefined,
+  dataExport?: ExportService | undefined,
 ): Promise<void> {
   await app.register(healthRoutes);
 
@@ -109,7 +113,7 @@ export async function registerRoutes(
       // Mounted only alongside authentication: every User route needs an
       // authenticated caller, and account creation needs the Identity that
       // authentication establishes.
-      await app.register(userRoutes(users, authentication, accountDeletion));
+      await app.register(userRoutes(users, authentication, accountDeletion, dataExport));
 
       if (authorization !== undefined) {
         await app.register(authorizationRoutes(authorization));

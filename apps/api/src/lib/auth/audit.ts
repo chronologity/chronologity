@@ -42,7 +42,9 @@ export type AuthAuditEventType =
    * survive a deletion — of which "this account was deleted, at this time, by
    * somebody who could read its mail" is the clearest example.
    */
-  | "account_deleted";
+  | "account_deleted"
+  /** Somebody asked for a copy of their history, and was sent a link. */
+  | "data_export_requested";
 
 export type AuthAuditOutcome = "success" | "failure";
 

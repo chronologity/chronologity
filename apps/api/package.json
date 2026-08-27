@@ -19,6 +19,7 @@
     "spec:generate": "node dist/cli/generate-spec.js",
     "start": "node dist/main.js",
     "start:erasure": "node dist/workers/erasure/index.js",
+    "start:export": "node dist/workers/export/index.js",
     "start:media": "node dist/workers/media/index.js",
     "start:notification-dispatcher": "node dist/workers/notification-dispatcher/index.js",
     "start:notification-generator": "node dist/workers/notification-generator/index.js",

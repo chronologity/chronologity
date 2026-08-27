@@ -1,5 +1,7 @@
 import {
+  confirmExportRequestSchema,
   createUserRequestSchema,
+  exportStatusSchema,
   currentUserSchema,
   publicUserSchema,
   updateHandleRequestSchema,
@@ -13,6 +15,7 @@ import { requireSession, requireUser } from "../../plugins/auth.plugin.js";
 import { errors } from "../../server/error-responses.js";
 import type { AuthenticationWiring } from "../authentication/authentication.types.js";
 import type { AccountDeletionService } from "../privacy/account-deletion.service.js";
+import type { ExportService } from "../privacy/export.service.js";
 import type { UserService } from "./user.service.js";
 
 /**
@@ -31,12 +34,15 @@ import type { UserService } from "./user.service.js";
  * @param accountDeletion - Asking for the account to be deleted and confirming
  *   it. Optional: a deployment with no erasure worker behind it should not
  *   offer a deletion it cannot finish.
+ * @param dataExport - Asking for a copy of the account's history. Optional for
+ *   the same reason: without a worker there is nobody to prepare one.
  * @returns A Fastify plugin registering the User endpoints.
  */
 export function userRoutes(
   users: UserService,
   authentication: AuthenticationWiring,
   accountDeletion?: AccountDeletionService,
+  dataExport?: ExportService,
 ) {
   return async function register(instance: FastifyInstance): Promise<void> {
     const app = instance.withTypeProvider<ZodTypeProvider>();
@@ -230,6 +236,74 @@ export function userRoutes(
 
           return reply.status(204).send(null);
         },
+      );
+    }
+
+    if (dataExport !== undefined) {
+      app.post(
+        "/users/me/export",
+        {
+          schema: {
+            summary: "Ask for a copy of your history",
+            description: [
+              "Sends a confirmation link to your verified email address. Nothing is prepared until you use it.",
+              "",
+              "The link exists for the same reason deletion has one: an export is everything you have, and a signed-in session only shows that somebody signed in once. Using it shows you can read the mailbox now, and the mail arriving means a stranger holding your session cannot quietly take a copy of your history.",
+            ].join("\n"),
+            response: { 202: z.null(), ...errors(400, 401, 403) },
+          },
+          preHandler: requireUser,
+        },
+        async (request, reply) => {
+          await dataExport.request(request.session.identityId, request.requestContext);
+
+          return reply.status(202).send(null);
+        },
+      );
+
+      app.post(
+        "/users/me/export/confirmation",
+        {
+          schema: {
+            summary: "Confirm that you want your history prepared",
+            description:
+              "Takes the token from the confirmation link and starts the work. A large history takes a while; check back with the endpoint below. Confirming while one is already being prepared changes nothing.",
+            body: confirmExportRequestSchema,
+            response: { 202: z.null(), ...errors(400, 401, 403) },
+          },
+          preHandler: requireUser,
+        },
+        async (request, reply) => {
+          await dataExport.confirm(
+            request.user.userId,
+            request.session.identityId,
+            request.body.token,
+            request.requestContext,
+          );
+
+          return reply.status(202).send(null);
+        },
+      );
+
+      app.get(
+        "/users/me/export",
+        {
+          schema: {
+            summary: "Where your export is",
+            description: [
+              "Reports how far along your export is and, once it is ready, where to fetch it.",
+              "",
+              "**Every link in the manifest is signed when you ask and lives for minutes.** A link signed when the export was built would still work days later, which is the same as having no expiry at all.",
+              "",
+              "Your photographs and videos are not copied to prepare an export \u2014 the manifest points at the originals. Media for a Moment you have since deleted is absent, because the manifest is built from what you have now rather than from what you had then.",
+              "",
+              "A prepared export is removed after a few days.",
+            ].join("\n"),
+            response: { 200: exportStatusSchema, ...errors(400, 401, 403) },
+          },
+          preHandler: requireUser,
+        },
+        async (request) => dataExport.status(request.user.userId),
       );
     }
 

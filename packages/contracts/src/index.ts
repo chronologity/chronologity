@@ -444,6 +444,20 @@ export {
   type SetDiscoverabilityRequest,
 } from "./discovery.js";
 export {
+  confirmExportRequestSchema,
+  exportManifestSchema,
+  exportMediaSchema,
+  exportPartSchema,
+  exportStateSchema,
+  exportStatusSchema,
+  type ConfirmExportRequest,
+  type ExportManifest,
+  type ExportMedia,
+  type ExportPart,
+  type ExportState,
+  type ExportStatus,
+} from "./export.js";
+export {
   deliveryChannelSchema,
   deliverySettingSchema,
   deliverySettingsSchema,

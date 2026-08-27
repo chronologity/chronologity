@@ -91,6 +91,25 @@ export class AccountErasureRepository {
   }
 
   /**
+   * Where any export this account prepared was written.
+   *
+   * @param userId - Whose account.
+   * @returns The prefixes, so the objects can be removed before the rows are.
+   *   A copy of somebody's entire history must not outlive the account it
+   *   belongs to, and deleting the row first would leave it in storage with
+   *   nothing left to say it was there.
+   */
+  async exportPrefixes(userId: string): Promise<string[]> {
+    const rows: { storage_prefix: string }[] = await this.dataSource.query(
+      `SELECT storage_prefix FROM export_requests
+        WHERE user_id = $1 AND storage_prefix IS NOT NULL`,
+      [userId],
+    );
+
+    return rows.map((row) => row.storage_prefix);
+  }
+
+  /**
    * Run every sweep the plan describes.
    *
    * @param tx - The caller's transaction, so the account's rows go together or

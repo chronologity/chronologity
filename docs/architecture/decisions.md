@@ -4035,3 +4035,61 @@ Deleting an account erases everything about the person and everything they autho
 **A strict equality check silently stopped being correct.** `findAccount` guarded with `row.preferences === undefined`, which was right while preferences could never be removed — an unloaded relation is `undefined`. Erasure made a missing one possible, and a missing relation is `null`. The guard stopped matching, and the failure surfaced three features away as a crash reading a property of null while notifying somebody. Two lessons: the comparison is now loose on purpose, and a comment records that the strictness was correct rather than careless when it was written. The reporter columns going nullable was caught the other way round, by a suite that reads `information_schema` and asserts the entities agree with it — which found the drift the same minute it appeared.
 
 **Making a column nullable changed a published contract.** `moderationReportSchema.reporterUserId` is now nullable, because a moderator reading a report from a departed account has to be shown that there is nobody to follow up with. Worth noting as a consequence rather than a detail: a privacy decision about erasure propagated all the way out to the API surface, which is the sort of thing that is cheap now and expensive after clients exist.
+
+---
+
+# ADR-125 — An Export Is a Manifest, Not a Copy
+
+## Status
+
+Accepted.
+
+## Context
+
+5R-2 shipped account deletion. Until export existed beside it, the only way out of Chronologity was to destroy everything — the opposite of what a product built to preserve decades of personal history should offer.
+
+`product/privacy.md:784` sets the hard constraint: a Moment may hold an unlimited number of images and videos, so a history may run to gigabytes. `architecture/security.md:1776` sets the security bar — strong authentication, secure generation, short-lived download access, and no exposure of anybody else's data.
+
+## Decision
+
+**An export is prepared asynchronously, written in parts, and described by a manifest.**
+
+**Media is never copied.** The manifest points at the originals the account already owns, signed for minutes at the moment somebody asks.
+
+**Asking takes two steps**, reusing deletion's confirmation-link machinery with a `confirm_export` purpose.
+
+**Every URL is signed on request**, not at preparation.
+
+**A prepared export expires after a few days**, and the worker that creates them sweeps them.
+
+**Preparing a new export removes what the previous one left**, rather than waiting for its own expiry.
+
+## Rationale
+
+**Not copying the media is the decision everything else follows from.** The storage client has no server-side copy, so copying an export's media would move gigabytes through the API process — which the unlimited-media invariant makes dangerous rather than merely slow. Presigning the originals avoids it entirely, and has a better privacy property as a side effect: the only new copy of anybody's history is the JSON, which is the small part.
+
+**Signing on request rather than at preparation is what makes "short-lived" true.** A URL signed when the export was built would still work days later for anybody who kept the manifest, which is indistinguishable from having no expiry. The manifest is therefore rebuilt on every read, and the media list comes from current state — so somebody who has deleted a Moment since preparing an export is not handed its photographs by a manifest older than the deletion.
+
+**The two-step confirmation is the same reasoning as deletion, applied to the same magnitude of thing.** A session shows somebody signed in once; consuming a fresh link shows they can read the mailbox now. An export is everything the person has, so a stolen session should not be enough — and the mail arriving means it cannot happen unnoticed.
+
+**The exclusions are enforced at two layers because a leak can be introduced at either.** The builders construct every field explicitly and never spread a row; the reads select only what may travel. Both have tests that bite, which took finding out — see below.
+
+**A new export sweeps the old one immediately.** Waiting for the older one's own expiry would leave two copies of somebody's history standing for days when they asked for one.
+
+## Consequences
+
+**A privacy test can be unfalsifiable because the leak it guards against is unreachable from where it looks.** Putting an email address into the account builder failed three unit tests and *passed* the whole integration suite — because the source repository never selects an email, so the builder had nothing to leak. That is good design and a bad test: the integration assertion could not fail. Breaking the repository instead, so an address genuinely reached the artefact, made it fail immediately. Both layers now have a break that proves them. This is the third time in this phase that a guard has looked convincing and turned out unfalsifiable, and all three were found the same way.
+
+**A test's own break can be ineffective, which looks exactly like a passing guard.** The first attempt at breaking the repository added a join without selecting the column, so nothing leaked and the suite passed — briefly suggesting the guard was the problem rather than the break. Worth checking that a deliberate break actually does what it claims before concluding anything from the result.
+
+**Short-lived download access needed a test that did not exist.** Nothing asserted the signed URLs expire; the plan called for the break, and there was no guard for it to fail. The manifest's links are now checked for an `X-Amz-Expires` of at most five minutes, and removing the lifetime argument fails it.
+
+**Sweeps are batch-bounded, and tests must drain them.** An expiry test passed alone and failed in the full file, because by then other accounts' expired exports filled the batch ahead of it. The same lesson as the notification dispatcher and the erasure coordinator, arrived at for the third time.
+
+**Zero retention is not a way to test expiry.** With it, the sweep in the same pass removes what that pass has just written, and the test asserts against an export that never really existed. A clock moved past the expiry is the honest version.
+
+**This is the fourth implementation of claim-lease-retry here** — the outbox publisher, the notification dispatcher, the erasure worker, and now this. Three was a pattern; four is an argument for extracting it. It is not extracted here, because doing so would refactor three working and separately-tested subsystems inside a sub-phase about something else. It is recorded so that a fifth does not simply happen.
+
+**Adding a table caught account erasure out, exactly as intended.** `export_requests` references `users`, and 5R-2's coverage test — which reads `pg_constraint` and demands every reference be swept or deliberately kept — failed the moment the migration landed. The answer it forced is one worth having: a prepared export is a copy of somebody's entire history, and it must not outlive the account it belongs to. Erasure now removes the objects before deleting the rows, because a row deleted first would leave the copy in storage with nothing pointing at it. That guard has now paid for itself once, in the first sub-phase after it was written.
+
+**The trigram-collision flake had a second home.** A shared fixture named Locations `Somewhere <8 hex characters>`, and search corrections are drawn at similarity 0.15: a real collision measured 0.174 against a query derived from a different suite's hexadecimal token, so one test's Location was offered as another's "did you mean". The same defect fixed during 5Q-2 for search's rare words, in a fixture that pollutes every suite because it is shared. Letters measure 0.000. The lesson is narrower than "use letters": a hexadecimal identifier is a poor source of test text anywhere trigram search can see it.

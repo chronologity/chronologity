@@ -85,6 +85,7 @@ async function main(): Promise<void> {
       moments: new MomentRepository(database.dataSource),
       comments: new MomentCommentRepository(database.dataSource),
       accounts: new AccountErasureRepository(database.dataSource),
+      storage,
       uploads,
       documents: new SearchRepository(database.dataSource),
       indexVersion: INDEX_VERSION,

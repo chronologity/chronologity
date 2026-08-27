@@ -97,6 +97,12 @@ export const ACCOUNT_SWEEPS: readonly AccountSweep[] = [
   { table: "authorization_user_roles", column: "user_id", action: "delete" },
   { table: "authorization_user_roles", column: "assigned_by", action: "clear" },
 
+  // Any export it prepared. A copy of somebody's whole history must not outlive
+  // the account it belongs to, and the objects behind these rows are removed
+  // before the rows go — a row deleted first would leave a copy in storage that
+  // nothing would ever come back for.
+  { table: "export_requests", column: "user_id", action: "delete" },
+
   // The account's own records. The date of birth has its own table precisely so
   // that erasing it is one targeted delete rather than a column update.
   { table: "user_restricted_data", column: "user_id", action: "delete" },

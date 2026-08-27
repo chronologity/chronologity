@@ -39,7 +39,14 @@ export type MagicLinkPurpose =
    * and the mail arriving is itself the control, because somebody who has taken
    * an account over cannot quietly delete it without the owner seeing this.
    */
-  | "confirm_deletion";
+  | "confirm_deletion"
+  /**
+   * Proving current control of the address before a copy of everything is made.
+   *
+   * The same reasoning as deletion: an export is the whole of somebody's
+   * history, and a session shows only that somebody signed in once.
+   */
+  | "confirm_export";
 
 export interface IssuedMagicLink {
   /** Sent to the address. Never stored, never logged. */
