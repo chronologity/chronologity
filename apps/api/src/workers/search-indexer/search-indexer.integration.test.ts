@@ -8,6 +8,7 @@ import type { ConsumedEvent } from "../../lib/messaging/consumer.js";
 import { withTransaction } from "../../lib/database/transaction.js";
 import { LocationRepository } from "../../features/locations/location.repository.js";
 import { ModerationRepository } from "../../features/moderation/moderation.repository.js";
+import { MomentCommentRepository } from "../../features/moments/moment-comment.repository.js";
 import { MomentRepository } from "../../features/moments/moment.repository.js";
 import { MomentService } from "../../features/moments/moment.service.js";
 import { RealWorldEventRepository } from "../../features/real-world-events/real-world-event.repository.js";
@@ -97,7 +98,6 @@ const config: AppConfig = {
   },
 };
 
-
 describe("search indexer", () => {
   let database: Database;
   let indexer: SearchIndexer;
@@ -123,6 +123,7 @@ describe("search indexer", () => {
       new FollowRepository(database.dataSource),
       new UserRepository(database.dataSource),
       new ModerationRepository(database.dataSource),
+      new MomentCommentRepository(database.dataSource),
     );
   });
 
@@ -354,9 +355,15 @@ describe("search indexer", () => {
     it("indexes again when a different message arrives about the same thing", async () => {
       const { author, momentId } = await someoneWithAMoment();
 
-      await indexFromEvent(indexer, message("MomentRecorded", { momentId, authorUserId: author.userId }));
+      await indexFromEvent(
+        indexer,
+        message("MomentRecorded", { momentId, authorUserId: author.userId }),
+      );
       await moments.updateCaption(momentId, author.userId, "Revised");
-      await indexFromEvent(indexer, message("MomentRevised", { momentId, authorUserId: author.userId }));
+      await indexFromEvent(
+        indexer,
+        message("MomentRevised", { momentId, authorUserId: author.userId }),
+      );
 
       assert.equal((await documentFor("moment", momentId))?.title, "Revised");
     });
@@ -474,10 +481,9 @@ describe("search indexer", () => {
 
         assert.equal(await documentFor("moment", momentId), undefined);
       } finally {
-        await database.dataSource.query(
-          `DELETE FROM moderation_states WHERE subject_id = $1`,
-          [momentId],
-        );
+        await database.dataSource.query(`DELETE FROM moderation_states WHERE subject_id = $1`, [
+          momentId,
+        ]);
         await database.dataSource.query(
           `ALTER TABLE moderation_states ADD CONSTRAINT moderation_states_state_check
              CHECK (state IN ('allowed','warned','restricted_from_amplification',

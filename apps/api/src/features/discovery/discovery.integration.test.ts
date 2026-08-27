@@ -13,6 +13,7 @@ import { AuthorizationService } from "../authorization/authorization.service.js"
 import { LocationRepository } from "../locations/location.repository.js";
 import { ModerationRepository } from "../moderation/moderation.repository.js";
 import { ModerationService } from "../moderation/moderation.service.js";
+import { MomentCommentRepository } from "../moments/moment-comment.repository.js";
 import { MomentRepository } from "../moments/moment.repository.js";
 import { MomentService } from "../moments/moment.service.js";
 import { RealWorldEventRepository } from "../real-world-events/real-world-event.repository.js";
@@ -100,8 +101,6 @@ const config: AppConfig = {
   },
 };
 
-
-
 const ADULT = "1990-04-12";
 
 /** Fifteen today: old enough for an account, not old enough to be recommended. */
@@ -164,6 +163,7 @@ describe("discovery", () => {
       new FollowRepository(database.dataSource),
       new UserRepository(database.dataSource),
       moderationRepository,
+      new MomentCommentRepository(database.dataSource),
     );
 
     app = await buildApp({
@@ -714,10 +714,10 @@ describe("discovery", () => {
       await indexer.index("moment", popular);
 
       // Engagement is not a signal, and the ranking code cannot reach one.
-      assert.deepEqual(
-        recommendedIds(await fromEvent(author.accessToken, event)),
-        [significant, popular],
-      );
+      assert.deepEqual(recommendedIds(await fromEvent(author.accessToken, event)), [
+        significant,
+        popular,
+      ]);
     });
 
     it("gives the same page twice", async () => {
@@ -749,8 +749,7 @@ describe("discovery", () => {
     it("says the same reason for everything it offers", async () => {
       const seeker = await onboard();
 
-      for (const one of (await explore(seeker.accessToken, { limit: 20 })).json()
-        .recommendations) {
+      for (const one of (await explore(seeker.accessToken, { limit: 20 })).json().recommendations) {
         assert.deepEqual(one.because, ["significant"]);
       }
     });
@@ -894,10 +893,7 @@ describe("discovery", () => {
 
       // Nothing finer than a region cell was ever stored, so a street-sized
       // view cannot reach it. The same rule Search follows.
-      assert.equal(
-        recommendedIds(await nearby(author.accessToken, 100)).includes(momentId),
-        false,
-      );
+      assert.equal(recommendedIds(await nearby(author.accessToken, 100)).includes(momentId), false);
       assert.ok(recommendedIds(await nearby(author.accessToken, 500_000)).includes(momentId));
     });
 

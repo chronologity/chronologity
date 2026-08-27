@@ -13,6 +13,7 @@ import { AuthorizationService } from "../authorization/authorization.service.js"
 import { LocationRepository } from "../locations/location.repository.js";
 import { ModerationRepository } from "../moderation/moderation.repository.js";
 import { ModerationService } from "../moderation/moderation.service.js";
+import { MomentCommentRepository } from "../moments/moment-comment.repository.js";
 import { MomentRepository } from "../moments/moment.repository.js";
 import { MomentService } from "../moments/moment.service.js";
 import { RealWorldEventRepository } from "../real-world-events/real-world-event.repository.js";
@@ -101,7 +102,6 @@ const config: AppConfig = {
   },
 };
 
-
 const ADULT = "1990-04-12";
 
 /** Fifteen today: old enough for an account, not for everything. */
@@ -167,6 +167,7 @@ describe("search", () => {
       new FollowRepository(database.dataSource),
       new UserRepository(database.dataSource),
       moderationRepository,
+      new MomentCommentRepository(database.dataSource),
     );
 
     app = await buildApp({
@@ -655,23 +656,31 @@ describe("search", () => {
       const word = rareWord();
 
       const older = await recordAndIndex(author, `${word} older`, {
-        occurrence: { start: "1990-01-01T00:00:00.000Z", end: "1990-01-01T00:00:00.000Z", precision: "instant" },
+        occurrence: {
+          start: "1990-01-01T00:00:00.000Z",
+          end: "1990-01-01T00:00:00.000Z",
+          precision: "instant",
+        },
       });
       const newer = await recordAndIndex(author, `${word}`, {
-        occurrence: { start: "2010-01-01T00:00:00.000Z", end: "2010-01-01T00:00:00.000Z", precision: "instant" },
+        occurrence: {
+          start: "2010-01-01T00:00:00.000Z",
+          end: "2010-01-01T00:00:00.000Z",
+          precision: "instant",
+        },
       });
 
       // The newer one is also the better textual match, so relevance would put
       // it first either way. Oldest-first is what proves relevance plays no
       // part at all.
-      assert.deepEqual(idsFrom(await search(author.accessToken, { q: word, sort: "occurrence_old" })), [
-        older,
-        newer,
-      ]);
-      assert.deepEqual(idsFrom(await search(author.accessToken, { q: word, sort: "occurrence_new" })), [
-        newer,
-        older,
-      ]);
+      assert.deepEqual(
+        idsFrom(await search(author.accessToken, { q: word, sort: "occurrence_old" })),
+        [older, newer],
+      );
+      assert.deepEqual(
+        idsFrom(await search(author.accessToken, { q: word, sort: "occurrence_new" })),
+        [newer, older],
+      );
     });
 
     it("pages without repeating or skipping", async () => {
@@ -1157,9 +1166,11 @@ describe("search", () => {
       const moderator = await onboardModerator();
       const seeker = await onboard();
 
-      assert.ok(suggestedIds(await suggest(seeker.accessToken, { q: name.slice(0, 6) })).includes(
-        account.userId,
-      ));
+      assert.ok(
+        suggestedIds(await suggest(seeker.accessToken, { q: name.slice(0, 6) })).includes(
+          account.userId,
+        ),
+      );
 
       await app.inject({
         method: "PUT",
@@ -1169,7 +1180,10 @@ describe("search", () => {
       });
       await indexer.index("user", account.userId);
 
-      assert.deepEqual(suggestedIds(await suggest(seeker.accessToken, { q: name.slice(0, 6) })), []);
+      assert.deepEqual(
+        suggestedIds(await suggest(seeker.accessToken, { q: name.slice(0, 6) })),
+        [],
+      );
     });
 
     it("does not suggest a deactivated account", async () => {
@@ -1184,7 +1198,10 @@ describe("search", () => {
       });
       await indexer.index("user", account.userId);
 
-      assert.deepEqual(suggestedIds(await suggest(seeker.accessToken, { q: name.slice(0, 6) })), []);
+      assert.deepEqual(
+        suggestedIds(await suggest(seeker.accessToken, { q: name.slice(0, 6) })),
+        [],
+      );
     });
 
     it("hides suggestions in both directions once a Block exists", async () => {
@@ -1289,7 +1306,10 @@ describe("search", () => {
       // Drawn from the eligible set, after eligibility. Drawn before it, this
       // is how a withheld name reaches a stranger through a door marked "did
       // you mean".
-      assert.equal((await search(seeker.accessToken, { q: nearMiss })).json().didYouMean, undefined);
+      assert.equal(
+        (await search(seeker.accessToken, { q: nearMiss })).json().didYouMean,
+        undefined,
+      );
     });
 
     it("never names something across a Block", async () => {
@@ -1305,7 +1325,10 @@ describe("search", () => {
         headers: authed(account.accessToken),
       });
 
-      assert.equal((await search(seeker.accessToken, { q: nearMiss })).json().didYouMean, undefined);
+      assert.equal(
+        (await search(seeker.accessToken, { q: nearMiss })).json().didYouMean,
+        undefined,
+      );
     });
 
     it("never offers a caption", async () => {
@@ -1387,7 +1410,10 @@ describe("search", () => {
         // An enumeration surface by construction: the eligibility rule bounds
         // what each answer contains, not how many answers somebody may collect.
         assert.deepEqual(statuses.slice(0, 3), [200, 200, 200]);
-        assert.ok(statuses.slice(3).every((status) => status === 429), statuses.join(","));
+        assert.ok(
+          statuses.slice(3).every((status) => status === 429),
+          statuses.join(","),
+        );
       } finally {
         await limited.close();
       }

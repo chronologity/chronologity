@@ -25,6 +25,7 @@ import { AuthorizationService } from "../features/authorization/authorization.se
 import { LocationRepository } from "../features/locations/location.repository.js";
 import { ModerationRepository } from "../features/moderation/moderation.repository.js";
 import { DiscoveryRetrieval } from "../features/discovery/discovery.retrieval.js";
+import { ErasureRepository } from "../features/privacy/erasure.repository.js";
 import { NotificationDeliveryRepository } from "../features/notifications/notification.delivery.repository.js";
 import { NotificationDeliveryService } from "../features/notifications/notification.delivery.service.js";
 import { StoredRecipientDirectory } from "../features/notifications/notification.recipients.js";
@@ -94,7 +95,6 @@ export interface ComposedApp {
  *   the routes back out.
  */
 export async function composeApp(config: AppConfig): Promise<ComposedApp> {
-
   // Loaded before anything serves traffic: a missing index is a broken build,
   // and discovering that on someone's first registration would mean the check
   // had been silently absent until then.
@@ -135,6 +135,10 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
   // service writes those decisions.
   const moderationRepository = new ModerationRepository(database.dataSource);
 
+  // Shared rather than built twice: comments own it, and Moments blank every
+  // comment on one when it is deleted.
+  const momentCommentRepository = new MomentCommentRepository(database.dataSource);
+
   const moments = new MomentService(
     database.dataSource,
     new MomentRepository(database.dataSource),
@@ -144,10 +148,14 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
     new FollowRepository(database.dataSource),
     accounts,
     moderationRepository,
+    momentCommentRepository,
+    // Deleting a Moment records the erasure still owed, in the same transaction.
+    // The HTTP process never performs one: erasing media is unbounded
+    // object-storage work and belongs to the worker.
+    new ErasureRepository(database.dataSource),
   );
 
   const momentReactionRepository = new MomentReactionRepository(database.dataSource);
-  const momentCommentRepository = new MomentCommentRepository(database.dataSource);
 
   const momentSignificanceRepository = new MomentSignificanceRepository(database.dataSource);
 

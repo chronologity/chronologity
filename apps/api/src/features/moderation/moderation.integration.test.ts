@@ -147,6 +147,7 @@ describe("moderation", () => {
       new FollowRepository(database.dataSource),
       new UserRepository(database.dataSource),
       moderationRepository,
+      new MomentCommentRepository(database.dataSource),
     );
 
     app = await buildApp({
@@ -650,12 +651,7 @@ describe("moderation", () => {
         assert.equal(response.statusCode, 403, `${surface.url}: ${response.body}`);
       }
 
-      const moderated = await moderate(
-        ordinary.accessToken,
-        "moment",
-        author.momentId,
-        "removed",
-      );
+      const moderated = await moderate(ordinary.accessToken, "moment", author.momentId, "removed");
 
       assert.equal(moderated.statusCode, 403, moderated.body);
     });
@@ -1740,12 +1736,7 @@ describe("moderation", () => {
       const stranger = await onboard();
       const moderator = await onboardModerator();
 
-      const moderated = await moderate(
-        moderator.accessToken,
-        "media",
-        author.uploadId,
-        "removed",
-      );
+      const moderated = await moderate(moderator.accessToken, "media", author.uploadId, "removed");
 
       assert.equal(moderated.statusCode, 200, moderated.body);
 

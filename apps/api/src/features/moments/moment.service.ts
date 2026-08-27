@@ -34,12 +34,15 @@ import {
   describeReorderRejection,
   positionMedia,
 } from "./moment.policy.js";
+import type { ErasureRepository } from "../privacy/erasure.repository.js";
+import type { MomentCommentRepository } from "./moment-comment.repository.js";
 import type { MomentRepository } from "./moment.repository.js";
 import type { UndisclosedMoment } from "./moment.types.js";
 import { disclosePlace } from "./moment.disclosure-policy.js";
 import { isAdult } from "../moderation/moderation.policy.js";
 import type { ModerationRepository } from "../moderation/moderation.repository.js";
 import { checkVisibility, type ViewFacts } from "./moment.visibility-policy.js";
+import { generateId } from "../../lib/ids/generate-id.js";
 import { decodeCursor, encodeCursor } from "../../lib/pagination/cursor.js";
 
 /**
@@ -78,6 +81,12 @@ export class MomentService {
    * @param moderation - Used to ask what Chronologity has decided about a
    *   Moment, whether its author is suspended, and whether the Viewer is old
    *   enough for age-restricted content.
+   * @param comments - Used to blank every comment on a Moment when it is
+   *   deleted, whoever wrote it.
+   * @param erasures - Where the request to finish a deletion is recorded.
+   *   Optional, and absent a deletion marks the Moment and erases nothing
+   *   further — which is what this service did before erasure existed, and is
+   *   the right behaviour for a process with no worker behind it.
    * @param clock - Injected so tests can move time without waiting.
    */
   constructor(
@@ -89,6 +98,8 @@ export class MomentService {
     private readonly follows: FollowRepository,
     private readonly users: UserRepository,
     private readonly moderation: ModerationRepository,
+    private readonly comments: MomentCommentRepository,
+    private readonly erasures?: ErasureRepository,
     private readonly clock: () => Date = () => new Date(),
   ) {}
 
@@ -141,8 +152,14 @@ export class MomentService {
         locationDisclosure: request.locationDisclosure,
         createdAt: this.clock(),
       });
-      await this.announce(tx, "MomentRecorded", momentId, authorUserId,
-        { recordedAt: this.clock().toISOString() }, context);
+      await this.announce(
+        tx,
+        "MomentRecorded",
+        momentId,
+        authorUserId,
+        { recordedAt: this.clock().toISOString() },
+        context,
+      );
     });
 
     await this.associate(momentId, request.locationId, request.realWorldEventIds);
@@ -281,8 +298,14 @@ export class MomentService {
 
     await withTransaction(this.dataSource, async (tx) => {
       await this.moments.setLocation(tx, momentId, locationId, this.clock());
-      await this.announce(tx, "MomentRevised", momentId, viewerUserId,
-        { kind: "location", revisedAt: this.clock().toISOString() }, context);
+      await this.announce(
+        tx,
+        "MomentRevised",
+        momentId,
+        viewerUserId,
+        { kind: "location", revisedAt: this.clock().toISOString() },
+        context,
+      );
     });
 
     return this.getForAuthor(momentId, viewerUserId);
@@ -308,8 +331,14 @@ export class MomentService {
 
     await withTransaction(this.dataSource, async (tx) => {
       await this.moments.clearLocation(tx, momentId);
-      await this.announce(tx, "MomentRevised", momentId, viewerUserId,
-        { kind: "location", revisedAt: this.clock().toISOString() }, context);
+      await this.announce(
+        tx,
+        "MomentRevised",
+        momentId,
+        viewerUserId,
+        { kind: "location", revisedAt: this.clock().toISOString() },
+        context,
+      );
     });
 
     return this.getForAuthor(momentId, viewerUserId);
@@ -339,8 +368,14 @@ export class MomentService {
 
     await withTransaction(this.dataSource, async (tx) => {
       await this.moments.addRealWorldEvent(tx, momentId, realWorldEventId, this.clock());
-      await this.announce(tx, "MomentRevised", momentId, viewerUserId,
-        { kind: "real_world_events", revisedAt: this.clock().toISOString() }, context);
+      await this.announce(
+        tx,
+        "MomentRevised",
+        momentId,
+        viewerUserId,
+        { kind: "real_world_events", revisedAt: this.clock().toISOString() },
+        context,
+      );
     });
 
     return this.getForAuthor(momentId, viewerUserId);
@@ -367,8 +402,14 @@ export class MomentService {
 
     await withTransaction(this.dataSource, async (tx) => {
       await this.moments.removeRealWorldEvent(tx, momentId, realWorldEventId);
-      await this.announce(tx, "MomentRevised", momentId, viewerUserId,
-        { kind: "real_world_events", revisedAt: this.clock().toISOString() }, context);
+      await this.announce(
+        tx,
+        "MomentRevised",
+        momentId,
+        viewerUserId,
+        { kind: "real_world_events", revisedAt: this.clock().toISOString() },
+        context,
+      );
     });
 
     return this.getForAuthor(momentId, viewerUserId);
@@ -405,8 +446,14 @@ export class MomentService {
         previous: { caption: before.caption },
         at,
       });
-      await this.announce(tx, "MomentRevised", momentId, viewerUserId,
-        { kind: "caption", revisedAt: at.toISOString() }, context);
+      await this.announce(
+        tx,
+        "MomentRevised",
+        momentId,
+        viewerUserId,
+        { kind: "caption", revisedAt: at.toISOString() },
+        context,
+      );
     });
 
     return this.getForAuthor(momentId, viewerUserId);
@@ -460,8 +507,14 @@ export class MomentService {
         },
         at,
       });
-      await this.announce(tx, "MomentRevised", momentId, viewerUserId,
-        { kind: "occurrence", revisedAt: at.toISOString() }, context);
+      await this.announce(
+        tx,
+        "MomentRevised",
+        momentId,
+        viewerUserId,
+        { kind: "occurrence", revisedAt: at.toISOString() },
+        context,
+      );
     });
 
     return this.getForAuthor(momentId, viewerUserId);
@@ -516,8 +569,14 @@ export class MomentService {
         previous: { uploadIds: present },
         at,
       });
-      await this.announce(tx, "MomentRevised", momentId, viewerUserId,
-        { kind: "media", revisedAt: at.toISOString() }, context);
+      await this.announce(
+        tx,
+        "MomentRevised",
+        momentId,
+        viewerUserId,
+        { kind: "media", revisedAt: at.toISOString() },
+        context,
+      );
     });
 
     return this.getForAuthor(momentId, viewerUserId);
@@ -570,8 +629,14 @@ export class MomentService {
         previous: { uploadIds: present },
         at,
       });
-      await this.announce(tx, "MomentRevised", momentId, viewerUserId,
-        { kind: "media", revisedAt: at.toISOString() }, context);
+      await this.announce(
+        tx,
+        "MomentRevised",
+        momentId,
+        viewerUserId,
+        { kind: "media", revisedAt: at.toISOString() },
+        context,
+      );
     });
 
     return this.getForAuthor(momentId, viewerUserId);
@@ -618,8 +683,14 @@ export class MomentService {
         previous: { uploadIds: present },
         at,
       });
-      await this.announce(tx, "MomentRevised", momentId, viewerUserId,
-        { kind: "media", revisedAt: at.toISOString() }, context);
+      await this.announce(
+        tx,
+        "MomentRevised",
+        momentId,
+        viewerUserId,
+        { kind: "media", revisedAt: at.toISOString() },
+        context,
+      );
     });
 
     return this.getForAuthor(momentId, viewerUserId);
@@ -646,7 +717,11 @@ export class MomentService {
     const at = this.clock();
 
     await withTransaction(this.dataSource, async (tx) => {
+      // Marking blanks the caption, and this blanks every comment on it. Both
+      // happen now rather than when the erasure worker runs, so that what is
+      // waiting in a queue is structure rather than anybody's words.
       await this.moments.markDeleted(tx, momentId, at);
+      await this.comments.blankAllForMoment(tx, momentId, at);
       await this.moments.recordEdit(tx, {
         momentId,
         editedByUserId: viewerUserId,
@@ -654,8 +729,26 @@ export class MomentService {
         previous: {},
         at,
       });
-      await this.announce(tx, "MomentRemoved", momentId, viewerUserId,
-        { removedAt: at.toISOString() }, context);
+
+      // In the same transaction as the deletion itself. A Moment cannot be
+      // marked deleted without the request that finishes the job: the media is
+      // in object storage and the document is in the index, and neither goes
+      // until somebody walks the rest of the path.
+      await this.erasures?.request(tx, {
+        requestId: generateId(),
+        subjectType: "moment",
+        subjectId: momentId,
+        at,
+      });
+
+      await this.announce(
+        tx,
+        "MomentRemoved",
+        momentId,
+        viewerUserId,
+        { removedAt: at.toISOString() },
+        context,
+      );
     });
   }
 
@@ -714,7 +807,12 @@ export class MomentService {
             moderationState: undefined,
             viewerIsAdult: true,
           }
-        : await this.gatherViewFacts(momentId, moment.authorUserId, moment.visibility, viewerUserId);
+        : await this.gatherViewFacts(
+            momentId,
+            moment.authorUserId,
+            moment.visibility,
+            viewerUserId,
+          );
 
     if (checkVisibility(viewerUserId, moment, facts) !== undefined) {
       throw new NotFoundError("No such moment");
@@ -741,8 +839,7 @@ export class MomentService {
     viewerUserId: string,
   ): Promise<ViewFacts> {
     const state = (await this.moderation.findState("moment", momentId))?.state as
-      | ViewFacts["moderationState"]
-      | undefined;
+      ViewFacts["moderationState"] | undefined;
 
     return {
       blockedEitherWay: await this.isBlocked(authorUserId, viewerUserId),
@@ -934,8 +1031,14 @@ export class MomentService {
       // A revision rather than a visibility change: who may see it has not
       // moved. What changed is whether Chronologity may put it in front of
       // somebody, which derived state has to learn either way.
-      await this.announce(tx, "MomentRevised", momentId, authorUserId,
-        { kind: "interaction_settings", revisedAt: this.clock().toISOString() }, context);
+      await this.announce(
+        tx,
+        "MomentRevised",
+        momentId,
+        authorUserId,
+        { kind: "interaction_settings", revisedAt: this.clock().toISOString() },
+        context,
+      );
     });
 
     return this.getForAuthor(momentId, authorUserId);
@@ -975,8 +1078,14 @@ export class MomentService {
 
     await withTransaction(this.dataSource, async (tx) => {
       await this.moments.setVisibility(tx, momentId, request.visibility, audience, this.clock());
-      await this.announce(tx, "MomentVisibilityChanged", momentId, authorUserId,
-        { visibility: request.visibility, changedAt: this.clock().toISOString() }, context);
+      await this.announce(
+        tx,
+        "MomentVisibilityChanged",
+        momentId,
+        authorUserId,
+        { visibility: request.visibility, changedAt: this.clock().toISOString() },
+        context,
+      );
     });
 
     return this.getForAuthor(momentId, authorUserId);
@@ -1020,8 +1129,14 @@ export class MomentService {
 
     await withTransaction(this.dataSource, async (tx) => {
       await this.moments.setLocationDisclosure(tx, momentId, disclosure, this.clock());
-      await this.announce(tx, "MomentRevised", momentId, authorUserId,
-        { kind: "location", revisedAt: this.clock().toISOString() }, context);
+      await this.announce(
+        tx,
+        "MomentRevised",
+        momentId,
+        authorUserId,
+        { kind: "location", revisedAt: this.clock().toISOString() },
+        context,
+      );
     });
 
     return this.getForAuthor(momentId, authorUserId);
@@ -1055,11 +1170,7 @@ export class MomentService {
    * @throws {ValidationError} If the cursor is not one this service issued.
    */
   async list(authorUserId: string, limit: number, cursor?: string): Promise<MomentPage> {
-    const moments = await this.moments.findForAuthor(
-      authorUserId,
-      limit,
-      decodeCursor(cursor),
-    );
+    const moments = await this.moments.findForAuthor(authorUserId, limit, decodeCursor(cursor));
 
     // A full page means there is probably more; a short one means there is
     // not. Asking for one extra row to be certain would cost a row on every
@@ -1068,7 +1179,9 @@ export class MomentService {
 
     return {
       moments: moments.map((moment) => this.disclose(moment, authorUserId)),
-      ...(last === undefined ? {} : { nextCursor: encodeCursor(new Date(last.occurrence.start), last.momentId) }),
+      ...(last === undefined
+        ? {}
+        : { nextCursor: encodeCursor(new Date(last.occurrence.start), last.momentId) }),
     };
   }
 }

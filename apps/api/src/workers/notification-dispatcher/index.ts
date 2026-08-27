@@ -8,6 +8,7 @@ import { loadConfig } from "../../config/app-config.js";
 import { IdentityRepository } from "../../features/authentication/identity.repository.js";
 import { LocationRepository } from "../../features/locations/location.repository.js";
 import { ModerationRepository } from "../../features/moderation/moderation.repository.js";
+import { MomentCommentRepository } from "../../features/moments/moment-comment.repository.js";
 import { MomentRepository } from "../../features/moments/moment.repository.js";
 import { MomentService } from "../../features/moments/moment.service.js";
 import { NotificationDeliveryRepository } from "../../features/notifications/notification.delivery.repository.js";
@@ -85,6 +86,7 @@ async function main(): Promise<void> {
     new FollowRepository(database.dataSource),
     accounts,
     new ModerationRepository(database.dataSource),
+    new MomentCommentRepository(database.dataSource),
   );
 
   const notifications = new NotificationService(

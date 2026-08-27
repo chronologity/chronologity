@@ -1122,6 +1122,16 @@ A hard delete physically removes data.
 
 Both may be required in different stores.
 
+Deleting a Moment uses both, in that order. Marking it deleted is synchronous
+and is what makes it vanish from every surface at once; it also blanks the
+caption and the body of every comment on it, so that what waits in the erasure
+queue is structure rather than anybody's words. The row itself is then hard
+deleted by the erasure worker, cascading the twelve tables that reference it.
+
+Moderation records are not among those twelve. They name their subject
+polymorphically with no foreign key and survive deliberately: an appeal against
+a decision whose record vanished with the content is not one.
+
 ---
 
 # Deletion Propagation
@@ -1136,6 +1146,22 @@ Deletion must reach:
 - caches;
 - notification snapshots;
 - analytics where required.
+
+Erasure reaches Search and object storage directly rather than waiting to be
+told. The Search document is removed in the same transaction as the row, so
+deletion never queues behind a reindex — which is what *restriction and deletion
+propagate at higher priority than ordinary indexing* means in practice. The
+event-driven indexer remains the backstop and converges on the same answer, so
+the two cannot disagree.
+
+Notifications need no propagation at all. They store identifiers and compose
+their wording at read time from what the reader may currently see, so a
+notification about an erased Moment stops rendering, and leaves the unread
+count, without anything having to reach it.
+
+ClickHouse is absent from this path because there are no Timeline projections
+yet. When they arrive they must join it: a projection that erasure cannot reach
+is not ready to hold personal history.
 
 ---
 

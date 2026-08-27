@@ -671,6 +671,45 @@ The precise behavior of each dependent record should be defined before implement
 
 Deleting a Moment should not silently delete unrelated Moments merely because they shared context.
 
+### What deleting a Moment does
+
+Each dependent record, answered.
+
+**Media goes with it.** The uploads it held are erased, and every derived copy
+with them, because a product cannot claim a video was deleted while continuing
+to serve a transcode. An upload another Moment still holds is spared: erasing
+one Moment must not break somebody else's.
+
+**Comments go with it, whoever wrote them.** Their text is blanked the instant
+deletion is asked for and the rows go with the Moment. A comment has no meaning
+without what it responded to and is unreachable once that is gone, so keeping
+the text would leave somebody's words in a table nobody can read but an
+operator.
+
+**Reactions, audience, contextual groupings, Location and Event associations,
+relationships, edit history, and significance go with it.** A relationship is
+severed at the join rather than at the other end: the Moment it was related to
+is untouched.
+
+**Search and Discovery documents are removed at erasure time**, not when an
+indexer next happens to look.
+
+**Notifications about it stop rendering**, and leave the unread count, because
+they store identifiers and compose their wording from what the reader may
+currently see.
+
+**Deep links stop resolving**, which they already did — a deep link is a
+pointer and never a permission.
+
+**Moderation records survive.** An appeal against a decision whose record
+vanished with the content is not one.
+
+Deletion happens in two stages. Marking is immediate and is what makes the
+Moment disappear everywhere; it also blanks the caption and the comments.
+Erasure follows as a worker, because a Moment may hold an unlimited number of
+images and videos and doing that work inside the request would time out
+half-finished.
+
 ## Account Deletion
 
 Account deletion requires its own explicit lifecycle.
@@ -848,9 +887,6 @@ The following questions should be resolved deliberately:
 - What information, if any, should appear when a historical jump lands in a period containing only inaccessible Moments?
 - Which temporal aggregates are safe to expose at broader zoom levels?
 - What data export capabilities belong in the initial release?
-- What are the precise deletion semantics for a Moment?
-- What happens to comments authored by other users when a Moment is deleted?
-- What happens to relationships when one endpoint is deleted?
 - What happens to shared-history participation when an account is deleted?
 - Which data categories require retention for security or legal reasons?
 - Should Chronologity ever use facial recognition?

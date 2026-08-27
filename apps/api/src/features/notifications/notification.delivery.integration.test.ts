@@ -193,9 +193,12 @@ describe("notification delivery", () => {
   };
 
   const logger = {
-    info: (payload: unknown, message?: string) => logLines.push(`${message} ${JSON.stringify(payload)}`),
-    warn: (payload: unknown, message?: string) => logLines.push(`${message} ${JSON.stringify(payload)}`),
-    error: (payload: unknown, message?: string) => logLines.push(`${message} ${JSON.stringify(payload)}`),
+    info: (payload: unknown, message?: string) =>
+      logLines.push(`${message} ${JSON.stringify(payload)}`),
+    warn: (payload: unknown, message?: string) =>
+      logLines.push(`${message} ${JSON.stringify(payload)}`),
+    error: (payload: unknown, message?: string) =>
+      logLines.push(`${message} ${JSON.stringify(payload)}`),
     debug: () => undefined,
   } as never;
 
@@ -233,6 +236,7 @@ describe("notification delivery", () => {
       new FollowRepository(database.dataSource),
       accounts,
       moderationRepository,
+      new MomentCommentRepository(database.dataSource),
     );
 
     reactions = new MomentReactionService(
@@ -335,9 +339,7 @@ describe("notification delivery", () => {
   };
 
   /** Every message Mailpit currently holds for an address, newest first. */
-  const mailFor = async (
-    address: string,
-  ): Promise<{ subject: string; body: string }[]> => {
+  const mailFor = async (address: string): Promise<{ subject: string; body: string }[]> => {
     const response = await fetch(
       `${MAILPIT}/api/v1/search?query=${encodeURIComponent(`to:${address}`)}`,
     );
@@ -850,7 +852,6 @@ describe("notification delivery", () => {
     assert.equal(attempt.statusCode, 404, attempt.body);
   });
 
-
   it("holds an ordinary notification until quiet hours end", async () => {
     const author = await onboard();
     const actor = await onboard();
@@ -1354,9 +1355,7 @@ describe("notification delivery", () => {
       url: "/notifications/delivery-settings",
       headers: authed(account.accessToken),
     });
-    const stored = after
-      .json()
-      .settings.find((one: { channel: string }) => one.channel === "push");
+    const stored = after.json().settings.find((one: { channel: string }) => one.channel === "push");
 
     assert.deepEqual(stored, {
       channel: "push",
@@ -1451,11 +1450,7 @@ describe("notification delivery", () => {
         ...(attempt.payload === undefined ? {} : { payload: attempt.payload }),
       });
 
-      assert.equal(
-        response.statusCode,
-        401,
-        `${attempt.method} ${attempt.url}: ${response.body}`,
-      );
+      assert.equal(response.statusCode, 401, `${attempt.method} ${attempt.url}: ${response.body}`);
     }
   });
 });

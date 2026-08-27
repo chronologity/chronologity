@@ -3927,3 +3927,61 @@ The mistakes available in this half are not the mistakes the first half could ma
 **A test fixture's alphabet is part of its isolation.** Two search suites generated "rare" words as `zq` plus ten hexadecimal characters. Sixteen symbols and a shared prefix leave enough trigrams in common that two such words reach similarity 0.3 — exactly the threshold search retrieves at — so one test's word matched another test's Moment and an exact-result assertion failed. Measured rather than guessed: three colliding pairs in two hundred words. Over twenty-six letters, four hundred words peak at 0.200 and nothing collides. The flake predated this sub-phase and surfaced twice, in a different test each time.
 
 **The push provider, new-device sign-in alerts, and localisation are deliberately absent.** A provider needs credentials and a device, and a test for it would have to mock the boundary under test. A sign-in alert needs a notion of a recognised device that does not exist, and one that fires on every sign-in is one people learn to ignore — which would make the category worthless. Localisation and template versioning want a template system, and there is one locale.
+
+---
+
+# ADR-123 — Deletion Marks Synchronously and Erases in a Worker
+
+## Status
+
+Accepted.
+
+## Context
+
+Deleting a Moment set `deleted_at` and returned. Everything derived converged on that correctly — the reading indexer dropped the document, the visibility predicate stopped matching, notifications about it stopped rendering — so from the outside it looked finished.
+
+Nothing had been erased. The caption was still in the row, the comments other people wrote were still in theirs, and the photographs and videos were still in object storage along with every thumbnail and transcode made from them. `product/privacy.md:646` is blunt about what that last one means: a product cannot truthfully claim a video was deleted while continuing to serve a transcoded copy.
+
+## Decision
+
+**Deletion happens in two stages.** Marking is synchronous, and is what makes a Moment vanish from every surface at once. Erasure is a worker, driven by a ledger.
+
+**The sensitive text is blanked at mark time**, in the same transaction: the caption, and the body of every comment on the Moment whoever wrote it.
+
+**One ledger, `erasure_requests`**, carrying a subject type so that account erasure joins it rather than inventing a second mechanism. Leased on claim, retried with backoff, abandoned at a ceiling.
+
+**Erasure removes derived artifacts itself**, rather than waiting for the indexer.
+
+**The row is hard deleted, cascading.** Moderation records survive, because they name their subject polymorphically.
+
+**Media goes with the Moment, guarded**: an upload another *living* Moment holds is spared.
+
+## Rationale
+
+**The worker exists because of a product invariant, not a preference.** A Moment may hold an unlimited number of images and videos. Erasing media inside the request would do unbounded object-storage work in an HTTP handler, and a Moment with two hundred videos would time out half-erased with no record of how far it got. `architecture/privacy.md:1136` separately requires cross-store deletion to be retryable, idempotent, and observably complete — which is a worker and a ledger by another name.
+
+**Blanking at mark time is what makes the queue safe to have.** A queue can back up; what waits in this one is structure rather than what somebody wrote. Comment deletion has always worked this way, so this generalises existing behaviour rather than introducing a rule.
+
+**Erasing derived artifacts directly is what "higher priority than ordinary indexing" means** in a system with one derived store. The document goes in the same transaction as the row, so deletion never queues behind a reindex; the event-driven indexer stays as the backstop and converges on the same answer, so the two cannot disagree.
+
+**The row goes last, and that ordering is what makes a partial run resumable.** While anything remains undone the row is still there to say what it was — its media links are the only record of which uploads to erase, and deleting the row would take that list with it. Object storage is swept before the transaction that removes the row, for the reason upload deletion already gives: orphaned objects are reclaimable, and a row gone with bytes still served is the failure this whole sub-phase exists to prevent.
+
+**The guard on shared uploads decides nothing it was not asked to.** Whether one upload may belong to two Moments is recorded in the ADRs as undecided, and nothing currently prevents it — the check on adding media only looks within the same Moment. Erasure declines to destroy bytes something living still points at, which leaves the question open rather than answering it by consequence. An upload held only by *other deleted* Moments is erased: those await erasure themselves, and if each deferred to the other the bytes would outlive both.
+
+**The ledger deliberately holds no record of who asked.** For a Moment the author is the only person who can ask, and once the Moment is erased that row would otherwise be the one remaining trace that a particular person had recorded something — exactly what erasure is for. What survives is an opaque identifier for something that no longer exists, which is what ADR-095 permits anywhere unerasable. The audit of who deleted what lives in `moment_edits` and goes with the Moment, which is the intended behaviour rather than an oversight.
+
+## Consequences
+
+**A retryable failure is not a failure the pass has finished with.** Counting it as `failed` would make an object store having a bad minute look like data nobody erased. The worker reports `retrying` separately from `failed` and `abandoned`.
+
+**Unrecognised failures are treated as transient, deliberately.** That errs towards finishing an erasure late rather than abandoning it, and the attempt ceiling stops an unrecognised permanent failure a few attempts later. Erring the other way would leave media in storage that somebody has been told is gone.
+
+**`stateAfterFailure` returns a type one value narrower than the request's state.** A failed attempt can leave a request owed, refused, or given up on, and can never leave it complete — so the signature says so rather than the caller checking.
+
+**The permanent-failure path was nearly unprovable, and the fix was to move the decision.** Nothing in the integration suite produces a constraint violation, so breaking the permanent branch changed no integration result. Classification moved out of the worker into the pure policy, where both it and the state it produces have tests that bite. A guard whose only home is a worker is a guard tested only through whatever that worker happens to be given.
+
+**A test that asks the product whether something is gone is asking the wrong question**, because the product said it was gone before erasure ran. Almost every assertion here reads PostgreSQL or the object store directly. The strongest is a sweep of every `text` column in the schema, read from `information_schema`, looking for the caption and the comment: it makes no assumption about which table a future column might put them in.
+
+**Adding a required constructor argument to `MomentService` touched eleven call sites.** It was made required rather than optional on purpose: an optional dependency that silently skips blanking comments is a guard nobody can prove.
+
+**ClickHouse is absent from the erasure path** because no Timeline projections exist yet. When they arrive they must join it, and that obligation belongs to the phase that builds them: a projection erasure cannot reach is not ready to hold personal history.

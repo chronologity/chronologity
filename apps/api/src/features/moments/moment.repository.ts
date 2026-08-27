@@ -374,9 +374,7 @@ export class MomentRepository {
    *   the policy decides whether it matters.
    */
   async isInAudience(momentId: string, userId: string): Promise<boolean> {
-    return this.dataSource
-      .getRepository(MomentAudience)
-      .existsBy({ momentId, userId });
+    return this.dataSource.getRepository(MomentAudience).existsBy({ momentId, userId });
   }
 
   /**
@@ -670,12 +668,7 @@ export class MomentRepository {
    *   requires that editing descriptive text not move a Moment through
    *   chronological navigation.
    */
-  async updateCaption(
-    tx: Transaction,
-    momentId: string,
-    caption: string,
-    at: Date,
-  ): Promise<void> {
+  async updateCaption(tx: Transaction, momentId: string, caption: string, at: Date): Promise<void> {
     await tx.update(MomentRow, { momentId }, { caption, updatedAt: at });
   }
 
@@ -751,9 +744,85 @@ export class MomentRepository {
     const { affected } = await tx.update(
       MomentRow,
       { momentId, deletedAt: IsNull() },
-      { deletedAt: at, updatedAt: at },
+      // The caption goes now rather than when the erasure worker runs. Erasure
+      // is a queue, and a queue can back up; what waits in it should be
+      // structure rather than what somebody wrote. This mirrors comment
+      // deletion, which has always blanked the body in the same statement that
+      // marks it gone.
+      { deletedAt: at, updatedAt: at, caption: "" },
     );
 
     return affected === 1;
+  }
+
+  /**
+   * Which uploads a Moment holds.
+   *
+   * @param momentId - Which Moment.
+   * @returns Their identifiers, in presentation order. Read while the Moment
+   *   still exists, because deleting its row takes the media links with it.
+   */
+  async findAttachedUploads(momentId: string): Promise<string[]> {
+    const rows: { upload_id: string }[] = await this.dataSource.query(
+      `SELECT upload_id FROM moment_media WHERE moment_id = $1 ORDER BY position ASC`,
+      [momentId],
+    );
+
+    return rows.map((row) => row.upload_id);
+  }
+
+  /**
+   * Which of these uploads something living still points at.
+   *
+   * The guard that keeps erasing one Moment from destroying another's media.
+   * Deleted Moments do not count as living: those are awaiting erasure
+   * themselves, and if each deferred to the other the bytes would outlive both.
+   *
+   * @param uploadIds - The candidates.
+   * @returns Those a Moment with no deletion timestamp still references.
+   */
+  async uploadsStillInUse(uploadIds: readonly string[]): Promise<string[]> {
+    if (uploadIds.length === 0) {
+      return [];
+    }
+
+    const rows: { upload_id: string }[] = await this.dataSource.query(
+      `SELECT DISTINCT media.upload_id
+         FROM moment_media media
+         JOIN moments moment ON moment.moment_id = media.moment_id
+        WHERE media.upload_id = ANY($1::uuid[]) AND moment.deleted_at IS NULL`,
+      [[...uploadIds]],
+    );
+
+    return rows.map((row) => row.upload_id);
+  }
+
+  /**
+   * Remove a Moment's row for good.
+   *
+   * Every table that references a Moment cascades, so this one statement takes
+   * the media links, audience, locations, Event associations, reactions,
+   * comments and their reactions and mentions, relationships, edit history, and
+   * significance with it.
+   *
+   * Moderation records are not among them: they name their subject
+   * polymorphically with no foreign key, so they survive. That is deliberate —
+   * 5N gave people a right of appeal, and an appeal against a decision whose
+   * record vanished with the content is not one.
+   *
+   * @param tx - The caller's transaction.
+   * @param momentId - Which Moment.
+   * @returns Whether a row was removed. False when it had already gone, which
+   *   is what a retried erasure finds and is success rather than failure.
+   */
+  async hardDelete(tx: Transaction, momentId: string): Promise<boolean> {
+    const rows: { count: number }[] = await tx.query(
+      `WITH erased AS (
+          DELETE FROM moments WHERE moment_id = $1 RETURNING 1
+       ) SELECT COUNT(*)::int AS count FROM erased`,
+      [momentId],
+    );
+
+    return (rows[0]?.count ?? 0) > 0;
   }
 }

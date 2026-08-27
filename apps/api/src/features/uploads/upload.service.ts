@@ -443,6 +443,50 @@ export class UploadService {
   }
 
   /**
+   * Erase an upload because the thing containing it is being erased.
+   *
+   * No actor, because there is not one. The caller has already established that
+   * the Moment this belonged to is going, and that the upload is not held by
+   * any Moment still alive — so there is nobody left with standing to ask.
+   * Keeping the ownership check would have meant passing the owner's identity
+   * around to satisfy a test that could no longer mean anything.
+   *
+   * Unlike `delete`, this does not stop early when the row already says
+   * `deleted`. That difference matters: a process that dies between marking the
+   * row and sweeping the objects would otherwise leave those bytes in storage
+   * for good, because every retry would look at the row and conclude the work
+   * was done. Sweeping again costs a listing and removes nothing the second
+   * time.
+   *
+   * @param uploadId - Which upload.
+   * @returns Nothing. An upload that was never there is not an error: erasure
+   *   asks for a state, and that state already holds.
+   * @throws {Error} If object storage could not be reached, so the caller can
+   *   record the failure and try again. The row stays marked deleted, which is
+   *   the safe half to have completed.
+   */
+  async erase(uploadId: string): Promise<void> {
+    const record = await this.uploads.findRecord(uploadId);
+
+    if (record === undefined) {
+      return;
+    }
+
+    await withTransaction(this.dataSource, (tx) =>
+      this.uploads.markDeleted(tx, uploadId, record.ownerUserId),
+    );
+
+    // Listed rather than reconstructed, for the reason `delete` gives: deleting
+    // a fixed set of key shapes would leave behind anything written by a
+    // version of the code that named things differently, and deleted media
+    // still sitting in storage is the worst kind of bug to find later. The
+    // listing covers the original and every derivative made from it.
+    for (const key of await this.storage.list(uploadPrefix(record.ownerUserId, uploadId))) {
+      await this.storage.remove(key);
+    }
+  }
+
+  /**
    * Read one upload.
    *
    * @param uploadId - Which upload.

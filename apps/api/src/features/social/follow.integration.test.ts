@@ -9,14 +9,11 @@ import { buildApp } from "../../server/app.js";
 import { createTestAuthentication, type TestAuthentication } from "../../testing/authentication.js";
 import { UserRepository } from "../users/user.repository.js";
 import { UserService } from "../users/user.service.js";
-import {
-  createLocation,
-  createReadyUpload,
-  createRealWorldEvent,
-} from "../../testing/fixtures.js";
+import { createLocation, createReadyUpload, createRealWorldEvent } from "../../testing/fixtures.js";
 import { LocationRepository } from "../locations/location.repository.js";
 import { ModerationRepository } from "../moderation/moderation.repository.js";
 import { MomentReactionRepository } from "../moments/moment-reaction.repository.js";
+import { MomentCommentRepository } from "../moments/moment-comment.repository.js";
 import { MomentRepository } from "../moments/moment.repository.js";
 import { MomentService } from "../moments/moment.service.js";
 import { RealWorldEventRepository } from "../real-world-events/real-world-event.repository.js";
@@ -117,7 +114,6 @@ describe("following", () => {
 
     const accounts = new UserRepository(database.dataSource);
 
-
     app = await buildApp({
       config,
       dependencies: [],
@@ -146,6 +142,7 @@ describe("following", () => {
         new FollowRepository(database.dataSource),
         new UserRepository(database.dataSource),
         new ModerationRepository(database.dataSource),
+        new MomentCommentRepository(database.dataSource),
       ),
     });
   });
@@ -228,8 +225,9 @@ describe("following", () => {
     app.inject({ method: "POST", url: `/users/${userId}/follow`, headers: authed(accessToken) });
 
   const pendingFor = async (accessToken: string) =>
-    (await app.inject({ method: "GET", url: "/follow-requests", headers: authed(accessToken) }))
-      .json().requests;
+    (
+      await app.inject({ method: "GET", url: "/follow-requests", headers: authed(accessToken) })
+    ).json().requests;
 
   describe("following an open account", () => {
     it("takes effect immediately", async () => {
@@ -780,10 +778,7 @@ describe("following", () => {
       const again = await followEvent(person.accessToken, realWorldEventId);
 
       assert.equal(again.statusCode, 204, again.body);
-      assert.equal(
-        (await followedEvents(person.accessToken)).json().realWorldEvents.length,
-        1,
-      );
+      assert.equal((await followedEvents(person.accessToken)).json().realWorldEvents.length, 1);
     });
 
     it("lets somebody follow an occurrence and a place recorded by anybody else", async () => {
@@ -987,8 +982,8 @@ describe("following", () => {
       });
 
     const followingOf = async (accessToken: string) =>
-      (await app.inject({ method: "GET", url: "/following", headers: authed(accessToken) }))
-        .json().users;
+      (await app.inject({ method: "GET", url: "/following", headers: authed(accessToken) })).json()
+        .users;
 
     it("ends the follow in both directions at once", async () => {
       const blocker = await onboard();
@@ -1022,7 +1017,10 @@ describe("following", () => {
       // Cancelled rather than declined. A block is not an answer to the
       // question the request asked, and recording it as one would put a refusal
       // in the history that nobody gave.
-      assert.deepEqual(rows.map((row) => row.status), ["cancelled"]);
+      assert.deepEqual(
+        rows.map((row) => row.status),
+        ["cancelled"],
+      );
     });
 
     it("hides the blocker exactly as an account that does not exist", async () => {

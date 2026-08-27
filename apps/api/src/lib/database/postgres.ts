@@ -51,6 +51,7 @@ import {
   ModerationReportRow,
   ModerationStateRow,
 } from "../../features/moderation/moderation.model.js";
+import { ErasureRequest } from "../../features/privacy/erasure.model.js";
 import {
   Notification,
   NotificationActor,
@@ -142,6 +143,7 @@ const entities = [
   NotificationDevice,
   NotificationDelivery,
   NotificationDeliverySetting,
+  ErasureRequest,
   OutboxMessage,
   ProjectionProcessedEvent,
   SchemaMigration,

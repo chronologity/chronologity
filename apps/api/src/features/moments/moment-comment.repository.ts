@@ -9,11 +9,7 @@ import type { Cursor } from "../../lib/pagination/cursor.js";
 import type { Transaction } from "../../lib/database/transaction.js";
 import { User } from "../users/user.model.js";
 import { toPublicUser } from "../users/user.repository.js";
-import {
-  CommentMention,
-  CommentReaction,
-  MomentComment,
-} from "./moment-comment.model.js";
+import { CommentMention, CommentReaction, MomentComment } from "./moment-comment.model.js";
 
 /** A comment as stored, before anybody has decided what a Viewer may see of it. */
 interface StoredComment {
@@ -199,7 +195,12 @@ export class MomentCommentRepository {
     const query = this.dataSource
       .getRepository(MomentComment)
       .createQueryBuilder("comment")
-      .leftJoinAndMapOne("comment.author", User, "author", "author.user_id = comment.author_user_id")
+      .leftJoinAndMapOne(
+        "comment.author",
+        User,
+        "author",
+        "author.user_id = comment.author_user_id",
+      )
       .where("comment.moment_id = :momentId", { momentId });
 
     if (threadCommentId === null) {
@@ -250,10 +251,7 @@ export class MomentCommentRepository {
    * @param viewerUserId - Who is asking, so their own reactions come back.
    * @returns The comments as this Viewer receives them.
    */
-  private async decorate(
-    rows: readonly MomentComment[],
-    viewerUserId: string,
-  ): Promise<Comment[]> {
+  private async decorate(rows: readonly MomentComment[], viewerUserId: string): Promise<Comment[]> {
     if (rows.length === 0) {
       return [];
     }
@@ -299,7 +297,11 @@ export class MomentCommentRepository {
       .getRepository(CommentMention)
       .createQueryBuilder("mention")
       .innerJoin(User, "user", "user.user_id = mention.user_id")
-      .select(["mention.comment_id AS comment_id", "user.user_id AS user_id", "user.handle AS handle"])
+      .select([
+        "mention.comment_id AS comment_id",
+        "user.user_id AS user_id",
+        "user.handle AS handle",
+      ])
       .where({ commentId: In([...commentIds]) })
       .orderBy("mention.created_at", "ASC")
       .getRawMany<{ comment_id: string; user_id: string; handle: string }>();
@@ -454,6 +456,38 @@ export class MomentCommentRepository {
    */
   async softDelete(tx: Transaction, commentId: string, at: Date): Promise<void> {
     await tx.update(MomentComment, { commentId }, { deletedAt: at, body: "" });
+  }
+
+  /**
+   * Blank every comment on a Moment, whoever wrote it.
+   *
+   * Called when the Moment itself is deleted. The rows go later, with the
+   * Moment's own row, but the words go now for the reason a single comment's
+   * do: erasure is a queue, and what waits in a queue should be structure
+   * rather than what somebody wrote.
+   *
+   * Other people's comments are included deliberately. A comment has no meaning
+   * without what it responded to and is unreachable once that is gone, so
+   * keeping the text would leave somebody's words in a table nobody can read
+   * but an operator.
+   *
+   * @param tx - The caller's transaction.
+   * @param momentId - Which Moment.
+   * @param at - When.
+   * @returns How many were blanked, so a caller can report it and a test can
+   *   assert it.
+   */
+  async blankAllForMoment(tx: Transaction, momentId: string, at: Date): Promise<number> {
+    const rows: { count: number }[] = await tx.query(
+      `WITH blanked AS (
+          UPDATE moment_comments SET body = '', deleted_at = COALESCE(deleted_at, $2)
+           WHERE moment_id = $1 AND (body <> '' OR deleted_at IS NULL)
+       RETURNING 1
+       ) SELECT COUNT(*)::int AS count FROM blanked`,
+      [momentId, at],
+    );
+
+    return rows[0]?.count ?? 0;
   }
 
   /**

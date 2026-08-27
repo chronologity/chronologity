@@ -105,9 +105,6 @@ const config: AppConfig = {
   },
 };
 
-
-
-
 const ADULT = "1990-04-12";
 const uniqueEmail = () => `person-${randomUUID()}@example.test`;
 const uniqueHandle = () => `h${randomUUID().replaceAll("-", "").slice(0, 12)}`;
@@ -146,6 +143,7 @@ describe("notifications", () => {
       new FollowRepository(database.dataSource),
       new UserRepository(database.dataSource),
       moderationRepository,
+      new MomentCommentRepository(database.dataSource),
     );
 
     reactions = new MomentReactionService(
@@ -632,8 +630,7 @@ describe("notifications", () => {
       } as never);
       await deliver(momentId);
 
-      const notificationId = (await list(named.accessToken)).json().notifications[0]
-        .notificationId;
+      const notificationId = (await list(named.accessToken)).json().notifications[0].notificationId;
 
       await moments.setVisibility(momentId, author.userId, { visibility: "private" });
 
@@ -868,7 +865,10 @@ describe("notifications", () => {
 
       assert.equal(marked.statusCode, 204, marked.body);
       assert.equal(await unreadCount(author.accessToken), 0);
-      assert.equal((await list(author.accessToken, { unreadOnly: "true" })).json().notifications.length, 0);
+      assert.equal(
+        (await list(author.accessToken, { unreadOnly: "true" })).json().notifications.length,
+        0,
+      );
       assert.equal((await list(author.accessToken)).json().notifications.length, 1);
     });
 

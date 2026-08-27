@@ -125,7 +125,6 @@ describe("moments", () => {
 
     authentication = createTestAuthentication(database.dataSource, config.auth, config.email);
 
-
     moments = new MomentService(
       database.dataSource,
       new MomentRepository(database.dataSource),
@@ -135,6 +134,7 @@ describe("moments", () => {
       new FollowRepository(database.dataSource),
       new UserRepository(database.dataSource),
       new ModerationRepository(database.dataSource),
+      new MomentCommentRepository(database.dataSource),
     );
 
     app = await buildApp({
@@ -590,12 +590,17 @@ describe("moments", () => {
         });
 
         assert.equal(response.statusCode, 200, response.body);
-        seen.push(...response.json().moments.map((moment: { momentId: string }) => moment.momentId));
+        seen.push(
+          ...response.json().moments.map((moment: { momentId: string }) => moment.momentId),
+        );
         cursor = response.json().nextCursor;
       } while (cursor !== undefined);
 
       // Every Moment exactly once, newest first, across three pages.
-      assert.deepEqual(seen, [...created].reverse().map((moment) => moment.momentId));
+      assert.deepEqual(
+        seen,
+        [...created].reverse().map((moment) => moment.momentId),
+      );
       assert.equal(new Set(seen).size, 5);
     });
 
@@ -653,7 +658,9 @@ describe("moments", () => {
           headers: authed(credentials.accessToken),
         });
 
-        seen.push(...response.json().moments.map((moment: { momentId: string }) => moment.momentId));
+        seen.push(
+          ...response.json().moments.map((moment: { momentId: string }) => moment.momentId),
+        );
         cursor = response.json().nextCursor;
       } while (cursor !== undefined);
 
@@ -1957,7 +1964,9 @@ describe("moments", () => {
         });
 
         assert.ok(response.json().moments.length <= 2, "the limit was not honoured");
-        seen.push(...response.json().moments.map((moment: { momentId: string }) => moment.momentId));
+        seen.push(
+          ...response.json().moments.map((moment: { momentId: string }) => moment.momentId),
+        );
         cursor = response.json().nextCursor;
       } while (cursor !== undefined);
 
@@ -2178,10 +2187,7 @@ describe("moments", () => {
     it("hands out no identifier below exact, so nothing can be looked up", async () => {
       const author = await onboard();
       const stranger = await onboard();
-      const exact = await placeSeenBy(
-        author.accessToken,
-        await recordSomewhere(author, "exact"),
-      );
+      const exact = await placeSeenBy(author.accessToken, await recordSomewhere(author, "exact"));
 
       for (const disclosure of ["neighbourhood", "city", "hidden"]) {
         const momentId = await recordSomewhere(author, disclosure);
@@ -2451,7 +2457,10 @@ describe("moments", () => {
       // twice would report one relationship as two.
       assert.equal(backward.statusCode, 201, backward.body);
       assert.equal(backward.json().relationshipId, forward.json().relationshipId);
-      assert.equal((await relationshipsOf(author.accessToken, first)).json().relationships.length, 1);
+      assert.equal(
+        (await relationshipsOf(author.accessToken, first)).json().relationships.length,
+        1,
+      );
     });
 
     it("refuses a cause that happened after its effect", async () => {
@@ -2497,7 +2506,11 @@ describe("moments", () => {
 
     it("refuses a causal claim running back the other way", async () => {
       const author = await onboard();
-      const overlapping = { start: "2010-01-01T00:00:00.000Z", end: "2010-12-31T00:00:00.000Z", precision: "year" as const };
+      const overlapping = {
+        start: "2010-01-01T00:00:00.000Z",
+        end: "2010-12-31T00:00:00.000Z",
+        precision: "year" as const,
+      };
       const first = await recordAt(author, overlapping);
       const second = await recordAt(author, overlapping);
       assert.equal((await relate(author.accessToken, first, second, "led_to")).statusCode, 201);
@@ -2666,7 +2679,10 @@ describe("moments", () => {
       // history.
       assert.deepEqual(after.occurrence, before.occurrence);
       assert.equal(after.caption, before.caption);
-      assert.deepEqual((await relationshipsOf(author.accessToken, source)).json().relationships, []);
+      assert.deepEqual(
+        (await relationshipsOf(author.accessToken, source)).json().relationships,
+        [],
+      );
     });
 
     it("lets only whoever made a claim withdraw it", async () => {
@@ -2685,7 +2701,10 @@ describe("moments", () => {
       // It is the claimant's reading of history. Owning one end does not make
       // it yours to retract.
       assert.equal(attempt.statusCode, 404, attempt.body);
-      assert.equal((await relationshipsOf(mine.accessToken, myMoment)).json().relationships.length, 1);
+      assert.equal(
+        (await relationshipsOf(mine.accessToken, myMoment)).json().relationships.length,
+        1,
+      );
     });
 
     it("treats claiming the same thing twice as the claim already made", async () => {
@@ -3174,7 +3193,9 @@ describe("moments", () => {
       const written: string[] = [];
 
       for (let index = 0; index < 5; index += 1) {
-        written.push((await say(author.accessToken, momentId, `comment ${index}`)).json().commentId);
+        written.push(
+          (await say(author.accessToken, momentId, `comment ${index}`)).json().commentId,
+        );
       }
 
       await database.dataSource.query(
@@ -3192,7 +3213,9 @@ describe("moments", () => {
           headers: authed(author.accessToken),
         });
 
-        seen.push(...page.json().comments.map((comment: { commentId: string }) => comment.commentId));
+        seen.push(
+          ...page.json().comments.map((comment: { commentId: string }) => comment.commentId),
+        );
         cursor = page.json().nextCursor;
       } while (cursor !== undefined);
 
@@ -3411,11 +3434,13 @@ describe("moments", () => {
       assert.equal(asFollower.statusCode, 201, asFollower.body);
       assert.equal(asStranger.statusCode, 400, asStranger.body);
       assert.equal(
-        (await app.inject({
-          method: "GET",
-          url: `/moments/${momentId}`,
-          headers: authed(stranger.accessToken),
-        })).statusCode,
+        (
+          await app.inject({
+            method: "GET",
+            url: `/moments/${momentId}`,
+            headers: authed(stranger.accessToken),
+          })
+        ).statusCode,
         200,
       );
     });
