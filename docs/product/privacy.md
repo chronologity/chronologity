@@ -769,6 +769,50 @@ Different categories of data may require different retention periods.
 
 For example, committed Moments and temporary failed-upload artifacts should not automatically have the same retention semantics.
 
+### What expires, and when
+
+**Nothing anybody recorded.** No Moment, no media, no comment, no reaction, no
+Location, no Event, and no moderation record is on the list below, and a test
+asserts that by counting them across a sweep with every period set to zero — the
+most destructive configuration the system permits. A product built to preserve
+decades does not expire the decades. What expires is the exhaust.
+
+Each period is configuration rather than a constant, because a retention period
+is an operator's decision and often a legal one. The defaults:
+
+| What | When it goes | Default |
+| --- | --- | --- |
+| Consumed sign-in links and spent phone codes | after they were issued | 1 day |
+| Read or dismissed social and media notifications | after they were read | 30 days |
+| Social and media notifications, read or not | after they arrived | 180 days |
+| Moderation and security notifications | after they arrived | 2 years |
+| The record that a message was already handled | after handling | 30 days |
+| Records of what was delivered where | after delivery finished | 30 days |
+| Devices that have stopped reporting in | *retired*, not removed | 180 days |
+| Retired devices | after retirement | 30 days |
+| Finished erasure and export requests | after completion | 90 days |
+| Authentication and authorization audit events | after they occurred | 2 years |
+| Registrations that were never finished | after the window closed | immediately |
+
+**An unread notification lives longer than a read one**, because an unread
+notification is something somebody has not dealt with. **A moderation or
+security notification lives longest**, because the first carries a right of
+appeal and the second is the record that an account changed.
+
+**A device that has gone quiet is retired rather than removed.** A client
+re-registers whenever it starts, so silence is evidence that an installation has
+gone; the retired row survives a while longer because it is what distinguishes a
+dead token from one that was never registered.
+
+**Audit events are bounded rather than kept for ever.** They are the security
+records a deletion is allowed to leave behind, and retaining data only as long as
+necessary has to be true of the category most likely to be examined, or it is
+not a principle.
+
+**Expiring a notification never removes what it was about.** The Moment, the
+comment, and the reaction all stand; what goes is the record that somebody was
+told.
+
 ## Data Export
 
 Users should eventually be able to obtain a meaningful export of their Chronologity data.

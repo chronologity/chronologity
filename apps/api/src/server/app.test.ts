@@ -1,3 +1,4 @@
+import { TEST_RETENTION_PERIODS } from "../testing/retention.js";
 import assert from "node:assert/strict";
 import { describe, it, onTestFinished } from "vitest";
 import type { AppConfig } from "../config/app-config.js";
@@ -24,6 +25,7 @@ const config: AppConfig = {
   },
   messaging: { brokers: ["unused:9092"], clientId: "test" },
   outbox: { retentionMs: 0 },
+  retention: { periods: TEST_RETENTION_PERIODS },
   auth: {
     jwtSecret: new TextEncoder().encode("test-secret-value-long-enough-for-hs256"),
     issuer: "chronologity",

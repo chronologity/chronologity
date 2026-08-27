@@ -1,3 +1,4 @@
+import { TEST_RETENTION_PERIODS } from "../../testing/retention.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, it } from "vitest";
@@ -58,6 +59,7 @@ const config: AppConfig = {
   },
   messaging: { brokers: ["localhost:9092"], clientId: "search-indexer-integration" },
   outbox: { retentionMs: 0 },
+  retention: { periods: TEST_RETENTION_PERIODS },
   auth: {
     jwtSecret: new TextEncoder().encode("integration-test-secret-long-enough-for-hs256"),
     issuer: "chronologity",

@@ -7,6 +7,7 @@ import { migrate } from "../../lib/database/migrations.js";
 import { connectDatabase, createDatabase, type Database } from "../../lib/database/postgres.js";
 import type { ConsumedEvent } from "../../lib/messaging/consumer.js";
 import { buildApp } from "../../server/app.js";
+import { TEST_RETENTION_PERIODS } from "../../testing/retention.js";
 import { createTestAuthentication, type TestAuthentication } from "../../testing/authentication.js";
 import { createReadyUpload } from "../../testing/fixtures.js";
 import { AuthorizationRepository } from "../authorization/authorization.repository.js";
@@ -65,6 +66,7 @@ const config: AppConfig = {
   },
   messaging: { brokers: ["localhost:9092"], clientId: "notifications-integration" },
   outbox: { retentionMs: 0 },
+  retention: { periods: TEST_RETENTION_PERIODS },
   auth: {
     jwtSecret: new TextEncoder().encode("integration-test-secret-long-enough-for-hs256"),
     issuer: "chronologity",

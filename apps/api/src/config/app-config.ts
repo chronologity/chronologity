@@ -5,6 +5,7 @@ import { toEmailConfig, type EmailConfig } from "./email-config.js";
 import { envSchema, type Env } from "./env.js";
 import { toMessagingConfig, type MessagingConfig } from "./messaging-config.js";
 import { toOutboxConfig, type OutboxConfig } from "./outbox-config.js";
+import { toRetentionConfig, type RetentionConfig } from "./retention-config.js";
 import { toPlacesConfig, type PlacesConfig } from "./places-config.js";
 import {
   toStorageConfig,
@@ -29,6 +30,7 @@ export interface AppConfig {
   readonly database: DatabaseConfig;
   readonly messaging: MessagingConfig;
   readonly outbox: OutboxConfig;
+  readonly retention: RetentionConfig;
   readonly auth: AuthConfig;
   /** Minimum age, in whole years, for creating an account. */
   readonly minimumAgeYears: number;
@@ -63,6 +65,7 @@ export function loadConfig(source: Record<string, string | undefined> = process.
     database: toDatabaseConfig(env),
     messaging: toMessagingConfig(env),
     outbox: toOutboxConfig(env),
+    retention: toRetentionConfig(env),
     auth: toAuthConfig(env),
     minimumAgeYears: env.USER_MINIMUM_AGE_YEARS,
     email: toEmailConfig(env),

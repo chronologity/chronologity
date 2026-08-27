@@ -1043,6 +1043,28 @@ Examples:
 
 # Retention Is Not One Global TTL
 
+It is a schedule, held as data in `features/privacy/retention.policy.ts` and run
+by a worker that owns every periodic sweep. Each rule names a table, the
+timestamp that decides whether a row has aged, which rows it applies to, and
+which configured period governs it.
+
+A sweep is deliberately not the claim-lease-retry shape the queue-driven workers
+use. There is no lease, no attempt count, and no per-row state, because a sweep
+that fails simply runs again on the next pass — which is `sweepPublishedOutbox`'s
+shape rather than the erasure worker's.
+
+Two properties matter more than the periods themselves.
+
+**Nothing anybody recorded is in the schedule.** No Moment, comment, reaction,
+Location, Event, or moderation record, asserted by counting them across a sweep
+with every period set to zero.
+
+**Every sweep is bounded.** A batch at a time, ordered oldest-first, with
+`FOR UPDATE SKIP LOCKED`, so a table nobody has swept in a year drains over many
+passes rather than in one statement holding locks the application needs.
+
+
+
 Different data has different value and risk.
 
 Do not apply one blanket retention period to all stores.

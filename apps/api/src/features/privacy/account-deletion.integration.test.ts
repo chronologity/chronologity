@@ -11,6 +11,7 @@ import {
   type StorageClient,
 } from "../../integrations/storage/storage-client.js";
 import { buildApp } from "../../server/app.js";
+import { TEST_RETENTION_PERIODS } from "../../testing/retention.js";
 import { createTestAuthentication, type TestAuthentication } from "../../testing/authentication.js";
 import { eraseDueRequests } from "../../workers/erasure/erase.js";
 import { AuthorizationRepository } from "../authorization/authorization.repository.js";
@@ -68,6 +69,7 @@ const config: AppConfig = {
   },
   messaging: { brokers: ["localhost:9092"], clientId: "deletion-integration" },
   outbox: { retentionMs: 0 },
+  retention: { periods: TEST_RETENTION_PERIODS },
   auth: {
     jwtSecret: new TextEncoder().encode("integration-test-secret-long-enough-for-hs256"),
     issuer: "chronologity",

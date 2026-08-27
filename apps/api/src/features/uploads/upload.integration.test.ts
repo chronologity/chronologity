@@ -19,6 +19,7 @@ import { createRecordedPlaceSearchClient } from "../../integrations/places/recor
 import { LocationRepository } from "../locations/location.repository.js";
 import { LocationService } from "../locations/location.service.js";
 import { buildApp } from "../../server/app.js";
+import { TEST_RETENTION_PERIODS } from "../../testing/retention.js";
 import { createTestAuthentication, type TestAuthentication } from "../../testing/authentication.js";
 import { UploadRepository } from "./upload.repository.js";
 import { UploadService } from "./upload.service.js";
@@ -68,6 +69,7 @@ const config: AppConfig = {
   },
   messaging: { brokers: ["localhost:9092"], clientId: "uploads-integration" },
   outbox: { retentionMs: 0 },
+  retention: { periods: TEST_RETENTION_PERIODS },
   auth: {
     jwtSecret: new TextEncoder().encode("integration-test-secret-long-enough-for-hs256"),
     issuer: "chronologity",

@@ -15,6 +15,7 @@ import {
   type PushClient,
 } from "../../integrations/push/push-client.js";
 import { buildApp } from "../../server/app.js";
+import { TEST_RETENTION_PERIODS } from "../../testing/retention.js";
 import { createTestAuthentication, type TestAuthentication } from "../../testing/authentication.js";
 import { createReadyUpload } from "../../testing/fixtures.js";
 import { dispatchDueDeliveries } from "../../workers/notification-dispatcher/dispatch.js";
@@ -78,6 +79,7 @@ const config: AppConfig = {
   },
   messaging: { brokers: ["localhost:9092"], clientId: "delivery-integration" },
   outbox: { retentionMs: 0 },
+  retention: { periods: TEST_RETENTION_PERIODS },
   auth: {
     jwtSecret: new TextEncoder().encode("integration-test-secret-long-enough-for-hs256"),
     issuer: "chronologity",

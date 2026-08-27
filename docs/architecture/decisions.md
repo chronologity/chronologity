@@ -4093,3 +4093,59 @@ Accepted.
 **Adding a table caught account erasure out, exactly as intended.** `export_requests` references `users`, and 5R-2's coverage test — which reads `pg_constraint` and demands every reference be swept or deliberately kept — failed the moment the migration landed. The answer it forced is one worth having: a prepared export is a copy of somebody's entire history, and it must not outlive the account it belongs to. Erasure now removes the objects before deleting the rows, because a row deleted first would leave the copy in storage with nothing pointing at it. That guard has now paid for itself once, in the first sub-phase after it was written.
 
 **The trigram-collision flake had a second home.** A shared fixture named Locations `Somewhere <8 hex characters>`, and search corrections are drawn at similarity 0.15: a real collision measured 0.174 against a query derived from a different suite's hexadecimal token, so one test's Location was offered as another's "did you mean". The same defect fixed during 5Q-2 for search's rare words, in a fixture that pollutes every suite because it is shared. Letters measure 0.000. The lesson is narrower than "use letters": a hexadecimal identifier is a poor source of test text anywhere trigram search can see it.
+
+---
+
+# ADR-126 — Retention Is a Schedule, and a Sweep Is Not a Queue
+
+## Status
+
+Accepted.
+
+## Context
+
+5R-1 to 5R-3 removed what somebody asks to have removed. This is the residue nobody asks about: consumed sign-in links, spent phone codes, delivery records, retired device tokens, audit events, and uploads registered and never finished. `product/privacy.md:764` requires keeping personal information only as long as it serves a purpose, and nothing enforced any of it.
+
+Two accumulations were found rather than assumed. `notification_source_events` — the deduplication table — has no foreign key to `notifications`, so it survives every notification sweep and grows on its own. And nothing swept expired uploads at all.
+
+## Decision
+
+**One retention worker owns every periodic sweep**, driven by a clock rather than a queue.
+
+**The schedule is data**, in the spirit of `ACCOUNT_SWEEPS`: table, timestamp, predicate, period, and whether rows are removed or a device is retired.
+
+**Notifications expire by category and by read state.** Read ordinary ones first, unread ones later, moderation and security last.
+
+**A device unseen for long enough is retired rather than removed**, and swept later.
+
+**Audit events are bounded**, at a long configurable period.
+
+**Every period is configuration**, following `OUTBOX_RETENTION_HOURS`.
+
+## Rationale
+
+**A sweep is not the claim-lease-retry shape, and this sub-phase needed no fifth instance of it.** `sweepPublishedOutbox` is the applicable shape: a bounded batch, `FOR UPDATE SKIP LOCKED`, a count, and `reachedEnd`. No lease, no attempts, no per-row state — because a sweep that fails simply runs again. The extraction recorded in ADR-125 stays recorded and stays undone, and the count stays at four.
+
+**Nothing anybody recorded is in the schedule.** The claim is asserted twice: once over the schedule itself, and once by counting Moments, comments, reactions, edit history, and moderation state across a sweep with every period set to zero — the most destructive configuration the system permits.
+
+**Read state is the signal for ordinary notifications.** An unread notification is something somebody has not dealt with, so expiring it removes a thing they were never told; a read one is finished with, so the reading is what should start its clock.
+
+**Silence is the only evidence of an uninstalled application available.** There is no push provider to report rejections, and a client re-registers whenever it starts. Retiring rather than removing keeps the distinction between a dead token and one that was never registered.
+
+## Consequences
+
+**`ctid IN (SELECT ctid … LIMIT n)` does not bound anything without `AS MATERIALIZED`.** A sweep with a batch of two removed five. Without materialisation the planner may inline the subquery into the `IN` and evaluate it more than once, applying `LIMIT` afresh each time. It reproduced about once in four runs — exactly often enough to be dismissed as a flaky test, which is what it looked like for several attempts. With `AS MATERIALIZED` it passed ten runs out of ten.
+
+**Naming the primary key does not sidestep it, and `sweepPublishedOutbox` had the same defect.** That was the assumption when the retention sweeps were written — that `ctid` was the risky part and the outbox's `id IN (…)` was safe. It is not: the hazard is the re-evaluation, not the identifier. The outbox's own batching test failed in the full run, sweeping three messages with a batch of two, having been latently wrong since it was written and surfacing only when another suite changed the table enough to change the plan. It is fixed the same way, and committed separately as the pre-existing bug it is.
+
+Worth stating plainly, because the reasoning that produced the bug is the reasoning most people would use: an unbounded delete on the outbox holds locks the publisher needs, and "bounded" was the property the batch size existed to provide.
+
+**Two guards were unfalsifiable, and deliberately breaking them is what showed it.** The device fixture set `registered_at` and `last_seen_at` to the same value, so the rule could have judged a device by when it was registered and every test would still have passed. And nothing exercised the reference check that stops an erased upload being removed while a Moment still points at it, because the only long-lived upload in the suite was `ready` and the sweep only looks at `deleted` ones. Both now have a break that fails.
+
+That makes five unfalsifiable guards found across this phase, all by the same technique. The pattern behind them is consistent: a test passes because the code path it guards is unreachable from where the test looks, not because the guard works.
+
+**Dropping the reference check does not merely delete too much — it throws.** The foreign key refuses the delete, which abandons the whole batch and leaves every other row in it unswept. Refusing is not the same as not attempting, which is why the check is in the query rather than left to the constraint.
+
+**A test that reads global database state is a test that alternates.** The batching test asserted `reachedEnd`, which depends on how much other suites had left behind; it passed on a full database and failed on a drained one. Rewritten to apply one rule directly and assert that no pass exceeds its batch, it is deterministic — and it is what caught the `ctid` defect.
+
+**Adding a field to `AppConfig` touched fifteen test literals.** Each integration suite builds its own configuration inline. A shared constant kept it to one import and one line apiece, but the duplication underneath is real and will be paid again by whatever adds the next field.

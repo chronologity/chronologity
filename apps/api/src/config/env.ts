@@ -44,6 +44,45 @@ export const envSchema = z.object({
   API_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(300),
   OUTBOX_RETENTION_HOURS: z.coerce.number().int().min(0).max(8_760).default(72),
 
+  // How long each category of operational residue is kept, in days.
+  //
+  // Bounded at ten years apiece: a period beyond that is not a retention policy
+  // but an absence of one, and it should have to be argued for in code rather
+  // than typed into an environment file. Zero is permitted throughout, so a
+  // deployment that wants to keep nothing can say so.
+
+  /** Consumed sign-in links and spent phone codes. Kept only to diagnose reuse. */
+  RETAIN_SIGN_IN_ARTEFACTS_DAYS: z.coerce.number().int().min(0).max(3_650).default(1),
+  /** Social and media notifications somebody has read or put away. */
+  RETAIN_READ_NOTIFICATIONS_DAYS: z.coerce.number().int().min(0).max(3_650).default(30),
+  /** Social and media notifications, read or not. */
+  RETAIN_NOTIFICATIONS_DAYS: z.coerce.number().int().min(0).max(3_650).default(180),
+  /**
+   * Moderation and security notifications.
+   *
+   * Longest of the three. The first carries a right of appeal and the second is
+   * the record that somebody was told their account changed.
+   */
+  RETAIN_REQUIRED_NOTIFICATIONS_DAYS: z.coerce.number().int().min(0).max(3_650).default(730),
+  /** How long a handled message is remembered, so a redelivery is recognised. */
+  RETAIN_NOTIFICATION_DEDUPLICATION_DAYS: z.coerce.number().int().min(0).max(3_650).default(30),
+  /** Records of what was delivered where. */
+  RETAIN_DELIVERY_RECORDS_DAYS: z.coerce.number().int().min(0).max(3_650).default(30),
+  /** How long a device may go unseen before it stops being pushed at. */
+  RETIRE_DORMANT_DEVICES_DAYS: z.coerce.number().int().min(0).max(3_650).default(180),
+  /** How long a retired device's row is kept, so a dead token stays recognisable. */
+  RETAIN_RETIRED_DEVICES_DAYS: z.coerce.number().int().min(0).max(3_650).default(30),
+  /**
+   * Authentication and authorization audit events.
+   *
+   * The security records a deletion is allowed to leave behind, and bounded for
+   * that reason: retaining data only as long as necessary has to be true of the
+   * category most likely to be examined, or it is not a principle.
+   */
+  RETAIN_AUDIT_EVENTS_DAYS: z.coerce.number().int().min(0).max(3_650).default(730),
+  /** Finished erasure and export requests. */
+  RETAIN_PRIVACY_REQUESTS_DAYS: z.coerce.number().int().min(0).max(3_650).default(90),
+
   // No default for the signing secret: a development fallback would eventually
   // reach an environment nobody re-checked, and a known signing key is a
   // forged session for anyone who has read the repository.
