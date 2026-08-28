@@ -203,6 +203,20 @@ try {
     // Stated so a later reader knows what the numbers are worth.
     caveat:
       "Measured on one developer machine against local containers. Comparable to another run on the same machine; not to anything else.",
+    // Recorded because the first baseline looked alarming without it: an
+    // authenticated read came out around fifty times slower than liveness, and
+    // the obvious reading was that authentication is expensive. It is not. A
+    // bare `SELECT 1` to the containerised PostgreSQL measured 2.9ms at the
+    // median from this host — Docker Desktop's network on macOS, where a local
+    // socket would be under a tenth of a millisecond. An authenticated request
+    // makes three lookups, so roughly nine milliseconds is gone before the API
+    // does anything, and the rest is contention on four cores already running
+    // PostgreSQL, Kafka, ClickHouse and object storage.
+    //
+    // So the authenticated numbers here measure this laptop's Docker networking
+    // more than they measure Chronologity. They are still worth recording, as
+    // long as nobody reads them as a verdict on the code.
+    databaseRoundTripMs: { select1p50: 2.9, measuredFrom: "host to container" },
     scenarios,
   };
 

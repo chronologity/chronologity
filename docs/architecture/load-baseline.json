@@ -1,6 +1,6 @@
 {
-  "recordedAt": "2026-08-28T12:44:06.415Z",
-  "commit": "602ccbb",
+  "recordedAt": "2026-08-28T13:38:16.043Z",
+  "commit": "93bd4d5",
   "machine": {
     "platform": "darwin",
     "arch": "x64",
@@ -9,36 +9,40 @@
     "node": "v24.19.0"
   },
   "caveat": "Measured on one developer machine against local containers. Comparable to another run on the same machine; not to anything else.",
+  "databaseRoundTripMs": {
+    "select1p50": 2.9,
+    "measuredFrom": "host to container"
+  },
   "scenarios": [
     {
       "name": "liveness",
-      "requestsPerSecond": 1730,
+      "requestsPerSecond": 1831,
       "latencyMs": {
         "p50": 3,
-        "p97_5": 23,
-        "max": 121
+        "p97_5": 22,
+        "max": 107
       },
-      "requests": 17299
+      "requests": 18310
     },
     {
       "name": "read own profile",
-      "requestsPerSecond": 117,
+      "requestsPerSecond": 98,
       "latencyMs": {
-        "p50": 78,
-        "p97_5": 172,
-        "max": 239
+        "p50": 90,
+        "p97_5": 232,
+        "max": 429
       },
-      "requests": 1172
+      "requests": 979
     },
     {
       "name": "list moments",
-      "requestsPerSecond": 78,
+      "requestsPerSecond": 46,
       "latencyMs": {
-        "p50": 107,
-        "p97_5": 339,
-        "max": 429
+        "p50": 167,
+        "p97_5": 720,
+        "max": 1131
       },
-      "requests": 775
+      "requests": 459
     }
   ]
 }
