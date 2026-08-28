@@ -117,6 +117,11 @@ export const envSchema = z.object({
   // member states free to lower it to thirteen.
   USER_MINIMUM_AGE_YEARS: z.coerce.number().int().min(0).max(25).default(13),
 
+  CLICKHOUSE_URL: z.string().min(1),
+  CLICKHOUSE_DATABASE: z.string().min(1),
+  CLICKHOUSE_USERNAME: z.string().min(1),
+  CLICKHOUSE_PASSWORD: z.string().min(1),
+
   SMTP_HOST: z.string().min(1),
   SMTP_PORT: portSchema,
   SMTP_FROM: z.email(),

@@ -16,6 +16,14 @@ const config: AppConfig = {
   // through hundreds of requests in a minute, which is not the traffic the
   // limiter defends against.
   rateLimit: { maxPerMinute: 100_000 },
+  // Unused like the rest: this suite builds an application without
+  // infrastructure, to prove that health and error mapping need none.
+  clickhouse: {
+    url: "http://unused",
+    database: "unused",
+    username: "unused",
+    password: "unused",
+  },
   database: {
     host: "unused",
     port: 5432,

@@ -38,6 +38,7 @@
     "@aws-sdk/s3-request-presigner": "^3.1111.0",
     "@chronologity/config": "workspace:*",
     "@chronologity/contracts": "workspace:*",
+    "@clickhouse/client": "^1.23.1",
     "@fastify/cors": "^11.3.0",
     "@fastify/helmet": "^13.1.0",
     "@fastify/rate-limit": "^11.2.0",

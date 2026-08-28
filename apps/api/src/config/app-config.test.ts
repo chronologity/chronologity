@@ -25,6 +25,10 @@ const required = (): Record<string, string> => ({
   KAFKA_BROKERS: "localhost:9092",
   AUTH_JWT_SECRET: "a-secret-long-enough-to-be-accepted",
   AUTH_MAGIC_LINK_BASE_URL: "https://app.example.test/auth/sessions",
+  CLICKHOUSE_URL: "http://localhost:8123",
+  CLICKHOUSE_DATABASE: "chronologity",
+  CLICKHOUSE_USERNAME: "chronologity",
+  CLICKHOUSE_PASSWORD: "chronologity",
   SMTP_HOST: "localhost",
   SMTP_PORT: "1025",
   SMTP_FROM: "no-reply@example.test",
@@ -94,6 +98,14 @@ describe("loadConfig", () => {
       "S3_SECRET_ACCESS_KEY",
       "S3_BUCKET",
       "SMTP_HOST",
+      // ClickHouse holds nothing authoritative, which is a reason it may be
+      // rebuilt and not a reason to start without knowing where it is. A
+      // projection quietly writing nowhere is worse than a process that
+      // refuses to boot.
+      "CLICKHOUSE_URL",
+      "CLICKHOUSE_DATABASE",
+      "CLICKHOUSE_USERNAME",
+      "CLICKHOUSE_PASSWORD",
     ]) {
       const issues = issuesFor(withEnv({ [key]: undefined }));
 

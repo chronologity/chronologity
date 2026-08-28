@@ -1,4 +1,5 @@
 import { parseEnv } from "@chronologity/config";
+import type { ClickHouseConfig } from "./clickhouse-config.js";
 import { toAuthConfig, type AuthConfig } from "./auth-config.js";
 import { toDatabaseConfig, type DatabaseConfig } from "./database-config.js";
 import { toEmailConfig, type EmailConfig } from "./email-config.js";
@@ -28,6 +29,8 @@ export interface AppConfig {
   /** How many requests one client may make in a minute, across every endpoint. */
   readonly rateLimit: { readonly maxPerMinute: number };
   readonly database: DatabaseConfig;
+  /** Where Timeline read models live. Derived; authoritative for nothing. */
+  readonly clickhouse: ClickHouseConfig;
   readonly messaging: MessagingConfig;
   readonly outbox: OutboxConfig;
   readonly retention: RetentionConfig;
@@ -62,6 +65,12 @@ export function loadConfig(source: Record<string, string | undefined> = process.
     host: env.API_HOST,
     port: env.API_PORT,
     rateLimit: { maxPerMinute: env.API_RATE_LIMIT_PER_MINUTE },
+    clickhouse: {
+      url: env.CLICKHOUSE_URL,
+      database: env.CLICKHOUSE_DATABASE,
+      username: env.CLICKHOUSE_USERNAME,
+      password: env.CLICKHOUSE_PASSWORD,
+    },
     database: toDatabaseConfig(env),
     messaging: toMessagingConfig(env),
     outbox: toOutboxConfig(env),
