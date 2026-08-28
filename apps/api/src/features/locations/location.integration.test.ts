@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { testContext } from "../../testing/context.js";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { createRecordedPlaceSearchClient } from "../../integrations/places/recorded-place-search-client.js";
@@ -100,7 +101,7 @@ describe("recording places", () => {
         precision: "exact",
         context: chosen.context,
         sourceReference: chosen.reference,
-      });
+      }, testContext());
 
       assert.equal(location.name, "Madison Square Garden");
       // Ours, and nothing to do with the map service's.
@@ -118,7 +119,7 @@ describe("recording places", () => {
         coordinates: { latitude: 51.5, longitude: -0.1 },
         precision: "exact",
         sourceReference: `way:${randomUUID().slice(0, 8)}`,
-      });
+      }, testContext());
 
       // The service now returns something different for the same reference.
       const later = await locations.record(await recorder(), {
@@ -126,7 +127,7 @@ describe("recording places", () => {
         coordinates: { latitude: 51.5, longitude: -0.1 },
         precision: "exact",
         sourceReference: original.sourceReference ?? "",
-      });
+      }, testContext());
 
       assert.equal(later.locationId, original.locationId, "a second place was created");
       assert.equal(later.name, "The Old Vic Tavern", "the recorded name was overwritten");
@@ -140,14 +141,14 @@ describe("recording places", () => {
         coordinates: { latitude: 1, longitude: 2 },
         precision: "exact",
         sourceReference: reference,
-      });
+      }, testContext());
 
       const second = await locations.record(await recorder(), {
         name: "Somewhere Shared",
         coordinates: { latitude: 1, longitude: 2 },
         precision: "exact",
         sourceReference: reference,
-      });
+      }, testContext());
 
       assert.equal(first.locationId, second.locationId);
     });
@@ -173,7 +174,7 @@ describe("recording places", () => {
 
       const people = await Promise.all(Array.from({ length: 8 }, () => recorder()));
       const recorded = await Promise.all(
-        people.map((userId) => locations.record(userId, place())),
+        people.map((userId) => locations.record(userId, place(), testContext())),
       );
 
       const identifiers = new Set(recorded.map((location) => location.locationId));
@@ -205,7 +206,7 @@ describe("recording places", () => {
             coordinates: { latitude: 5, longitude: 6 },
             precision: "exact",
             sourceReference: reference,
-          }),
+          }, testContext()),
         ),
       );
 
@@ -219,7 +220,7 @@ describe("recording places", () => {
         name: "Chosen From A Search",
         coordinates: { latitude: 1, longitude: 2 },
         precision: "exact",
-      });
+      }, testContext());
 
       // A request that says nothing about its source is describing somebody
       // typing a name in, which is the strongest claim there is.
@@ -230,7 +231,7 @@ describe("recording places", () => {
         coordinates: { latitude: 3, longitude: 4 },
         precision: "exact",
         source: "media-metadata",
-      });
+      }, testContext());
 
       // "Typed in by the person who was there" and "read out of a photograph's
       // metadata" are different claims, and a record holding only the name has
@@ -244,7 +245,7 @@ describe("recording places", () => {
         coordinates: { latitude: 5, longitude: 6 },
         precision: "approximate",
         source: "device-location",
-      });
+      }, testContext());
 
       assert.equal((await locations.get(recorded.locationId)).source, "device-location");
     });
@@ -254,7 +255,7 @@ describe("recording places", () => {
         name: "Nana's house",
         coordinates: { latitude: 53.4, longitude: -2.9 },
         precision: "exact",
-      });
+      }, testContext());
 
       assert.equal(location.name, "Nana's house");
       assert.equal(location.sourceReference, null);
@@ -264,7 +265,7 @@ describe("recording places", () => {
       const location = await locations.record(await recorder(), {
         name: "Somewhere in the Lake District",
         precision: "unknown",
-      });
+      }, testContext());
 
       assert.equal(location.precision, "unknown");
       assert.equal(location.coordinates, null);
@@ -277,7 +278,7 @@ describe("recording places", () => {
         name: "Northern Italy",
         coordinates: { latitude: 45.4642, longitude: 9.19 },
         precision: "broad",
-      });
+      }, testContext());
 
       assert.equal(broad.precision, "broad");
       assert.ok(broad.coordinates !== null);
@@ -293,7 +294,7 @@ describe("recording places", () => {
         precision: "exact",
         context: chosen.context,
         sourceReference: `way:${randomUUID().slice(0, 8)}`,
-      });
+      }, testContext());
 
       assert.equal(location.context.city, "New York");
       assert.equal(location.context.countryCode, "US");
@@ -307,12 +308,12 @@ describe("recording places", () => {
           name: "Nowhere In Particular",
           coordinates: { latitude: 1, longitude: 2 },
           precision: "unknown",
-        }),
+        }, testContext()),
         /cannot carry coordinates/,
       );
 
       await assert.rejects(
-        locations.record(await recorder(), { name: "Somewhere Definite", precision: "exact" }),
+        locations.record(await recorder(), { name: "Somewhere Definite", precision: "exact" }, testContext()),
         /needs coordinates/,
       );
     });
@@ -324,7 +325,7 @@ describe("recording places", () => {
         name: "Readable Place",
         coordinates: { latitude: 5, longitude: 6 },
         precision: "exact",
-      });
+      }, testContext());
 
       const read = await locations.get(created.locationId);
 

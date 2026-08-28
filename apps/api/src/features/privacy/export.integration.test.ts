@@ -1,4 +1,5 @@
 import { TEST_RETENTION_PERIODS } from "../../testing/retention.js";
+import { testContext } from "../../testing/context.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, it } from "vitest";
@@ -282,7 +283,7 @@ describe("data export", () => {
       uploadIds: [uploadId],
       visibility: "public",
       locationDisclosure: "exact",
-    } as never);
+    } as never, testContext());
 
     return moment.momentId;
   };

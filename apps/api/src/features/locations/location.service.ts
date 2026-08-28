@@ -89,7 +89,7 @@ export class LocationService {
   async record(
     recordedByUserId: string,
     request: CreateLocationRequest,
-    context?: RequestContext,
+    context: RequestContext,
   ): Promise<Location> {
     const rejection = checkPosition(request.precision, request.coordinates);
 
@@ -132,7 +132,7 @@ export class LocationService {
 
       // Shared reference data, so the payload names nobody. What a Moment
       // discloses about having been here is decided on the Moment.
-      const traceId = context?.traceId ?? randomUUID();
+      const traceId = context.traceId;
 
       await enqueueOutboxMessage(tx, {
         topic: topicName(LOCATIONS_BOUNDARY),
@@ -149,7 +149,7 @@ export class LocationService {
           causationId: undefined,
           actorUserId: recordedByUserId,
           eventVersion: 1,
-          recordedAt: (context?.receivedAt ?? this.clock()).toISOString(),
+          recordedAt: context.receivedAt.toISOString(),
         },
       });
 

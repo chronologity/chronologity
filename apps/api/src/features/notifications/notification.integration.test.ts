@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { testContext } from "../../testing/context.js";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import type { FastifyInstance } from "fastify";
@@ -282,7 +283,7 @@ describe("notifications", () => {
       uploadIds: [uploadId],
       visibility: "public",
       locationDisclosure: "exact",
-    } as never);
+    } as never, testContext());
 
     return moment.momentId;
   };
@@ -607,7 +608,7 @@ describe("notifications", () => {
       await deliver(momentId);
       assert.ok(typesFor(await list(named.accessToken)).includes("comment_mentioned"));
 
-      await moments.setVisibility(momentId, author.userId, { visibility: "private" });
+      await moments.setVisibility(momentId, author.userId, { visibility: "private" }, testContext());
 
       // Absent rather than blanked, and gone from the count as well as the
       // list. A count that outran the list would say something existed.
@@ -634,7 +635,7 @@ describe("notifications", () => {
 
       const notificationId = (await list(named.accessToken)).json().notifications[0].notificationId;
 
-      await moments.setVisibility(momentId, author.userId, { visibility: "private" });
+      await moments.setVisibility(momentId, author.userId, { visibility: "private" }, testContext());
 
       const opened = await app.inject({
         method: "GET",
@@ -720,7 +721,7 @@ describe("notifications", () => {
       ).json().handle;
       const momentId = await record(author);
 
-      await moments.setVisibility(momentId, author.userId, { visibility: "private" });
+      await moments.setVisibility(momentId, author.userId, { visibility: "private" }, testContext());
 
       // The comment cannot be added to a private Moment by a stranger, so the
       // author names them on their own private Moment — the eligibility check
@@ -750,7 +751,7 @@ describe("notifications", () => {
       const stranger = await onboard();
       const momentId = await record(author);
 
-      await moments.setVisibility(momentId, author.userId, { visibility: "private" });
+      await moments.setVisibility(momentId, author.userId, { visibility: "private" }, testContext());
 
       const outcome = await generator.consider(
         {
@@ -991,7 +992,7 @@ describe("notifications", () => {
         },
       });
 
-      await moments.setVisibility(momentId, author.userId, { visibility: "private" });
+      await moments.setVisibility(momentId, author.userId, { visibility: "private" }, testContext());
       await comments.add(momentId, author.userId, {
         body: `Ask @${namedHandle} about this`,
       } as never);

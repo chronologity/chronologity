@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { testContext } from "../../testing/context.js";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import type { FastifyInstance } from "fastify";
@@ -293,7 +294,7 @@ describe("discovery", () => {
       visibility: "public",
       locationDisclosure: "exact",
       ...over,
-    } as never);
+    } as never, testContext());
 
     await indexer.index("moment", moment.momentId);
 
@@ -491,7 +492,7 @@ describe("discovery", () => {
       await moments.setVisibility(momentId, author.userId, {
         visibility: "restricted",
         audience: [friend.userId],
-      });
+      }, testContext());
       await indexer.index("moment", momentId);
 
       // Being invited to see something is not the same as asking to be shown
@@ -506,7 +507,7 @@ describe("discovery", () => {
       const momentId = await recordAndIndex(author, rareWord());
       await attach(momentId, event);
 
-      await moments.setVisibility(momentId, author.userId, { visibility: "private" });
+      await moments.setVisibility(momentId, author.userId, { visibility: "private" }, testContext());
       await indexer.index("moment", momentId);
 
       assert.equal(await offeredTo(author, event, momentId), false);

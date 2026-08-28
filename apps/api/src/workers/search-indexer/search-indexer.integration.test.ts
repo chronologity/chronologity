@@ -1,4 +1,5 @@
 import { TEST_RETENTION_PERIODS } from "../../testing/retention.js";
+import { testContext } from "../../testing/context.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, it } from "vitest";
@@ -174,7 +175,7 @@ describe("search indexer", () => {
       uploadIds: [uploadId],
       visibility: "public",
       locationDisclosure: "exact",
-    });
+    }, testContext());
 
     return { author, momentId: moment.momentId, uploadId };
   };
@@ -248,7 +249,7 @@ describe("search indexer", () => {
         uploadIds,
         visibility: "public",
         locationDisclosure: "exact",
-      });
+      }, testContext());
 
       await indexer.index("moment", moment.momentId);
 
@@ -269,8 +270,8 @@ describe("search indexer", () => {
         "A family reunion",
       );
 
-      await moments.setLocation(momentId, author.userId, locationId);
-      await moments.addRealWorldEvent(momentId, author.userId, eventId);
+      await moments.setLocation(momentId, author.userId, locationId, testContext());
+      await moments.addRealWorldEvent(momentId, author.userId, eventId, testContext());
       await indexer.index("moment", momentId);
 
       const document = await documentFor("moment", momentId);
@@ -282,7 +283,7 @@ describe("search indexer", () => {
       const { author, momentId } = await someoneWithAMoment();
 
       await indexer.index("moment", momentId);
-      await moments.updateCaption(momentId, author.userId, "A different caption entirely");
+      await moments.updateCaption(momentId, author.userId, "A different caption entirely", testContext());
       await indexer.index("moment", momentId);
 
       const document = await documentFor("moment", momentId);
@@ -362,7 +363,7 @@ describe("search indexer", () => {
         indexer,
         message("MomentRecorded", { momentId, authorUserId: author.userId }),
       );
-      await moments.updateCaption(momentId, author.userId, "Revised");
+      await moments.updateCaption(momentId, author.userId, "Revised", testContext());
       await indexFromEvent(
         indexer,
         message("MomentRevised", { momentId, authorUserId: author.userId }),
@@ -406,7 +407,7 @@ describe("search indexer", () => {
     it("carries a private Moment's visibility rather than hiding it from its author", async () => {
       const { author, momentId } = await someoneWithAMoment();
 
-      await moments.setVisibility(momentId, author.userId, { visibility: "private" });
+      await moments.setVisibility(momentId, author.userId, { visibility: "private" }, testContext());
       await indexer.index("moment", momentId);
 
       const document = await documentFor("moment", momentId);
@@ -499,7 +500,7 @@ describe("search indexer", () => {
     it("marks a deleted Moment as deleted", async () => {
       const { author, momentId } = await someoneWithAMoment();
 
-      await moments.delete(momentId, author.userId);
+      await moments.delete(momentId, author.userId, testContext());
       await indexer.index("moment", momentId);
 
       assert.equal((await documentFor("moment", momentId))?.deleted, true);

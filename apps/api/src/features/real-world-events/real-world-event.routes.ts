@@ -48,7 +48,7 @@ export function realWorldEventRoutes(events: RealWorldEventService) {
         preHandler: requireUser,
       },
       async (request, reply) => {
-        const event = await events.record(request.user.userId, request.body);
+        const event = await events.record(request.user.userId, request.body, request.requestContext);
 
         return reply.status(201).send(event);
       },

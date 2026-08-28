@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { testContext } from "../../testing/context.js";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import type { FastifyInstance } from "fastify";
@@ -297,7 +298,7 @@ describe("search", () => {
       visibility: "public",
       locationDisclosure: "exact",
       ...over,
-    } as never);
+    } as never, testContext());
 
     await indexer.index("moment", moment.momentId);
 
@@ -451,7 +452,7 @@ describe("search", () => {
       await moments.setVisibility(momentId, author.userId, {
         visibility: "restricted",
         audience: [friend.userId],
-      });
+      }, testContext());
       await indexer.index("moment", momentId);
 
       assert.deepEqual(idsFrom(await search(friend.accessToken, { q: word })), [momentId]);
@@ -587,7 +588,7 @@ describe("search", () => {
       await moments.setVisibility(momentId, author.userId, {
         visibility: "restricted",
         audience: [friend.userId],
-      });
+      }, testContext());
 
       await app.inject({
         method: "PUT",
@@ -1004,7 +1005,7 @@ describe("search", () => {
 
       assert.deepEqual(idsFrom(await search(friend.accessToken, { q: word })), [momentId]);
 
-      await moments.setVisibility(momentId, author.userId, { visibility: "private" });
+      await moments.setVisibility(momentId, author.userId, { visibility: "private" }, testContext());
 
       // The index still holds it as public until the worker catches up. Opening
       // reauthorizes against current state, so the stale entry cannot become

@@ -67,7 +67,7 @@ export function userRoutes(
         preHandler: requireSession,
       },
       async (request, reply) => {
-        const userId = await users.create(request.session.identityId, request.body);
+        const userId = await users.create(request.session.identityId, request.body, request.requestContext);
 
         return reply.status(201).send(await users.getAccount(userId));
       },
@@ -96,7 +96,7 @@ export function userRoutes(
         preHandler: requireUser,
       },
       async (request) => {
-        await users.updateProfile(request.user.userId, request.body);
+        await users.updateProfile(request.user.userId, request.body, request.requestContext);
 
         return users.getAccount(request.user.userId);
       },
@@ -115,7 +115,7 @@ export function userRoutes(
         preHandler: requireUser,
       },
       async (request) => {
-        await users.updateHandle(request.user.userId, request.body.handle);
+        await users.updateHandle(request.user.userId, request.body.handle, request.requestContext);
 
         return users.getAccount(request.user.userId);
       },
@@ -153,7 +153,7 @@ export function userRoutes(
         preHandler: requireUser,
       },
       async (request) => {
-        await users.deactivate(request.user.userId);
+        await users.deactivate(request.user.userId, request.requestContext);
 
         // Deactivating an account that leaves its sessions signed in would
         // deactivate nothing anyone can observe.
@@ -177,7 +177,7 @@ export function userRoutes(
         preHandler: requireUser,
       },
       async (request) => {
-        await users.reactivate(request.user.userId);
+        await users.reactivate(request.user.userId, request.requestContext);
 
         return users.getAccount(request.user.userId);
       },

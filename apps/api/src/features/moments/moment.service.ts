@@ -119,7 +119,7 @@ export class MomentService {
   async record(
     authorUserId: string,
     request: CreateMomentRequest,
-    context?: RequestContext,
+    context: RequestContext,
   ): Promise<Moment> {
     const occurrenceRejection = checkOccurrence(request.occurrence);
 
@@ -291,7 +291,7 @@ export class MomentService {
     momentId: string,
     viewerUserId: string,
     locationId: string,
-    context?: RequestContext,
+    context: RequestContext,
   ): Promise<Moment> {
     await this.getForAuthor(momentId, viewerUserId);
     await this.checkContextExists(locationId, undefined);
@@ -325,7 +325,7 @@ export class MomentService {
   async clearLocation(
     momentId: string,
     viewerUserId: string,
-    context?: RequestContext,
+    context: RequestContext,
   ): Promise<Moment> {
     await this.getForAuthor(momentId, viewerUserId);
 
@@ -361,7 +361,7 @@ export class MomentService {
     momentId: string,
     viewerUserId: string,
     realWorldEventId: string,
-    context?: RequestContext,
+    context: RequestContext,
   ): Promise<Moment> {
     await this.getForAuthor(momentId, viewerUserId);
     await this.checkContextExists(undefined, [realWorldEventId]);
@@ -396,7 +396,7 @@ export class MomentService {
     momentId: string,
     viewerUserId: string,
     realWorldEventId: string,
-    context?: RequestContext,
+    context: RequestContext,
   ): Promise<Moment> {
     await this.getForAuthor(momentId, viewerUserId);
 
@@ -432,7 +432,7 @@ export class MomentService {
     momentId: string,
     viewerUserId: string,
     caption: string,
-    context?: RequestContext,
+    context: RequestContext,
   ): Promise<Moment> {
     const before = await this.getForAuthor(momentId, viewerUserId);
     const at = this.clock();
@@ -482,7 +482,7 @@ export class MomentService {
     viewerUserId: string,
     occurrence: Occurrence,
     offsetMinutes: number,
-    context?: RequestContext,
+    context: RequestContext,
   ): Promise<Moment> {
     const before = await this.getForAuthor(momentId, viewerUserId);
     const rejection = checkOccurrence(occurrence);
@@ -539,7 +539,7 @@ export class MomentService {
     momentId: string,
     viewerUserId: string,
     uploadIds: readonly string[],
-    context?: RequestContext,
+    context: RequestContext,
   ): Promise<Moment> {
     await this.getForAuthor(momentId, viewerUserId);
 
@@ -602,7 +602,7 @@ export class MomentService {
     momentId: string,
     viewerUserId: string,
     uploadId: string,
-    context?: RequestContext,
+    context: RequestContext,
   ): Promise<Moment> {
     await this.getForAuthor(momentId, viewerUserId);
 
@@ -661,7 +661,7 @@ export class MomentService {
     momentId: string,
     viewerUserId: string,
     uploadIds: readonly string[],
-    context?: RequestContext,
+    context: RequestContext,
   ): Promise<Moment> {
     await this.getForAuthor(momentId, viewerUserId);
 
@@ -711,7 +711,7 @@ export class MomentService {
    * @returns Nothing.
    * @throws {NotFoundError} If there is no such Moment, or it is not theirs.
    */
-  async delete(momentId: string, viewerUserId: string, context?: RequestContext): Promise<void> {
+  async delete(momentId: string, viewerUserId: string, context: RequestContext): Promise<void> {
     await this.getForAuthor(momentId, viewerUserId);
 
     const at = this.clock();
@@ -900,10 +900,9 @@ export class MomentService {
     momentId: string,
     authorUserId: string,
     extra: Record<string, unknown>,
-    context: RequestContext | undefined,
+    context: RequestContext,
   ): Promise<void> {
-    const at = this.clock();
-    const traceId = context?.traceId ?? randomUUID();
+    const traceId = context.traceId;
 
     await enqueueOutboxMessage(tx, {
       topic: topicName(MOMENTS_BOUNDARY),
@@ -922,7 +921,7 @@ export class MomentService {
         causationId: undefined,
         actorUserId: authorUserId,
         eventVersion: 1,
-        recordedAt: (context?.receivedAt ?? at).toISOString(),
+        recordedAt: context.receivedAt.toISOString(),
       },
     });
   }
@@ -1022,7 +1021,7 @@ export class MomentService {
     momentId: string,
     authorUserId: string,
     discoverable: boolean,
-    context?: RequestContext,
+    context: RequestContext,
   ): Promise<Moment> {
     await this.getForAuthor(momentId, authorUserId);
 
@@ -1061,7 +1060,7 @@ export class MomentService {
     momentId: string,
     authorUserId: string,
     request: SetMomentVisibilityRequest,
-    context?: RequestContext,
+    context: RequestContext,
   ): Promise<Moment> {
     await this.getForAuthor(momentId, authorUserId);
 
@@ -1123,7 +1122,7 @@ export class MomentService {
     momentId: string,
     authorUserId: string,
     disclosure: LocationDisclosure,
-    context?: RequestContext,
+    context: RequestContext,
   ): Promise<Moment> {
     await this.getForAuthor(momentId, authorUserId);
 

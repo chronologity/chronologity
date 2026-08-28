@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { testContext } from "../../testing/context.js";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, it } from "vitest";
 import type { FastifyInstance } from "fastify";
@@ -534,7 +535,7 @@ describe("notification delivery", () => {
       uploadIds: [uploadId],
       visibility: "public",
       locationDisclosure: "exact",
-    } as never);
+    } as never, testContext());
 
     return moment.momentId;
   };
@@ -1242,7 +1243,7 @@ describe("notification delivery", () => {
     // The Moment goes private after the mention was scheduled and before it was
     // sent. An email cannot be unsent, which is exactly why the words are built
     // now rather than then.
-    await moments.setVisibility(momentId, author.userId, { visibility: "private" });
+    await moments.setVisibility(momentId, author.userId, { visibility: "private" }, testContext());
 
     await dispatch();
 

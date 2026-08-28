@@ -62,7 +62,7 @@ export function locationRoutes(locations: LocationService) {
         preHandler: requireUser,
       },
       async (request, reply) => {
-        const location = await locations.record(request.user.userId, request.body);
+        const location = await locations.record(request.user.userId, request.body, request.requestContext);
 
         return reply.status(201).send(location);
       },

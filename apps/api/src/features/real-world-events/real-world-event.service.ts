@@ -69,7 +69,7 @@ export class RealWorldEventService {
   async record(
     createdByUserId: string,
     request: CreateRealWorldEventRequest,
-    context?: RequestContext,
+    context: RequestContext,
   ): Promise<RealWorldEvent> {
     const rejection = checkOccurrence(request.occurrence);
 
@@ -104,7 +104,7 @@ export class RealWorldEventService {
 
       // Shared history, so the payload names nobody: an Event has no author
       // whose privacy or suspension could decide whether it is findable.
-      const traceId = context?.traceId ?? randomUUID();
+      const traceId = context.traceId;
 
       await enqueueOutboxMessage(tx, {
         topic: topicName(REAL_WORLD_EVENTS_BOUNDARY),
@@ -121,7 +121,7 @@ export class RealWorldEventService {
           causationId: undefined,
           actorUserId: createdByUserId,
           eventVersion: 1,
-          recordedAt: (context?.receivedAt ?? this.clock()).toISOString(),
+          recordedAt: context.receivedAt.toISOString(),
         },
       });
     });

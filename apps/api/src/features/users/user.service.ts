@@ -100,7 +100,7 @@ export class UserService {
   async create(
     identityId: string,
     request: CreateUserRequest,
-    context?: RequestContext,
+    context: RequestContext,
   ): Promise<string> {
     const at = this.clock();
     const { handle, displayName, biography, dateOfBirth } = request;
@@ -181,7 +181,7 @@ export class UserService {
   async updateProfile(
     userId: string,
     request: UpdateProfileRequest,
-    context?: RequestContext,
+    context: RequestContext,
   ): Promise<void> {
     const state = await this.requireActive(userId);
     const changes = profileChanges(state, request);
@@ -218,7 +218,7 @@ export class UserService {
    * @throws {ValidationError} If the handle is malformed, unavailable, the one
    *   already held, or the account is deactivated.
    */
-  async updateHandle(userId: string, handle: string, context?: RequestContext): Promise<void> {
+  async updateHandle(userId: string, handle: string, context: RequestContext): Promise<void> {
     const at = this.clock();
     const check = checkHandle(handle);
 
@@ -296,7 +296,7 @@ export class UserService {
    * @throws {NotFoundError} If there is no such User.
    * @throws {ValidationError} If the account is already deactivated.
    */
-  async deactivate(userId: string, context?: RequestContext): Promise<void> {
+  async deactivate(userId: string, context: RequestContext): Promise<void> {
     if (!(await this.users.exists(userId))) {
       throw new NotFoundError("No such account");
     }
@@ -332,7 +332,7 @@ export class UserService {
    * @throws {NotFoundError} If there is no such User.
    * @throws {ValidationError} If the account is already active.
    */
-  async reactivate(userId: string, context?: RequestContext): Promise<void> {
+  async reactivate(userId: string, context: RequestContext): Promise<void> {
     if (!(await this.users.exists(userId))) {
       throw new NotFoundError("No such account");
     }
@@ -379,9 +379,9 @@ export class UserService {
     eventType: string,
     userId: string,
     extra: Record<string, unknown>,
-    context: RequestContext | undefined,
+    context: RequestContext,
   ): Promise<void> {
-    const traceId = context?.traceId ?? randomUUID();
+    const traceId = context.traceId;
 
     await enqueueOutboxMessage(tx, {
       topic: topicName(USERS_BOUNDARY),
@@ -398,7 +398,7 @@ export class UserService {
         causationId: undefined,
         actorUserId: userId,
         eventVersion: 1,
-        recordedAt: (context?.receivedAt ?? new Date()).toISOString(),
+        recordedAt: context.receivedAt.toISOString(),
       },
     });
   }

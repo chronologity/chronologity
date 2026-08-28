@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { testContext } from "../../testing/context.js";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import type { FastifyInstance } from "fastify";
@@ -291,7 +292,7 @@ describe("account deletion", () => {
       uploadIds: [uploadId],
       visibility: "public",
       locationDisclosure: "exact",
-    } as never);
+    } as never, testContext());
 
     return moment.momentId;
   };

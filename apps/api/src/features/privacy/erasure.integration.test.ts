@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { testContext } from "../../testing/context.js";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import type { AppConfig } from "../../config/app-config.js";
@@ -188,7 +189,7 @@ describe("erasure", () => {
       uploadIds: [...uploadIds],
       visibility: "public",
       locationDisclosure: "exact",
-    } as never);
+    } as never, testContext());
 
     return moment.momentId;
   };
@@ -244,7 +245,7 @@ describe("erasure", () => {
         await uploadWithObjects(author.userId),
       ]);
 
-      await moments.delete(momentId, author.userId);
+      await moments.delete(momentId, author.userId, testContext());
 
       const rows: { caption: string }[] = await database.dataSource.query(
         `SELECT caption FROM moments WHERE moment_id = $1`,
@@ -265,7 +266,7 @@ describe("erasure", () => {
       const said = `zq${randomUUID().replaceAll("-", "")}`;
 
       await comments.add(momentId, talker.userId, { body: said } as never);
-      await moments.delete(momentId, author.userId);
+      await moments.delete(momentId, author.userId, testContext());
 
       const rows: { body: string }[] = await database.dataSource.query(
         `SELECT body FROM moment_comments WHERE moment_id = $1`,
@@ -282,7 +283,7 @@ describe("erasure", () => {
         await uploadWithObjects(author.userId),
       ]);
 
-      await moments.delete(momentId, author.userId);
+      await moments.delete(momentId, author.userId, testContext());
 
       const request = await requestFor(momentId);
 
@@ -296,8 +297,8 @@ describe("erasure", () => {
         await uploadWithObjects(author.userId),
       ]);
 
-      await moments.delete(momentId, author.userId);
-      await assert.rejects(() => moments.delete(momentId, author.userId));
+      await moments.delete(momentId, author.userId, testContext());
+      await assert.rejects(() => moments.delete(momentId, author.userId, testContext()));
 
       const rows: { count: string }[] = await database.dataSource.query(
         `SELECT COUNT(*) AS count FROM erasure_requests WHERE subject_id = $1`,
@@ -317,7 +318,7 @@ describe("erasure", () => {
       ]);
 
       await comments.add(momentId, talker.userId, { body: "something said" } as never);
-      await moments.delete(momentId, author.userId);
+      await moments.delete(momentId, author.userId, testContext());
       await erase();
 
       const rows: { count: string }[] = await database.dataSource.query(
@@ -341,7 +342,7 @@ describe("erasure", () => {
 
       assert.equal((await storage.list(prefix)).length, 2, "before");
 
-      await moments.delete(momentId, author.userId);
+      await moments.delete(momentId, author.userId, testContext());
       await erase();
 
       // A product cannot truthfully claim a video was deleted while continuing
@@ -389,7 +390,7 @@ describe("erasure", () => {
 
       assert.notEqual(await documents.find(INDEX_VERSION, "moment", momentId), undefined);
 
-      await moments.delete(momentId, author.userId);
+      await moments.delete(momentId, author.userId, testContext());
       await erase();
 
       assert.equal(await documents.find(INDEX_VERSION, "moment", momentId), undefined);
@@ -401,7 +402,7 @@ describe("erasure", () => {
         await uploadWithObjects(author.userId),
       ]);
 
-      await moments.delete(momentId, author.userId);
+      await moments.delete(momentId, author.userId, testContext());
       await erase();
 
       const request = await requestFor(momentId);
@@ -419,7 +420,7 @@ describe("erasure", () => {
       ];
       const momentId = await record(author.userId, "a caption", uploadIds);
 
-      await moments.delete(momentId, author.userId);
+      await moments.delete(momentId, author.userId, testContext());
       await erase();
 
       for (const uploadId of uploadIds) {
@@ -437,7 +438,7 @@ describe("erasure", () => {
         await uploadWithObjects(author.userId),
       ]);
 
-      await moments.delete(momentId, author.userId);
+      await moments.delete(momentId, author.userId, testContext());
 
       const first = await erase();
 
@@ -457,7 +458,7 @@ describe("erasure", () => {
       const doomed = await record(author.userId, "the one being deleted", [uploadId]);
       const kept = await record(author.userId, "the one that stays", [uploadId]);
 
-      await moments.delete(doomed, author.userId);
+      await moments.delete(doomed, author.userId, testContext());
       await erase();
 
       // Nothing prevents attaching one upload twice, and erasure declines to
@@ -476,8 +477,8 @@ describe("erasure", () => {
       const first = await record(author.userId, "one", [uploadId]);
       const second = await record(author.userId, "two", [uploadId]);
 
-      await moments.delete(first, author.userId);
-      await moments.delete(second, author.userId);
+      await moments.delete(first, author.userId, testContext());
+      await moments.delete(second, author.userId, testContext());
       await erase();
 
       // Both are awaiting erasure. If each deferred to the other the bytes
@@ -494,7 +495,7 @@ describe("erasure", () => {
         await uploadWithObjects(author.userId),
       ]);
 
-      await moments.delete(doomed, author.userId);
+      await moments.delete(doomed, author.userId, testContext());
       await erase();
 
       const still = await moments.get(other, author.userId);
@@ -514,7 +515,7 @@ describe("erasure", () => {
         [momentId, author.userId],
       );
 
-      await moments.delete(momentId, author.userId);
+      await moments.delete(momentId, author.userId, testContext());
       await erase();
 
       const rows: { count: string }[] = await database.dataSource.query(
@@ -535,7 +536,7 @@ describe("erasure", () => {
         await uploadWithObjects(author.userId),
       ]);
 
-      await moments.delete(momentId, author.userId);
+      await moments.delete(momentId, author.userId, testContext());
       await erase();
 
       const indexer = new SearchIndexer(
@@ -584,7 +585,7 @@ describe("erasure", () => {
       assert.equal((await notifications.list({ limit: 20, unreadOnly: false }, author.userId))
         .notifications.length, 1, "before");
 
-      await moments.delete(momentId, author.userId);
+      await moments.delete(momentId, author.userId, testContext());
       await erase();
 
       // Composition resolves access every time it renders, so a notification
@@ -606,7 +607,7 @@ describe("erasure", () => {
       ]);
 
       await comments.add(momentId, talker.userId, { body: said } as never);
-      await moments.delete(momentId, author.userId);
+      await moments.delete(momentId, author.userId, testContext());
       await erase();
 
       // Every text column in the database, asked directly. The narrower tests
@@ -644,7 +645,7 @@ describe("erasure", () => {
         await uploadWithObjects(author.userId),
       ]);
 
-      await moments.delete(momentId, author.userId);
+      await moments.delete(momentId, author.userId, testContext());
 
       storageRefuses = new Error("the object store is unreachable");
       await erase();
@@ -666,7 +667,7 @@ describe("erasure", () => {
       const uploadId = await uploadWithObjects(author.userId);
       const momentId = await record(author.userId, "a caption", [uploadId]);
 
-      await moments.delete(momentId, author.userId);
+      await moments.delete(momentId, author.userId, testContext());
 
       storageRefuses = new Error("the object store is unreachable");
       await erase();
@@ -696,7 +697,7 @@ describe("erasure", () => {
         await uploadWithObjects(author.userId),
       ]);
 
-      await moments.delete(momentId, author.userId);
+      await moments.delete(momentId, author.userId, testContext());
 
       storageRefuses = new Error("the object store is unreachable");
 

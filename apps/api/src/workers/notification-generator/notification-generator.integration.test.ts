@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { testContext } from "../../testing/context.js";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { LocationRepository } from "../../features/locations/location.repository.js";
 import { ModerationRepository } from "../../features/moderation/moderation.repository.js";
@@ -101,7 +102,7 @@ describe("a reaction reaching the notification generator over Kafka", () => {
       uploadIds: [uploadId],
       visibility: "public",
       locationDisclosure: "exact",
-    });
+    }, testContext());
 
     await reactions.react(moment.momentId, admirer.userId, "loved");
 
@@ -145,7 +146,7 @@ describe("a reaction reaching the notification generator over Kafka", () => {
       uploadIds: [uploadId],
       visibility: "public",
       locationDisclosure: "exact",
-    });
+    }, testContext());
 
     await assert.rejects(
       () =>

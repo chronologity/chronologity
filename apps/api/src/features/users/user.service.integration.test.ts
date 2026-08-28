@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { testContext } from "../../testing/context.js";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { migrate } from "../../lib/database/migrations.js";
@@ -67,7 +68,7 @@ describe("accounts", () => {
       handle,
       displayName: "A Person",
       dateOfBirth: "1990-01-01",
-    });
+    }, testContext());
 
     return { identityId, userId, handle };
   };
@@ -81,7 +82,7 @@ describe("accounts", () => {
           handle: uniqueHandle(),
           displayName: "The Same Person",
           dateOfBirth: "1990-01-01",
-        }),
+        }, testContext()),
         ValidationError,
       );
     });
@@ -94,7 +95,7 @@ describe("accounts", () => {
           handle,
           displayName: "Someone Else",
           dateOfBirth: "1990-01-01",
-        }),
+        }, testContext()),
         (error: unknown) => {
           assert.ok(error instanceof ValidationError);
           // "Reserved" and "held" read identically: which one it is maps out
@@ -113,7 +114,7 @@ describe("accounts", () => {
           handle: uniqueHandle(),
           displayName: "Too Young",
           dateOfBirth: "2020-01-01",
-        }),
+        }, testContext()),
         (error: unknown) => {
           assert.ok(error instanceof ValidationError);
           // An age gate that answers its own question only teaches people what
@@ -135,7 +136,7 @@ describe("accounts", () => {
           handle,
           displayName: "Too Young",
           dateOfBirth: "2020-01-01",
-        }),
+        }, testContext()),
         ValidationError,
       );
 
@@ -161,7 +162,7 @@ describe("accounts", () => {
           handle: uniqueHandle(),
           displayName: "Too Young",
           dateOfBirth: new Date(Date.now() - 12 * 365.25 * DAY_MS).toISOString().slice(0, 10),
-        }),
+        }, testContext()),
         ValidationError,
       );
 
@@ -170,7 +171,7 @@ describe("accounts", () => {
           handle: uniqueHandle(),
           displayName: "Old Enough",
           dateOfBirth: "1990-01-01",
-        }),
+        }, testContext()),
       );
     });
 
@@ -180,7 +181,7 @@ describe("accounts", () => {
           handle: "not a handle!",
           displayName: "A Person",
           dateOfBirth: "1990-01-01",
-        }),
+        }, testContext()),
         ValidationError,
       );
     });
@@ -204,7 +205,7 @@ describe("accounts", () => {
             handle,
             displayName: "A Contender",
             dateOfBirth: "1990-01-01",
-          }),
+          }, testContext()),
         ),
       );
 
@@ -308,24 +309,24 @@ describe("accounts", () => {
       // from what is stored, so this is the service's own guard and only
       // reachable from here.
       await assert.rejects(
-        users.updateProfile(userId, { displayName: "A Person" }),
+        users.updateProfile(userId, { displayName: "A Person" }, testContext()),
         ValidationError,
       );
     });
 
     it("refuses an account that does not exist", async () => {
       await assert.rejects(
-        users.updateProfile(randomUUID(), { displayName: "Nobody" }),
+        users.updateProfile(randomUUID(), { displayName: "Nobody" }, testContext()),
         NotFoundError,
       );
     });
 
     it("refuses a deactivated account", async () => {
       const { userId } = await account();
-      await users.deactivate(userId);
+      await users.deactivate(userId, testContext());
 
       await assert.rejects(
-        users.updateProfile(userId, { displayName: "Still Here" }),
+        users.updateProfile(userId, { displayName: "Still Here" }, testContext()),
         ValidationError,
       );
     });
@@ -333,17 +334,17 @@ describe("accounts", () => {
     it("clears a biography with null and leaves it alone when absent", async () => {
       const { userId } = await account();
 
-      await users.updateProfile(userId, { biography: "Something about me" });
+      await users.updateProfile(userId, { biography: "Something about me" }, testContext());
       assert.equal((await users.getAccount(userId)).biography, "Something about me");
 
-      await users.updateProfile(userId, { displayName: "A Renamed Person" });
+      await users.updateProfile(userId, { displayName: "A Renamed Person" }, testContext());
       assert.equal(
         (await users.getAccount(userId)).biography,
         "Something about me",
         "an absent biography must leave it alone",
       );
 
-      await users.updateProfile(userId, { biography: null });
+      await users.updateProfile(userId, { biography: null }, testContext());
       assert.equal((await users.getAccount(userId)).biography, null);
     });
   });
@@ -352,13 +353,13 @@ describe("accounts", () => {
     it("refuses a malformed handle", async () => {
       const { userId } = await account();
 
-      await assert.rejects(users.updateHandle(userId, "not a handle!"), ValidationError);
+      await assert.rejects(users.updateHandle(userId, "not a handle!", testContext()), ValidationError);
     });
 
     it("refuses the handle already held", async () => {
       const { userId, handle } = await account();
 
-      await assert.rejects(users.updateHandle(userId, handle), (error: unknown) => {
+      await assert.rejects(users.updateHandle(userId, handle, testContext()), (error: unknown) => {
         assert.ok(error instanceof ValidationError);
         assert.match(error.message, /already your handle/);
         return true;
@@ -369,27 +370,27 @@ describe("accounts", () => {
       const { userId } = await account();
       const other = await account();
 
-      await assert.rejects(users.updateHandle(userId, other.handle), ValidationError);
+      await assert.rejects(users.updateHandle(userId, other.handle, testContext()), ValidationError);
     });
 
     it("refuses a deactivated account", async () => {
       const { userId } = await account();
-      await users.deactivate(userId);
+      await users.deactivate(userId, testContext());
 
-      await assert.rejects(users.updateHandle(userId, uniqueHandle()), ValidationError);
+      await assert.rejects(users.updateHandle(userId, uniqueHandle(), testContext()), ValidationError);
     });
 
     it("keeps a released handle reserved against everyone but its previous holder", async () => {
       const first = await account();
-      await users.updateHandle(first.userId, uniqueHandle());
+      await users.updateHandle(first.userId, uniqueHandle(), testContext());
 
       // Handing a recognisable handle straight to someone else invites
       // impersonation, so it goes into cooldown rather than becoming free.
       const second = await account();
-      await assert.rejects(users.updateHandle(second.userId, first.handle), ValidationError);
+      await assert.rejects(users.updateHandle(second.userId, first.handle, testContext()), ValidationError);
 
       // Its previous holder may take it back at any point during the cooldown.
-      await users.updateHandle(first.userId, first.handle);
+      await users.updateHandle(first.userId, first.handle, testContext());
       assert.equal((await users.getAccount(first.userId)).handle, first.handle);
     });
 
@@ -397,14 +398,14 @@ describe("accounts", () => {
       now = new Date("2026-08-19T00:00:00.000Z");
 
       const first = await account();
-      await users.updateHandle(first.userId, uniqueHandle());
+      await users.updateHandle(first.userId, uniqueHandle(), testContext());
 
       const second = await account();
-      await assert.rejects(users.updateHandle(second.userId, first.handle), ValidationError);
+      await assert.rejects(users.updateHandle(second.userId, first.handle, testContext()), ValidationError);
 
       now = new Date(now.getTime() + (COOLDOWN_DAYS + 1) * DAY_MS);
 
-      await users.updateHandle(second.userId, first.handle);
+      await users.updateHandle(second.userId, first.handle, testContext());
       assert.equal((await users.getAccount(second.userId)).handle, first.handle);
 
       now = new Date();
@@ -417,7 +418,7 @@ describe("accounts", () => {
       // reservation and no other account is involved. The claim used to find
       // an unreleased row and call it taken without noticing whose it was,
       // which told the holder their own handle was unavailable.
-      await users.updateHandle(userId, handle.toUpperCase());
+      await users.updateHandle(userId, handle.toUpperCase(), testContext());
 
       assert.equal((await users.getAccount(userId)).handle, handle.toUpperCase());
       assert.equal(
@@ -435,7 +436,7 @@ describe("accounts", () => {
         [handle.toLowerCase()],
       );
 
-      await users.updateHandle(userId, handle.toUpperCase());
+      await users.updateHandle(userId, handle.toUpperCase(), testContext());
 
       const after = await database.dataSource.query(
         `SELECT assigned_at, released_at FROM user_handles WHERE normalized_handle = $1`,
@@ -463,7 +464,7 @@ describe("accounts", () => {
       // The holder check must distinguish "mine" from "unreleased", not
       // weaken the rule that an unreleased handle belongs to whoever has it.
       await assert.rejects(
-        users.updateHandle(userId, other.handle.toUpperCase()),
+        users.updateHandle(userId, other.handle.toUpperCase(), testContext()),
         (error: unknown) => {
           assert.ok(error instanceof ValidationError);
           assert.match(error.message, /not available/);
@@ -478,7 +479,7 @@ describe("accounts", () => {
       const { userId, handle } = await account();
       const replacement = uniqueHandle();
 
-      await users.updateHandle(userId, replacement);
+      await users.updateHandle(userId, replacement, testContext());
 
       const rows: { normalized_handle: string }[] = await database.dataSource.query(
         `SELECT normalized_handle FROM user_handles
@@ -519,32 +520,32 @@ describe("accounts", () => {
 
   describe("deactivating and reactivating", () => {
     it("refuses to deactivate an account that does not exist", async () => {
-      await assert.rejects(users.deactivate(randomUUID()), NotFoundError);
+      await assert.rejects(users.deactivate(randomUUID(), testContext()), NotFoundError);
     });
 
     it("refuses to deactivate an account that is already deactivated", async () => {
       const { userId } = await account();
-      await users.deactivate(userId);
+      await users.deactivate(userId, testContext());
 
-      await assert.rejects(users.deactivate(userId), ValidationError);
+      await assert.rejects(users.deactivate(userId, testContext()), ValidationError);
     });
 
     it("refuses to reactivate an account that does not exist", async () => {
-      await assert.rejects(users.reactivate(randomUUID()), NotFoundError);
+      await assert.rejects(users.reactivate(randomUUID(), testContext()), NotFoundError);
     });
 
     it("refuses to reactivate an account that is already active", async () => {
       const { userId } = await account();
 
-      await assert.rejects(users.reactivate(userId), ValidationError);
+      await assert.rejects(users.reactivate(userId, testContext()), ValidationError);
     });
 
     it("lets exactly one of two simultaneous deactivations through", async () => {
       const { userId } = await account();
 
       const attempts = await Promise.allSettled([
-        users.deactivate(userId),
-        users.deactivate(userId),
+        users.deactivate(userId, testContext()),
+        users.deactivate(userId, testContext()),
       ]);
 
       // The transition is a conditional update, so the second matches no rows
@@ -555,8 +556,8 @@ describe("accounts", () => {
     it("brings a deactivated account back", async () => {
       const { userId } = await account();
 
-      await users.deactivate(userId);
-      await users.reactivate(userId);
+      await users.deactivate(userId, testContext());
+      await users.reactivate(userId, testContext());
 
       assert.equal((await users.getAccount(userId)).status, "active");
     });
@@ -573,14 +574,14 @@ describe("accounts", () => {
 
     it("refuses a former handle rather than pointing at who used to hold it", async () => {
       const { userId, handle } = await account();
-      await users.updateHandle(userId, uniqueHandle());
+      await users.updateHandle(userId, uniqueHandle(), testContext());
 
       await assert.rejects(users.getByHandle(handle), NotFoundError);
     });
 
     it("hides a deactivated account from the public view", async () => {
       const { userId, handle } = await account();
-      await users.deactivate(userId);
+      await users.deactivate(userId, testContext());
 
       await assert.rejects(users.getByHandle(handle), NotFoundError);
 
