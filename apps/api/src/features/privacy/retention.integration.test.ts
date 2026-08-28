@@ -154,6 +154,36 @@ describe("retention", () => {
       assert.equal(await countWhere("magic_link_tokens", "token_hash", consumed), 0);
       assert.equal(await countWhere("magic_link_tokens", "token_hash", live), 1, "unconsumed");
     });
+
+    it("removes one written in the very millisecond the sweep began", async () => {
+      // Every test here retains nothing, so the cutoff is the instant the sweep
+      // began and the boundary is reached constantly — it is only invisible
+      // because the rows are dated days earlier. Dating one exactly on the
+      // cutoff asks the question the outbox sweep got wrong: an exclusive
+      // comparison keeps what was written during the millisecond before it, and
+      // "retain nothing" then retains something.
+      const at = new Date();
+      const token = randomUUID();
+
+      await connection.dataSource.query(
+        `INSERT INTO magic_link_tokens
+           (token_hash, email, purpose, expires_at, consumed_at, created_at)
+         VALUES ($1, $2, 'login', now() + '1 hour'::interval, $3, $3)`,
+        [token, `${token}@example.test`, at],
+      );
+
+      const rule = RETENTION_SCHEDULE.find((candidate) => candidate.name === "consumed sign-in links");
+
+      assert.notEqual(rule, undefined, "the rule this test is about has been renamed");
+
+      await retention.apply(rule!, NOTHING_RETAINED, 500, at);
+
+      assert.equal(
+        await countWhere("magic_link_tokens", "token_hash", token),
+        0,
+        "a zero retention period retained something",
+      );
+    });
   });
 
   describe("notifications", () => {

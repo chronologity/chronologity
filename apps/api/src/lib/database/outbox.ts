@@ -266,7 +266,10 @@ export interface SweepResult {
  *
  * @param dataSource - The database to sweep.
  * @param retainForMs - How long a published message is kept, in milliseconds,
- *   measured from when it was published.
+ *   measured from when it was published. Zero means keep nothing, and a message
+ *   published in the same millisecond the sweep runs is swept: the boundary is
+ *   inclusive, because an exclusive one made "retain nothing" untrue for
+ *   exactly the messages a zero window is about.
  * @param batchSize - How many rows to remove at most, so a long-neglected table
  *   is drained over several passes rather than in one long-held lock.
  * @param now - Injected so tests can move time without waiting.
@@ -297,7 +300,14 @@ export async function sweepPublishedOutbox(
        SELECT id
          FROM outbox_messages
         WHERE published_at IS NOT NULL
-          AND published_at < $1
+          -- Inclusive. Both timestamps come from the same clock, and with a
+          -- retention of zero the cutoff is the instant the sweep began — so an
+          -- exclusive comparison cannot remove a message published during the
+          -- millisecond before it, and "retain nothing" quietly retained
+          -- something. It failed on CI roughly every other run and never here,
+          -- because it needs the write and the sweep to land inside one
+          -- millisecond, which a fast machine does and a busy laptop does not.
+          AND published_at <= $1
         ORDER BY published_at
         LIMIT $2
           FOR UPDATE SKIP LOCKED

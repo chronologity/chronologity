@@ -558,6 +558,44 @@ describe("outbox publication against real infrastructure", () => {
       assert.equal(swept.removed, 1);
     });
 
+    it("sweeps a message published in the very millisecond the sweep began", async () => {
+      // The test above says the same thing but only when the clock helps: it
+      // seeds from `Date.now()` and sweeps a moment later, so the two
+      // timestamps usually differ and the boundary is never actually reached.
+      // On a fast machine they landed in one millisecond and it failed — every
+      // other CI run, never locally. Pinning both to one instant asks the
+      // question directly, and the same way every time.
+      const at = new Date();
+      const id = await seed({});
+
+      await database.dataSource.query(
+        `UPDATE outbox_messages SET published_at = $2 WHERE id = $1`,
+        [id, at],
+      );
+
+      const swept = await sweepPublishedOutbox(database.dataSource, 0, 100, at);
+
+      assert.equal(swept.removed, 1, "a zero retention window retained something");
+      assert.deepEqual(await survivors(), []);
+    });
+
+    it("keeps a message published after the cutoff", async () => {
+      // The other side of the boundary, so the comparison cannot simply have
+      // been widened to everything.
+      const at = new Date();
+      const id = await seed({});
+
+      await database.dataSource.query(
+        `UPDATE outbox_messages SET published_at = $2 WHERE id = $1`,
+        [id, new Date(at.getTime() + 1)],
+      );
+
+      const swept = await sweepPublishedOutbox(database.dataSource, 0, 100, at);
+
+      assert.equal(swept.removed, 0);
+      assert.deepEqual(await survivors(), [id]);
+    });
+
     it("leaves a message the publisher has just delivered", async () => {
       await withTransaction(database.dataSource, (tx) =>
         enqueueOutboxMessage(tx, {

@@ -78,10 +78,17 @@ export class RetentionRepository {
     // That is not available here: the schedule spans tables whose keys differ,
     // and `notification_source_events` has a composite one, so `ctid` is the
     // only identifier every rule can share.
+    //
+    // The comparison is inclusive. `cutoff` permits a period of zero — "retain
+    // nothing" is a configuration this supports — and for that period the
+    // cutoff is the instant the sweep began, so an exclusive comparison would
+    // keep whatever was written during the millisecond before it. The outbox
+    // sweep had exactly this defect and it cost several CI runs before anybody
+    // read it as a boundary rather than as a flake.
     const doomed = `SELECT ctid FROM "${rule.table}"
                      WHERE (${rule.where})
                        AND "${rule.column}" IS NOT NULL
-                       AND "${rule.column}" < $1
+                       AND "${rule.column}" <= $1
                      ORDER BY "${rule.column}"
                      LIMIT $2
                        FOR UPDATE SKIP LOCKED`;
