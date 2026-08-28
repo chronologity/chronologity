@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
+import { assertInfrastructureReachable } from "./vitest.infrastructure.js";
 import { assertWorkspacePackagesBuilt } from "./vitest.workspace-build.js";
 
 /**
@@ -24,6 +25,10 @@ if (existsSync(envFile)) {
 // several minutes into a run, which reads as a defect in whatever test
 // happened to touch it first.
 assertWorkspacePackagesBuilt();
+
+// And before anything tries to connect. A stack that is down otherwise fails as
+// thirty-seven files at once, each blaming whatever it touched first.
+await assertInfrastructureReachable();
 
 export default defineConfig({
   test: {
