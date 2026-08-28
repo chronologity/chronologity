@@ -54,12 +54,38 @@ export class AccountErasureRepository {
     const rows: { moment_id: string }[] = await this.dataSource.query(
       `SELECT moment_id FROM moments
         WHERE author_user_id = $1
+          AND deleted_at IS NULL
         ORDER BY created_at ASC, moment_id ASC
         LIMIT $2`,
       [userId, limit],
     );
 
     return rows.map((row) => row.moment_id);
+  }
+
+  /**
+   * Moment erasures still owed for this account.
+   *
+   * @param userId - Whose account.
+   * @returns How many of this account's Moments have an erasure request still
+   *   pending. Zero while Moments remain means nothing is coming for them: every
+   *   request has completed, failed, or been abandoned, and the account is
+   *   waiting on work that will never arrive. That is the difference between an
+   *   erasure that is slow and one that is stuck, and without asking it the two
+   *   are indistinguishable.
+   */
+  async pendingMomentErasures(userId: string): Promise<number> {
+    const rows: { count: string }[] = await this.dataSource.query(
+      `SELECT COUNT(*) AS count
+         FROM erasure_requests request
+         JOIN moments moment ON moment.moment_id = request.subject_id
+        WHERE moment.author_user_id = $1
+          AND request.subject_type = 'moment'
+          AND request.state = 'pending'`,
+      [userId],
+    );
+
+    return Number(rows[0]?.count ?? "0");
   }
 
   /**

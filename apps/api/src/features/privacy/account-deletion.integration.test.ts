@@ -810,6 +810,100 @@ describe("account deletion", () => {
       assert.equal(second.failed, 0);
       assert.equal((await erasures.findLatest("account", account.userId))?.state, "completed");
     });
+
+    it("hands each Moment to the Moment path exactly once", async () => {
+      // The coordinator asks for the account's Moments each pass and hands them
+      // on. It used to ask for all of them, including the ones it had already
+      // handed on and marked, so every pass enqueued the same work again — one
+      // request per Moment per pass, for as many passes as the run took.
+      const account = await onboard();
+
+      for (const index of [0, 1, 2]) {
+        await record(account.userId, `moment ${index}`);
+      }
+
+      const momentIds: { moment_id: string }[] = await database.dataSource.query(
+        "SELECT moment_id FROM moments WHERE author_user_id = $1",
+        [account.userId],
+      );
+
+      await deleteAccount(account);
+      await erase();
+
+      const requests: { count: string }[] = await database.dataSource.query(
+        `SELECT COUNT(*) AS count FROM erasure_requests
+          WHERE subject_type = 'moment' AND subject_id = ANY($1::uuid[])`,
+        [momentIds.map((row) => row.moment_id)],
+      );
+
+      assert.equal(Number(requests[0]?.count), 3, "a Moment was handed on more than once");
+    });
+
+    it("gives up when nothing is coming for the Moments it is waiting on", async () => {
+      // The account hands its Moments to the Moment path and waits for the rows
+      // to go. If those erasures die — a store that refuses for good, a ceiling
+      // reached — nothing will ever remove the rows, and the account used to
+      // wait for that forever: rescheduling itself, never counting an attempt,
+      // never reporting anything. A worker that never drains is a deletion
+      // nobody has been told is incomplete.
+      const account = await onboard();
+      await record(account.userId, "a Moment nothing will erase");
+      await deleteAccount(account);
+
+      // One pass hands the Moment on and makes progress.
+      await eraseDueRequests({
+        dataSource: database.dataSource,
+        erasures,
+        moments: momentRepository,
+        comments: commentRepository,
+        accounts: accountErasure,
+        storage,
+        uploads,
+        documents,
+        indexVersion: INDEX_VERSION,
+      });
+
+      // Kill the Moment erasure the way a ceiling would, leaving the row.
+      await database.dataSource.query(
+        `UPDATE erasure_requests SET state = 'abandoned', completed_at = now()
+          WHERE subject_type = 'moment' AND state = 'pending'
+            AND subject_id IN (SELECT moment_id FROM moments WHERE author_user_id = $1)`,
+        [account.userId],
+      );
+
+      const result = await eraseDueRequests({
+        dataSource: database.dataSource,
+        erasures,
+        moments: momentRepository,
+        comments: commentRepository,
+        accounts: accountErasure,
+        storage,
+        uploads,
+        documents,
+        indexVersion: INDEX_VERSION,
+      });
+
+      assert.equal(result.continuing, 0, "the account was still waiting on nothing");
+      assert.equal(result.retrying + result.failed + result.abandoned, 1);
+
+      const request = await erasures.findLatest("account", account.userId);
+
+      assert.notEqual(request?.state, "completed");
+
+      // Deliberately left stuck, so it must not be left in the ledger: every
+      // other test here drains every request that is due, and an account that
+      // can never finish would be claimed by whichever ran next and counted
+      // against it.
+      await database.dataSource.query(
+        `DELETE FROM erasure_requests
+          WHERE subject_id = $1
+             OR subject_id IN (SELECT moment_id FROM moments WHERE author_user_id = $1)`,
+        [account.userId],
+      );
+      await database.dataSource.query("DELETE FROM moments WHERE author_user_id = $1", [
+        account.userId,
+      ]);
+    });
   });
 
   describe("what must survive", () => {

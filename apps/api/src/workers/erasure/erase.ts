@@ -294,6 +294,28 @@ async function eraseAccount(
     return false;
   }
 
+  // Nothing left to hand on, but the rows are still there — the Moment path has
+  // them and has not finished. Waiting is the correct thing to do and costs an
+  // attempt nothing, because a long history is long rather than broken.
+  //
+  // Waiting forever is not. If no request is owed for those Moments, none is
+  // coming: every one has completed, failed, or been abandoned at its own
+  // ceiling, and the account would otherwise reschedule itself for as long as
+  // the process lives — which is what `The worker never drained` was, and why a
+  // bucket that did not exist could hang an erasure indefinitely instead of
+  // reporting that it had not happened. `architecture/privacy.md:1149` asks
+  // that a failure in one subsystem not silently stop the workflow; this is the
+  // silent stop, so it is made loud.
+  if (await options.accounts.remainingMoments(userId) > 0) {
+    if ((await options.accounts.pendingMomentErasures(userId)) === 0) {
+      throw new Error(
+        "Moments remain for this account and no erasure is owed for them; the Moment path cannot finish",
+      );
+    }
+
+    return false;
+  }
+
   // Every Moment is gone. Anything still in object storage belonged to no
   // Moment — a file uploaded and never used, or one whose Moment has just been
   // erased — and nothing else will ever come for it.
