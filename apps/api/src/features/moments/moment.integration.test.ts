@@ -3710,6 +3710,110 @@ describe("moments", () => {
       assert.equal(reacted.json().reactions.yours, "loved");
     });
 
+    it("announces a reaction to a comment, so its author can be told", async () => {
+      // The gap 6A found: everything downstream of this event existed — the
+      // contract, the notification type, the message, the generator's handler —
+      // and nothing published it, so reacting to somebody's comment told them
+      // nothing at all.
+      const author = await onboard();
+      const other = await onboard();
+      const momentId = await aMoment(author);
+      const said = (await say(author.accessToken, momentId, "I remember")).json();
+
+      await app.inject({
+        method: "PUT",
+        url: `/comments/${said.commentId}/reaction`,
+        headers: authed(other.accessToken),
+        payload: { kind: "loved" },
+      });
+
+      const rows: { payload: Record<string, unknown>; topic: string }[] =
+        await database.dataSource.query(
+          `SELECT payload, topic FROM outbox_messages
+            WHERE event_type = 'CommentReacted' AND aggregate_id = $1`,
+          [said.commentId],
+        );
+
+      assert.equal(rows.length, 1, "reacting to a comment announced nothing");
+      assert.equal(rows[0]?.topic, "chronologity.domain-reactions.v1");
+      assert.deepEqual(Object.keys(rows[0]!.payload).sort(), [
+        "actorUserId",
+        "authorUserId",
+        "commentId",
+        "kind",
+        "momentId",
+        "reactedAt",
+      ]);
+      assert.equal(rows[0]!.payload.authorUserId, author.userId, "the wrong person is named");
+      assert.equal(rows[0]!.payload.actorUserId, other.userId);
+      assert.equal(rows[0]!.payload.kind, "loved");
+    });
+
+    it("says nothing when a reaction is refused", async () => {
+      // Announcing and recording share a transaction, so a refusal cannot leave
+      // an announcement behind. Here the comment is on a Moment the stranger
+      // may not see at all.
+      const author = await onboard();
+      const stranger = await onboard();
+      const uploadId = await createReadyUpload(database.dataSource, author.userId);
+      const momentId = (
+        await record(author.accessToken, {
+          caption: "Not yours to read",
+          occurrence: summer,
+          occurrenceOffsetMinutes: NEW_YORK,
+          uploadIds: [uploadId],
+          visibility: "private",
+        })
+      ).json().momentId as string;
+      const said = (await say(author.accessToken, momentId, "I remember")).json();
+
+      const refused = await app.inject({
+        method: "PUT",
+        url: `/comments/${said.commentId}/reaction`,
+        headers: authed(stranger.accessToken),
+        payload: { kind: "loved" },
+      });
+
+      assert.equal(refused.statusCode, 404);
+
+      const rows: { count: string }[] = await database.dataSource.query(
+        `SELECT COUNT(*) AS count FROM outbox_messages
+          WHERE event_type = 'CommentReacted' AND aggregate_id = $1`,
+        [said.commentId],
+      );
+
+      assert.equal(Number(rows[0]?.count), 0);
+    });
+
+    it("says nothing when a reaction is withdrawn", async () => {
+      // Deliberate, and the same as withdrawing a reaction to a Moment. There
+      // is nothing to tell anybody about a response being taken back.
+      const author = await onboard();
+      const other = await onboard();
+      const momentId = await aMoment(author);
+      const said = (await say(author.accessToken, momentId, "I remember")).json();
+
+      await app.inject({
+        method: "PUT",
+        url: `/comments/${said.commentId}/reaction`,
+        headers: authed(other.accessToken),
+        payload: { kind: "loved" },
+      });
+      await app.inject({
+        method: "DELETE",
+        url: `/comments/${said.commentId}/reaction`,
+        headers: authed(other.accessToken),
+      });
+
+      const rows: { count: string }[] = await database.dataSource.query(
+        `SELECT COUNT(*) AS count FROM outbox_messages
+          WHERE event_type = 'CommentReacted' AND aggregate_id = $1`,
+        [said.commentId],
+      );
+
+      assert.equal(Number(rows[0]?.count), 1, "withdrawing announced something");
+    });
+
     it("replaces a reaction to a comment rather than adding one", async () => {
       const author = await onboard();
       const momentId = await aMoment(author);

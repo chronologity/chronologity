@@ -6,7 +6,7 @@ import type {
   ReactionKind,
   SetCommentPolicyRequest,
 } from "@chronologity/contracts";
-import { COMMENTS_BOUNDARY } from "@chronologity/contracts";
+import { COMMENTS_BOUNDARY, REACTIONS_BOUNDARY } from "@chronologity/contracts";
 import type { DataSource } from "typeorm";
 import { withTransaction, type Transaction } from "../../lib/database/transaction.js";
 import { enqueueOutboxMessage } from "../../lib/database/outbox.js";
@@ -570,11 +570,85 @@ export class MomentCommentService {
       throw new ValidationError("This comment is not accepting reactions", { field: "kind" });
     }
 
-    await withTransaction(this.dataSource, (tx) =>
-      this.comments.react(tx, commentId, viewerUserId, kind, this.clock()),
-    );
+    // One instant for the row and the announcement, rather than one each. They
+    // describe the same event and a consumer comparing them should not find
+    // them disagreeing by a millisecond.
+    const at = this.clock();
+
+    await withTransaction(this.dataSource, async (tx) => {
+      await this.comments.react(tx, commentId, viewerUserId, kind, at);
+      await this.announceReaction(tx, {
+        commentId,
+        momentId: stored.momentId,
+        authorUserId: stored.authorUserId,
+        actorUserId: viewerUserId,
+        kind,
+        at,
+      });
+    });
 
     return this.read(commentId, viewerUserId);
+  }
+
+  /**
+   * Say that somebody responded to a comment.
+   *
+   * Published unconditionally, including when somebody reacts to their own
+   * comment. Deciding who hears about activity is not this service's job:
+   * `recipientOf` already refuses to make anybody the subject of their own
+   * activity, and duplicating that rule here would be a second place for it to
+   * be wrong.
+   *
+   * To the reactions boundary rather than the comments one, alongside
+   * `MomentReacted`. What a consumer subscribes to is the kind of activity, and
+   * a response to a comment is the same kind of thing as a response to a
+   * Moment.
+   *
+   * @param tx - The transaction recording the reaction, so the announcement
+   *   cannot survive a reaction that was rolled back.
+   * @param reaction - Who responded to what, how, and when.
+   * @returns Nothing.
+   */
+  private async announceReaction(
+    tx: Transaction,
+    reaction: {
+      commentId: string;
+      momentId: string;
+      authorUserId: string;
+      actorUserId: string;
+      kind: ReactionKind;
+      at: Date;
+    },
+  ): Promise<void> {
+    const traceId = randomUUID();
+
+    await enqueueOutboxMessage(tx, {
+      topic: topicName(REACTIONS_BOUNDARY),
+      // Ordered per Moment, as every other note about a Moment's discussion is,
+      // so two responses within one conversation keep their sequence.
+      partitionKey: reaction.momentId,
+      aggregateType: "comment",
+      aggregateId: reaction.commentId,
+      aggregateVersion: 0,
+      eventType: "CommentReacted",
+      eventVersion: 1,
+      payload: {
+        commentId: reaction.commentId,
+        momentId: reaction.momentId,
+        authorUserId: reaction.authorUserId,
+        actorUserId: reaction.actorUserId,
+        kind: reaction.kind,
+        reactedAt: reaction.at.toISOString(),
+      },
+      metadata: {
+        traceId,
+        correlationId: traceId,
+        causationId: undefined,
+        actorUserId: reaction.actorUserId,
+        eventVersion: 1,
+        recordedAt: reaction.at.toISOString(),
+      },
+    });
   }
 
   /**
