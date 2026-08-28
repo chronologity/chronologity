@@ -19,6 +19,7 @@
     "test": "turbo run test",
     "test:unit": "turbo run test:unit",
     "test:integration": "turbo run test:integration",
+    "test:integration:clean": "pnpm db:reset && turbo run test:integration",
     "test:watch": "turbo run test:watch",
     "clean": "turbo run clean",
     "lint:root": "eslint eslint.config.js prettier.config.js",
@@ -28,7 +29,8 @@
     "infra:reset": "bash scripts/compose.sh down --volumes",
     "infra:ps": "bash scripts/compose.sh ps",
     "infra:logs": "bash scripts/compose.sh logs --follow",
-    "infra:validate": "bash scripts/validate-infra.sh"
+    "infra:validate": "bash scripts/validate-infra.sh",
+    "db:reset": "bash scripts/reset-database.sh"
   },
   "devDependencies": {
     "@chronologity/eslint-config": "workspace:*",

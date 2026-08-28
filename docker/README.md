@@ -16,6 +16,7 @@ All commands run from the repository root.
 | `pnpm infra:down`     | Stop and remove containers, **keeping** data volumes     |
 | `pnpm infra:reset`    | Stop and remove containers **and** data volumes          |
 | `pnpm infra:validate` | Connect to each service from the host and exercise it    |
+| `pnpm db:reset`       | Drop the PostgreSQL database, recreate it, and migrate it |
 
 `infra:up` exits non-zero if any service fails to become healthy, so it is safe to chain.
 
@@ -26,6 +27,16 @@ A healthy stack is not the same as a usable one. PostgreSQL arrives with its dat
 Until it did, the bucket existed only because whichever integration suite ran first happened to create it — and on a stack with fresh storage that was not the suite that needed it. Account erasure runs earlier in the alphabet than the media worker's tests, so it always ran first, always found no bucket, and always failed: erasing a Moment deletes its media, storage answered "The specified bucket does not exist", and the erasure retried forever. It failed every CI run and no local one, because a developer's storage volume already held the bucket from the last time.
 
 Creating a bucket that already exists changes nothing, so this runs every time rather than only the first. The bucket is then asked for rather than assumed: `weed shell` exits zero whatever happens — a bogus command, an unreachable master, a bucket it never created — so its exit status is worth nothing and the script lists the buckets and looks for this one instead.
+
+### Starting from nothing
+
+CI runs the integration suite against an empty database every time. A developer's machine does not, and the difference eventually shows: the suites create Users, Moments, Locations and search documents, and almost none of them clean up. Past a certain volume that stops being harmless — a bounded page fills with other runs' rows before it reaches the row under test, and a "did you mean" correction finds a real match among tens of thousands of accumulated names. Those failures cost an hour each to chase and none of them means anything.
+
+`pnpm db:reset` makes a clean start cheap: about twenty seconds, against a suite that takes rather longer. `pnpm test:integration:clean` does it and then runs the suite.
+
+It is not wired into `test:integration` itself, deliberately. Running one file while chasing a failure should stay fast, and the state a failure left behind is often the thing worth looking at.
+
+It touches PostgreSQL only. Kafka keeps its log and object storage keeps its objects, because both are addressed by identifiers a later run will not reuse — accumulation there does not interfere with anything. `infra:reset` is still how those go, and it takes the containers with them.
 
 ## Services
 
