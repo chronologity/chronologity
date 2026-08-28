@@ -1,10 +1,9 @@
-import { TEST_RETENTION_PERIODS } from "../../testing/retention.js";
+import { testAppConfig } from "../../testing/app-config.js";
 import { testContext } from "../../testing/context.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import type { FastifyInstance } from "fastify";
-import type { AppConfig } from "../../config/app-config.js";
 import { migrate } from "../../lib/database/migrations.js";
 import { connectDatabase, createDatabase, type Database } from "../../lib/database/postgres.js";
 import { createEmailClient } from "../../integrations/email/email-client.js";
@@ -44,61 +43,7 @@ import { ExportService } from "./export.service.js";
 
 const MAILPIT = `http://127.0.0.1:${process.env.MAILPIT_UI_PORT ?? "8025"}`;
 
-const config: AppConfig = {
-  nodeEnv: "test",
-  logLevel: "fatal",
-  host: "127.0.0.1",
-  port: 0,
-  rateLimit: { maxPerMinute: 100_000 },
-  database: {
-    host: process.env.POSTGRES_HOST ?? "localhost",
-    port: Number(process.env.POSTGRES_PORT ?? "5432"),
-    database: process.env.POSTGRES_DATABASE ?? "chronologity",
-    user: process.env.POSTGRES_USER ?? "chronologity",
-    password: process.env.POSTGRES_PASSWORD ?? "chronologity",
-  },
-  messaging: { brokers: ["localhost:9092"], clientId: "export-integration" },
-  outbox: { retentionMs: 0 },
-  retention: { periods: TEST_RETENTION_PERIODS },
-  auth: {
-    jwtSecret: new TextEncoder().encode("integration-test-secret-long-enough-for-hs256"),
-    issuer: "chronologity",
-    audience: "chronologity-clients",
-    accessTokenTtlSeconds: 600,
-    refreshTokenTtlSeconds: 2_592_000,
-    magicLinkTtlSeconds: 900,
-    phoneCodeTtlSeconds: 300,
-    magicLinkBaseUrl: "http://localhost:3000/auth/sessions",
-    passwordHashing: { memoryCostKib: 8_192, timeCost: 1, parallelism: 1 },
-    passwordPolicy: { minimumLength: 12, maximumLength: 256 },
-  },
-  minimumAgeYears: 13,
-  storage: {
-    endpoint: process.env.S3_ENDPOINT ?? "http://127.0.0.1:8333",
-    region: process.env.S3_REGION ?? "us-east-1",
-    accessKeyId: process.env.S3_ACCESS_KEY_ID ?? "chronologity",
-    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? "chronologity-local-secret",
-    bucket: process.env.S3_BUCKET ?? "chronologity-media",
-    forcePathStyle: true,
-    uploadUrlTtlSeconds: 900,
-  },
-  uploadLimits: {
-    registrationTtlSeconds: 3_600,
-    maxImageBytes: 26_214_400,
-    maxVideoBytes: 524_288_000,
-  },
-  places: {
-    endpoint: "https://nominatim.openstreetmap.org/search",
-    userAgent: "Chronologity/0.1 (test)",
-    minimumIntervalMs: 0,
-    reverseEndpoint: "https://nominatim.openstreetmap.org/reverse",
-  },
-  email: {
-    host: process.env.SMTP_HOST ?? "localhost",
-    port: Number(process.env.SMTP_PORT ?? "1025"),
-    from: process.env.SMTP_FROM ?? "no-reply@chronologity.local",
-  },
-};
+const config = testAppConfig("export-integration");
 
 const ADULT = "1990-04-12";
 const uniqueEmail = () => `person-${randomUUID()}@example.test`;

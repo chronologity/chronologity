@@ -32,6 +32,12 @@ export function testAppConfig(clientId: string): AppConfig {
       user: process.env.POSTGRES_USER ?? "chronologity",
       password: process.env.POSTGRES_PASSWORD ?? "chronologity",
     },
+    clickhouse: {
+      url: process.env.CLICKHOUSE_URL ?? "http://localhost:8123",
+      database: process.env.CLICKHOUSE_DATABASE ?? "chronologity",
+      username: process.env.CLICKHOUSE_USERNAME ?? "chronologity",
+      password: process.env.CLICKHOUSE_PASSWORD ?? "chronologity",
+    },
     messaging: { brokers: ["localhost:9092"], clientId },
     outbox: { retentionMs: 0 },
     retention: { periods: TEST_RETENTION_PERIODS },
