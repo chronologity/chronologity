@@ -320,8 +320,31 @@ describe("account deletion", () => {
     return token;
   };
 
-  /** Run the worker until nothing is due. */
-  const erase = async () => {
+  /**
+   * Run the worker until nothing is due, and check this account finished.
+   *
+   * A pass that stops is not a pass that succeeded: a sweep the database
+   * refuses looks exactly like a sweep with nothing to do, which is how "keeps
+   * a Location it recorded" once passed while erasure was failing to delete
+   * one. So something has to be asserted about the outcome.
+   *
+   * What is asserted is *this account*, not the tally. The tally counts every
+   * request in a database these suites share, so one poisoned request — left by
+   * another test, or by a storage outage during an earlier run — failed a test
+   * about somebody's date of birth. That happened twice in two days and cost an
+   * hour each time looking for a defect that was not there.
+   *
+   * Asking whether this account completed is both narrower and stronger. An
+   * account request only completes once every Moment row has gone and the
+   * sweeps have run, and it refuses to keep waiting when no erasure is owed for
+   * the Moments that remain — so `completed` says the whole path worked, for
+   * this account, and says nothing about anybody else's debris.
+   *
+   * @param userId - Whose account was deleted.
+   * @returns The result of the pass that drained.
+   * @throws {Error} If the ledger never drains within two hundred passes.
+   */
+  const erase = async (userId: string) => {
     for (let pass = 0; pass < 200; pass += 1) {
       const result = await eraseDueRequests({
         dataSource: database.dataSource,
@@ -336,14 +359,12 @@ describe("account deletion", () => {
       });
 
       if (result.reachedEnd && result.continuing === 0) {
-        // A pass that stops is not a pass that succeeded. Without this, a sweep
-        // the database refuses looks exactly like a sweep that had nothing to
-        // do — which is how "keeps a Location it recorded" passed while erasure
-        // was trying to delete one and failing.
+        const request = await erasures.findLatest("account", userId);
+
         assert.equal(
-          result.failed + result.abandoned + result.retrying,
-          0,
-          JSON.stringify(result),
+          request?.state,
+          "completed",
+          `this account did not finish: ${JSON.stringify(request)}`,
         );
 
         return result;
@@ -621,7 +642,7 @@ describe("account deletion", () => {
       assert.equal(await countWhere("user_restricted_data", "user_id", account.userId), 1);
 
       await deleteAccount(account);
-      await erase();
+      await erase(account.userId);
 
       assert.equal(await countWhere("user_restricted_data", "user_id", account.userId), 0);
       assert.equal(await countWhere("user_preferences", "user_id", account.userId), 0);
@@ -672,7 +693,7 @@ describe("account deletion", () => {
       const second = await record(account.userId, "two");
 
       await deleteAccount(account);
-      await erase();
+      await erase(account.userId);
 
       assert.equal(await countWhere("moments", "author_user_id", account.userId), 0);
       assert.equal(await countWhere("moment_media", "moment_id", first), 0);
@@ -699,7 +720,7 @@ describe("account deletion", () => {
 
       await comments.add(momentId, talker.userId, { body: "what they said" } as never);
       await deleteAccount(talker);
-      await erase();
+      await erase(talker.userId);
 
       assert.equal(await countWhere("moment_comments", "author_user_id", talker.userId), 0);
 
@@ -730,7 +751,7 @@ describe("account deletion", () => {
       });
 
       await deleteAccount(leaver);
-      await erase();
+      await erase(leaver.userId);
 
       assert.equal(await countWhere("moment_reactions", "user_id", leaver.userId), 0);
       assert.equal(await countWhere("user_follows", "follower_user_id", leaver.userId), 0);
@@ -760,7 +781,7 @@ describe("account deletion", () => {
       assert.equal((await storage.list(prefix)).length, 1, "written");
 
       await deleteAccount(account);
-      await erase();
+      await erase(account.userId);
 
       // A copy of somebody's entire history must not outlive the account it
       // belongs to. The row going alone would leave the objects in storage
@@ -804,9 +825,9 @@ describe("account deletion", () => {
 
       await record(account.userId, "a Moment");
       await deleteAccount(account);
-      await erase();
+      await erase(account.userId);
 
-      const second = await erase();
+      const second = await erase(account.userId);
 
       assert.equal(second.failed, 0);
       assert.equal((await erasures.findLatest("account", account.userId))?.state, "completed");
@@ -829,7 +850,7 @@ describe("account deletion", () => {
       );
 
       await deleteAccount(account);
-      await erase();
+      await erase(account.userId);
 
       const requests: { count: string }[] = await database.dataSource.query(
         `SELECT COUNT(*) AS count FROM erasure_requests
@@ -927,7 +948,7 @@ describe("account deletion", () => {
       );
 
       await deleteAccount(leaver);
-      await erase();
+      await erase(leaver.userId);
 
       // A Location is shared reference data. Somebody who first recorded a
       // place did not thereby own it.
@@ -963,7 +984,7 @@ describe("account deletion", () => {
       assert.equal(reported.statusCode, 201, reported.body);
 
       await deleteAccount(reporter);
-      await erase();
+      await erase(reporter.userId);
 
       const rows: { reporter_user_id: string | null; reason: string }[] =
         await database.dataSource.query(
@@ -983,7 +1004,7 @@ describe("account deletion", () => {
       const account = await onboard();
 
       await deleteAccount(account);
-      await erase();
+      await erase(account.userId);
 
       const rows: { handle: string; display_name: string; status: string }[] =
         await database.dataSource.query(
@@ -1013,7 +1034,7 @@ describe("account deletion", () => {
       await record(account.userId, caption);
 
       await deleteAccount(account);
-      await erase();
+      await erase(account.userId);
 
       const columns: { table_name: string; column_name: string }[] =
         await database.dataSource.query(
