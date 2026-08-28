@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { TimelineProjector } from "../../features/timeline/timeline.projector.js";
 import { TimelineRepository } from "../../features/timeline/timeline.repository.js";
+import { rebuildTimeline } from "../../features/timeline/timeline.rebuild.js";
 import { TimelineSourceRepository } from "../../features/timeline/timeline-source.repository.js";
 import { LocationRepository } from "../../features/locations/location.repository.js";
 import { ModerationRepository } from "../../features/moderation/moderation.repository.js";
@@ -58,6 +59,7 @@ describe("a Moment reaching the Timeline", () => {
   let authentication: TestAuthentication;
   let projector: TimelineProjector;
   let timeline: TimelineRepository;
+  let sources: TimelineSourceRepository;
   const version = `test-${randomUUID().slice(0, 8)}`;
 
   beforeAll(async () => {
@@ -70,11 +72,8 @@ describe("a Moment reaching the Timeline", () => {
 
     authentication = createTestAuthentication(database.dataSource, config.auth, config.email);
     timeline = new TimelineRepository(analytics.client, version);
-    projector = new TimelineProjector(
-      database.dataSource,
-      timeline,
-      new TimelineSourceRepository(database.dataSource),
-    );
+    sources = new TimelineSourceRepository(database.dataSource);
+    projector = new TimelineProjector(database.dataSource, timeline, sources);
 
     const moderationRepository = new ModerationRepository(database.dataSource);
     const moments = new MomentService(
@@ -278,6 +277,44 @@ describe("a Moment reaching the Timeline", () => {
 
     assert.equal(await projector.handle(eventId, momentId), "projected");
     assert.equal(await projector.handle(eventId, momentId), "already-handled");
+  });
+
+  it("rebuilds what the worker built, from the database rather than the log", async () => {
+    const author = await onboard();
+    const momentId = await record(author);
+
+    await projector.project(momentId);
+
+    const asProjected = await timeline.find(momentId);
+
+    // Wiped as if the projection had been lost, then rebuilt from PostgreSQL.
+    await timeline.remove(momentId);
+    assert.equal(await timeline.find(momentId), undefined);
+
+    const report = await rebuildTimeline(projector, sources, { only: [momentId] });
+    const asRebuilt = await timeline.find(momentId);
+
+    assert.equal(report.projected, 1);
+    assert.equal(asRebuilt?.moment_id, asProjected?.moment_id);
+    assert.equal(asRebuilt?.occurred_at, asProjected?.occurred_at);
+    assert.equal(asRebuilt?.visibility, asProjected?.visibility);
+  });
+
+  it("does not bring back a Moment that was erased", async () => {
+    // The requirement `privacy.md` places on replay, and the reason a rebuild
+    // reads authoritative state rather than the event log. Replaying events
+    // would resurrect precisely what erasure removed.
+    const author = await onboard();
+    const momentId = await record(author);
+
+    await projector.project(momentId);
+    await database.dataSource.query("DELETE FROM moments WHERE moment_id = $1", [momentId]);
+
+    const report = await rebuildTimeline(projector, sources, { only: [momentId] });
+
+    assert.equal(report.projected, 0);
+    assert.equal(report.removed, 1);
+    assert.equal(await timeline.find(momentId), undefined, "erasure was undone by a rebuild");
   });
 
   it("holds one row even when the same Moment is projected under two messages", async () => {

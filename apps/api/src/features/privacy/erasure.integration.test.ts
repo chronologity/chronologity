@@ -23,6 +23,13 @@ import { INDEX_VERSION } from "../search/search-document.js";
 import { SearchIndexer } from "../search/search.indexer.js";
 import { SearchSourceRepository } from "../search/search-source.repository.js";
 import { SearchRepository } from "../search/search.repository.js";
+import { TimelineProjector } from "../timeline/timeline.projector.js";
+import { rebuildTimeline } from "../timeline/timeline.rebuild.js";
+import { TimelineRepository } from "../timeline/timeline.repository.js";
+import { TimelineSourceRepository } from "../timeline/timeline-source.repository.js";
+import { createAnalytics, type Analytics } from "../../lib/clickhouse/clickhouse.js";
+import { migrateAnalytics } from "../../lib/clickhouse/migrations.js";
+import { testAppConfig } from "../../testing/app-config.js";
 import { FollowRepository } from "../social/follow.repository.js";
 import { UploadRepository } from "../uploads/upload.repository.js";
 import { UploadService } from "../uploads/upload.service.js";
@@ -82,6 +89,10 @@ describe("erasure", () => {
   let erasures: ErasureRepository;
   let momentRepository: MomentRepository;
   let documents: SearchRepository;
+  let analytics: Analytics;
+  let timeline: TimelineRepository;
+  let projector: TimelineProjector;
+  const timelineVersion = `test-${randomUUID().slice(0, 8)}`;
   let uploads: UploadService;
   let commentRepository: MomentCommentRepository;
   let accountErasure: AccountErasureRepository;
@@ -115,6 +126,15 @@ describe("erasure", () => {
     momentRepository = new MomentRepository(database.dataSource);
     erasures = new ErasureRepository(database.dataSource);
     documents = new SearchRepository(database.dataSource);
+
+    analytics = createAnalytics(testAppConfig("erasure-integration").clickhouse);
+    await migrateAnalytics(analytics.client);
+    timeline = new TimelineRepository(analytics.client, timelineVersion);
+    projector = new TimelineProjector(
+      database.dataSource,
+      timeline,
+      new TimelineSourceRepository(database.dataSource),
+    );
 
     uploads = new UploadService(
       database.dataSource,
@@ -151,6 +171,13 @@ describe("erasure", () => {
   });
 
   afterAll(async () => {
+    // A projection version of its own, removed at the end: the table is shared,
+    // and a version left behind accumulates the way stale search rows once did.
+    await analytics.client.command({
+      query: `DELETE FROM timeline_moments WHERE projection_version = {version: String}`,
+      query_params: { version: timelineVersion },
+    });
+    await analytics.close();
     await database.close();
   });
 
@@ -206,6 +233,7 @@ describe("erasure", () => {
       uploads,
       documents,
       indexVersion: INDEX_VERSION,
+      timeline,
     });
 
     for (let pass = 0; pass < 50 && !last.reachedEnd; pass += 1) {
@@ -219,6 +247,7 @@ describe("erasure", () => {
         uploads,
         documents,
         indexVersion: INDEX_VERSION,
+        timeline,
       });
     }
 
@@ -530,6 +559,46 @@ describe("erasure", () => {
   });
 
   describe("what erasure must leave nowhere", () => {
+    it("takes the Moment off the Timeline", async () => {
+      // The obligation the roadmap attaches to Phase 7 in plain terms: every
+      // projection built there joins the erasure path, in the sub-phase that
+      // creates it rather than a later one. A projection erasure cannot reach
+      // is not ready to hold personal history, however well it performs.
+      const author = await createUser(database.dataSource);
+      const momentId = await record(author.userId, "a caption", [
+        await uploadWithObjects(author.userId),
+      ]);
+
+      await projector.project(momentId);
+      assert.notEqual(await timeline.find(momentId), undefined, "nothing to erase");
+
+      await moments.delete(momentId, author.userId, testContext());
+      await erase();
+
+      assert.equal(await timeline.find(momentId), undefined, "the Timeline still holds it");
+    });
+
+    it("resists a replay: rebuilding the Timeline afterwards restores nothing", async () => {
+      // The other half. Removing the row is worth little if the next rebuild
+      // puts it back, which is why a rebuild reads authoritative state rather
+      // than the event log — the Moment is gone from PostgreSQL, so there is
+      // nothing to rebuild from.
+      const author = await createUser(database.dataSource);
+      const momentId = await record(author.userId, "a caption", [
+        await uploadWithObjects(author.userId),
+      ]);
+
+      await projector.project(momentId);
+      await moments.delete(momentId, author.userId, testContext());
+      await erase();
+
+      await rebuildTimeline(projector, new TimelineSourceRepository(database.dataSource), {
+        only: [momentId],
+      });
+
+      assert.equal(await timeline.find(momentId), undefined, "a rebuild undid an erasure");
+    });
+
     it("resists a replay: reindexing afterwards produces no document", async () => {
       const author = await createUser(database.dataSource);
       const momentId = await record(author.userId, "a caption", [
@@ -684,6 +753,7 @@ describe("erasure", () => {
         uploads,
         documents,
         indexVersion: INDEX_VERSION,
+        timeline,
         now: () => new Date(Date.now() + 60 * 60 * 1_000),
       });
 
@@ -706,12 +776,13 @@ describe("erasure", () => {
           dataSource: database.dataSource,
           erasures,
           moments: momentRepository,
-        comments: commentRepository,
-        accounts: accountErasure,
-        storage,
+          comments: commentRepository,
+          accounts: accountErasure,
+          storage,
           uploads,
           documents,
           indexVersion: INDEX_VERSION,
+          timeline,
           maximumAttempts: 2,
           now: () => new Date(Date.now() + round * 60 * 60 * 1_000),
         });

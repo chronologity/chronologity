@@ -17,6 +17,7 @@ import type {
   ErasureRepository,
 } from "../../features/privacy/erasure.repository.js";
 import type { SearchRepository } from "../../features/search/search.repository.js";
+import type { TimelineRepository } from "../../features/timeline/timeline.repository.js";
 import type { UploadService } from "../../features/uploads/upload.service.js";
 import type { StorageClient } from "../../integrations/storage/storage-client.js";
 import { withTransaction } from "../../lib/database/transaction.js";
@@ -59,6 +60,22 @@ export interface ErasureOptions {
   readonly documents: SearchRepository;
   /** Which index generation to remove documents from. */
   readonly indexVersion: string;
+  /**
+   * The Timeline projection.
+   *
+   * Required, and deliberately so. It began optional — a test of the Moment
+   * path should not have to stand up ClickHouse — which is the same reasoning
+   * that made the request context optional, and that let seven callers drop a
+   * trace with nothing failing. An erasure that silently skipped a derived
+   * store would be a worse version of the same mistake: the roadmap's
+   * requirement for this phase is that every projection joins the erasure path,
+   * and a parameter a caller may omit is not a path anything joins.
+   *
+   * A caller with no ClickHouse now says so by constructing a repository
+   * against a client that is not connected, rather than by leaving an argument
+   * out and hoping somebody notices.
+   */
+  readonly timeline: TimelineRepository;
   readonly batchSize?: number;
   readonly maximumAttempts?: number;
   readonly backoffMs?: number;
@@ -331,6 +348,15 @@ async function eraseAccount(
     return false;
   }
 
+  // Everything of theirs left on the Timeline, which by now should be nothing:
+  // each of their Moments went through the Moment path, and that removes its
+  // row. This is the sweep that catches what a pass which failed partway left
+  // behind — a Moment erased from PostgreSQL while ClickHouse was refusing
+  // would otherwise sit on the Timeline with nothing left to say it should not.
+  // Keyed on the author rather than on Moments, so it needs no list of what to
+  // look for.
+  await options.timeline.removeEverythingBy(userId);
+
   // Before the sweep, because the sweep deletes the rows that say where these
   // are. A copy of somebody's whole history left in storage with nothing
   // pointing at it is worse than one nobody has got round to removing.
@@ -373,6 +399,15 @@ async function eraseMoment(options: ErasureOptions, momentId: string): Promise<v
   for (const uploadId of erasableUploads(attached, stillInUse)) {
     await options.uploads.erase(uploadId);
   }
+
+  // The Timeline, before the row goes, and outside any transaction for the same
+  // reason object storage is: no transaction spans PostgreSQL and ClickHouse,
+  // so the only orderings available are "derived gone first" and "authoritative
+  // gone first". A Moment missing from the Timeline while its row survives is a
+  // projection to rebuild; a row gone while the Timeline still shows it is
+  // history nobody can erase, because the thing that said what to remove has
+  // itself been removed.
+  await options.timeline.remove(momentId);
 
   await withTransaction(options.dataSource, async (tx) => {
     // Directly, rather than waiting for the indexer to notice. Deletion must

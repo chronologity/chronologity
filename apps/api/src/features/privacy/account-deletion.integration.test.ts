@@ -29,6 +29,9 @@ import { MomentService } from "../moments/moment.service.js";
 import { RealWorldEventRepository } from "../real-world-events/real-world-event.repository.js";
 import { INDEX_VERSION } from "../search/search-document.js";
 import { SearchRepository } from "../search/search.repository.js";
+import { TimelineRepository } from "../timeline/timeline.repository.js";
+import { createAnalytics, type Analytics } from "../../lib/clickhouse/clickhouse.js";
+import { migrateAnalytics } from "../../lib/clickhouse/migrations.js";
 import { FollowRepository } from "../social/follow.repository.js";
 import { UploadRepository } from "../uploads/upload.repository.js";
 import { UploadService } from "../uploads/upload.service.js";
@@ -77,6 +80,9 @@ describe("account deletion", () => {
   let commentRepository: MomentCommentRepository;
   let accountErasure: AccountErasureRepository;
   let documents: SearchRepository;
+  let analytics: Analytics;
+  let timeline: TimelineRepository;
+  const timelineVersion = `test-${randomUUID().slice(0, 8)}`;
   let uploads: UploadService;
   let storage: StorageClient;
   let mail: ReturnType<typeof createEmailClient>;
@@ -99,6 +105,10 @@ describe("account deletion", () => {
     accountErasure = new AccountErasureRepository(database.dataSource);
     erasures = new ErasureRepository(database.dataSource);
     documents = new SearchRepository(database.dataSource);
+
+    analytics = createAnalytics(config.clickhouse);
+    await migrateAnalytics(analytics.client);
+    timeline = new TimelineRepository(analytics.client, timelineVersion);
 
     uploads = new UploadService(
       database.dataSource,
@@ -157,6 +167,14 @@ describe("account deletion", () => {
   });
 
   afterAll(async () => {
+    // A projection version of its own, removed at the end. The table is shared
+    // between suites, and a version left behind accumulates the way stale
+    // search rows once did.
+    await analytics.client.command({
+      query: `DELETE FROM timeline_moments WHERE projection_version = {version: String}`,
+      query_params: { version: timelineVersion },
+    });
+    await analytics.close();
     await app.close();
     await mail.close();
     await authentication.close();
@@ -301,6 +319,7 @@ describe("account deletion", () => {
         uploads,
         documents,
         indexVersion: INDEX_VERSION,
+      timeline,
       });
 
       if (result.reachedEnd && result.continuing === 0) {
@@ -757,6 +776,7 @@ describe("account deletion", () => {
           uploads,
           documents,
           indexVersion: INDEX_VERSION,
+      timeline,
           momentsPerRun: 1,
         });
       }
@@ -828,6 +848,7 @@ describe("account deletion", () => {
         uploads,
         documents,
         indexVersion: INDEX_VERSION,
+      timeline,
       });
 
       // Kill the Moment erasure the way a ceiling would, leaving the row.
@@ -848,6 +869,7 @@ describe("account deletion", () => {
         uploads,
         documents,
         indexVersion: INDEX_VERSION,
+      timeline,
       });
 
       assert.equal(result.continuing, 0, "the account was still waiting on nothing");

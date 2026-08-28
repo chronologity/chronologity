@@ -11,9 +11,11 @@ import { AccountErasureRepository } from "../../features/privacy/account-erasure
 import { ErasureRepository } from "../../features/privacy/erasure.repository.js";
 import { INDEX_VERSION } from "../../features/search/search-document.js";
 import { SearchRepository } from "../../features/search/search.repository.js";
+import { TimelineRepository } from "../../features/timeline/timeline.repository.js";
 import { UploadRepository } from "../../features/uploads/upload.repository.js";
 import { UploadService } from "../../features/uploads/upload.service.js";
 import { createStorageClient } from "../../integrations/storage/storage-client.js";
+import { createAnalytics } from "../../lib/clickhouse/clickhouse.js";
 import { connectDatabase, createDatabase } from "../../lib/database/postgres.js";
 import { eraseDueRequests } from "./erase.js";
 
@@ -59,6 +61,11 @@ async function main(): Promise<void> {
   const database = createDatabase(config.database);
   await connectDatabase(database);
 
+  // The Timeline is a derived store erasure has to reach, exactly as object
+  // storage and the Search index are. A Moment erased from PostgreSQL while
+  // ClickHouse still holds its row is history nobody can remove afterwards,
+  // because what said to remove it has itself gone.
+  const analytics = createAnalytics(config.clickhouse);
   const storage = createStorageClient(config.storage);
   const uploads = new UploadService(
     database.dataSource,
@@ -72,6 +79,7 @@ async function main(): Promise<void> {
 
   const shutdown = async (): Promise<void> => {
     running = false;
+    await analytics.close();
     await database.close();
   };
 
@@ -89,6 +97,7 @@ async function main(): Promise<void> {
       uploads,
       documents: new SearchRepository(database.dataSource),
       indexVersion: INDEX_VERSION,
+      timeline: new TimelineRepository(analytics.client),
       batchSize: BATCH_SIZE,
     });
 
