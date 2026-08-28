@@ -49,7 +49,17 @@ const BUCKET = process.env.S3_BUCKET ?? "chronologity-media";
 // needs a deliberately oversized body rather than an accident.
 const MAX_IMAGE_BYTES = 1_024;
 
-const config = testAppConfig("uploads-integration");
+const config = {
+  ...testAppConfig("uploads-integration"),
+  // Deliberately tiny, so "over the limit" needs a body a test can hold rather
+  // than twenty-five megabytes. The shared defaults are the production ones,
+  // and taking them here made two size checks pass against objects that were
+  // never oversized.
+  uploadLimits: {
+    ...testAppConfig("uploads-integration").uploadLimits,
+    maxImageBytes: MAX_IMAGE_BYTES,
+  },
+};
 
 const ADULT = "1990-04-12";
 const uniqueEmail = () => `person-${randomUUID()}@example.test`;
