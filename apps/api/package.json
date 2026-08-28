@@ -27,6 +27,7 @@
     "start:retention": "node dist/workers/retention/index.js",
     "start:search-indexer": "node dist/workers/search-indexer/index.js",
     "start:significance": "node dist/workers/significance/index.js",
+    "start:timeline-projector": "node dist/workers/timeline-projector/index.js",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:unit": "vitest run",

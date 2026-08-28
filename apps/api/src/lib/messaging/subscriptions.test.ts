@@ -13,6 +13,10 @@ import {
   SEARCH_INDEXER_BOUNDARIES,
   SEARCH_INDEXER_EVENTS,
 } from "../../workers/search-indexer/index-event.js";
+import {
+  TIMELINE_PROJECTOR_BOUNDARIES,
+  TIMELINE_PROJECTOR_EVENTS,
+} from "../../workers/timeline-projector/project-timeline.js";
 
 /**
  * What each consumer group listens to, against what it can act on.
@@ -50,6 +54,11 @@ const WORKERS: readonly Worker[] = [
     group: "notification-generator",
     handles: NOTIFICATION_GENERATOR_EVENTS,
     subscribes: NOTIFICATION_GENERATOR_BOUNDARIES,
+  },
+  {
+    group: "timeline-projector",
+    handles: TIMELINE_PROJECTOR_EVENTS,
+    subscribes: TIMELINE_PROJECTOR_BOUNDARIES,
   },
 ];
 
