@@ -1,0 +1,44 @@
+{
+  "recordedAt": "2026-08-28T12:44:06.415Z",
+  "commit": "602ccbb",
+  "machine": {
+    "platform": "darwin",
+    "arch": "x64",
+    "cpus": 4,
+    "memoryGb": 8,
+    "node": "v24.19.0"
+  },
+  "caveat": "Measured on one developer machine against local containers. Comparable to another run on the same machine; not to anything else.",
+  "scenarios": [
+    {
+      "name": "liveness",
+      "requestsPerSecond": 1730,
+      "latencyMs": {
+        "p50": 3,
+        "p97_5": 23,
+        "max": 121
+      },
+      "requests": 17299
+    },
+    {
+      "name": "read own profile",
+      "requestsPerSecond": 117,
+      "latencyMs": {
+        "p50": 78,
+        "p97_5": 172,
+        "max": 239
+      },
+      "requests": 1172
+    },
+    {
+      "name": "list moments",
+      "requestsPerSecond": 78,
+      "latencyMs": {
+        "p50": 107,
+        "p97_5": 339,
+        "max": 429
+      },
+      "requests": 775
+    }
+  ]
+}

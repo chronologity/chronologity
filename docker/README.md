@@ -17,6 +17,7 @@ All commands run from the repository root.
 | `pnpm infra:reset`    | Stop and remove containers **and** data volumes          |
 | `pnpm infra:validate` | Connect to each service from the host and exercise it    |
 | `pnpm db:reset`       | Drop the PostgreSQL database, recreate it, and migrate it |
+| `pnpm load`           | Measure throughput and latency; `--save` records a baseline |
 
 `infra:up` exits non-zero if any service fails to become healthy, so it is safe to chain.
 
