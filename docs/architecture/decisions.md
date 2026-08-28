@@ -4149,3 +4149,53 @@ That makes five unfalsifiable guards found across this phase, all by the same te
 **A test that reads global database state is a test that alternates.** The batching test asserted `reachedEnd`, which depends on how much other suites had left behind; it passed on a full database and failed on a drained one. Rewritten to apply one rule directly and assert that no pass exceeds its batch, it is deterministic — and it is what caught the `ctid` defect.
 
 **Adding a field to `AppConfig` touched fifteen test literals.** Each integration suite builds its own configuration inline. A shared constant kept it to one import and one line apiece, but the duplication underneath is real and will be paid again by whatever adds the next field.
+
+---
+
+# ADR-127 — The Event Registry Is a Table, and a Subscription Is Checked Against It
+
+## Status
+
+Accepted.
+
+## Context
+
+Twenty-two Integration Events existed and not one was referenced by a test. `contracts.test.ts` covered the envelope and the identifiers inside it and stopped there. A field could have been removed, renamed, or made required, and every test in the repository would have passed — for contracts `events.md:552` describes as boundary promises, immutable and deliberately versioned.
+
+Subscriptions were in the same position from the other direction. Three consumer groups subscribe to eleven topics between them, and only the media checker's single topic had ever carried a message in a test. The rest were exercised by handing events straight to the handler, which proves the handler and says nothing about whether the worker is listening. 5Q-2 added a fifth subscription to the notification generator; a wrong or forgotten topic name there would have passed everything while notifying nobody.
+
+Both worker handlers were switch statements, so the set of event types a worker understood could not be read by anything but a person.
+
+`events.md:782` had already asked for a canonical registry mapping type, version, schema, owner, and classification, and said plainly it could be code-driven.
+
+## Decision
+
+The registry is data: `EVENT_REGISTRY` in `packages/contracts/src/event-registry.ts`, one entry per event, carrying type, version, envelope schema, payload schema, boundary, owner, classification, and a payload the schema accepts.
+
+Each worker exports the event types it handles and the boundaries it subscribes to, as data, from the module holding its handlers. `index.ts` subscribes with that exported list rather than one written out inside it.
+
+Properties are asserted over the table rather than per event: uniqueness of type and of type-and-version; that every documented example parses; that dropping any field of an example is refused; and that no payload property name suggests a secret or erasable personal data, per ADR-095. Separately, a test compares each worker's handled types against its subscriptions in both directions, and an integration test reads every event type the outbox has ever held and refuses one that is not registered.
+
+Three end-to-end tests, one per consumer group, publish through the outbox to a real broker and assert the effect reaches the database.
+
+## Alternatives Considered
+
+A test per event, hand-written. Rejected: twenty-two events is where that stops being maintained, and the property that matters — every event, including the next one — is exactly what a hand-written test cannot hold.
+
+A runtime registry service. Rejected for the reason `events.md:800` gives: nothing here needs the registry at runtime, and a service would add a dependency to gain nothing.
+
+Leaving the topic lists in each `index.ts`. Rejected because a worker entry point runs on import; a list held there is a list no test can read, which is how the eleven subscriptions came to be unverified in the first place.
+
+Comparing worker subscriptions against publishers rather than against the registry. Rejected: `LocationRevised` and `RealWorldEventRevised` are contracts written ahead of the operations that will raise them, and a check in that direction would have to be suppressed for them.
+
+## Consequences
+
+**Three events were registered with no publisher, and one of those is a defect rather than a decision.** `LocationRevised` and `RealWorldEventRevised` are deliberate — neither entity has a revise operation yet. `CommentReacted` is not: `PUT /comments/:commentId/reaction` records the reaction and announces nothing, while the notification generator has a `comment_reacted` handler waiting for it. Reacting to a comment notified nobody. Fixed separately, as the pre-existing bug it is.
+
+**Neither `subjectOf` nor `candidateFrom` had a unit test.** Both are decisions over a dozen branches each, and the switch shape made that easy not to notice. Converted to tables and driven from the registry's own examples, every handled type is now exercised with the payload the contract promises.
+
+**The end-to-end tests are slow and would be slower still without filtering.** A fresh consumer group reading from the beginning replays everything the local broker holds. The shared harness filters to the aggregate under test before delegating, so the message under test walks the whole path while unrelated history does not re-drive the worker.
+
+**Publishing in a test drains the whole outbox, not one message.** The publisher claims in creation order across the table, so the harness creates topics for every pending message's topic before publishing — otherwise a stale row bound for a topic that no longer exists fails the batch carrying the message under test.
+
+**The registry is now the thing to update when an event is added.** That is the cost, and it is the point: an event added without registering it fails as soon as anything publishes one.

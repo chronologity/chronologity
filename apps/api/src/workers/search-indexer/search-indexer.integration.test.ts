@@ -27,16 +27,17 @@ import {
   createRealWorldEvent,
   createUser,
 } from "../../testing/fixtures.js";
-import { indexFromEvent } from "./index-event.js";
+import { deliverThroughBroker } from "../../testing/broker.js";
+import { indexFromEvent, SEARCH_INDEXER_BOUNDARIES } from "./index-event.js";
 
 /**
  * The Search indexer, against real infrastructure.
  *
- * Kafka transport is not exercised here. It is proven once by the media
- * worker's suite, and repeating it would test the broker rather than the
- * projection; what is specific to this worker is what a document says, that
- * saying it twice changes nothing, and that a rebuild reproduces what the
- * worker built incrementally.
+ * Most of it hands events to the handler directly, which is the right shape for
+ * what is specific to this worker: what a document says, that saying it twice
+ * changes nothing, and that a rebuild reproduces what the worker built
+ * incrementally. One test at the end does not, because none of those prove the
+ * worker is listening to the right topics.
  *
  * Requires `pnpm infra:up`.
  */
@@ -588,6 +589,30 @@ describe("search indexer", () => {
       await database.dataSource.query("DELETE FROM search_documents WHERE index_version = $1", [
         shadow,
       ]);
+    });
+  });
+
+  describe("reaching the worker through the broker it actually subscribes to", () => {
+    it("indexes a Moment that arrived over Kafka rather than by hand", async () => {
+      // The only test here that would notice a wrong topic name. The boundaries
+      // come from the worker's own exported list, which is what `index.ts`
+      // subscribes with, so changing one and leaving the other alone is not
+      // possible.
+      const { author, momentId } = await someoneWithAMoment("Carried by the broker");
+
+      const delivered = await deliverThroughBroker({
+        dataSource: database.dataSource,
+        boundaries: SEARCH_INDEXER_BOUNDARIES,
+        aggregateId: momentId,
+        handler: (event) => indexFromEvent(indexer, event),
+        clientId: "search-indexer-broker",
+      });
+
+      const document = await documentFor("moment", momentId);
+
+      assert.ok(delivered > 0);
+      assert.equal(document?.title, "Carried by the broker");
+      assert.equal(document?.authorUserId, author.userId);
     });
   });
 });

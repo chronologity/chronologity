@@ -4,7 +4,6 @@
 import "reflect-metadata";
 
 import { ConfigurationError } from "@chronologity/config";
-import { MEDIA_BOUNDARY } from "@chronologity/contracts";
 import { loadConfig } from "../../config/app-config.js";
 import { UploadRepository } from "../../features/uploads/upload.repository.js";
 import { UploadService } from "../../features/uploads/upload.service.js";
@@ -15,7 +14,7 @@ import { topicName } from "../../lib/messaging/topics.js";
 import { createDerivativeClient } from "../../integrations/metadata/derivative-client.js";
 import { createMetadataClient } from "../../integrations/metadata/metadata-client.js";
 import { createStorageClient } from "../../integrations/storage/storage-client.js";
-import { checkArrivedMedia } from "./check-media.js";
+import { checkArrivedMedia, MEDIA_CHECKER_BOUNDARIES } from "./check-media.js";
 
 /**
  * The media-checking worker.
@@ -60,7 +59,7 @@ async function main(): Promise<void> {
   const consumer = createEventConsumer({
     kafka: messaging.kafka,
     groupId: GROUP_ID,
-    topics: [topicName(MEDIA_BOUNDARY)],
+    topics: MEDIA_CHECKER_BOUNDARIES.map((boundary) => topicName(boundary)),
     handler: (event) => checkArrivedMedia(uploads, event),
   });
 

@@ -112,6 +112,13 @@ export {
   type UserRoles,
 } from "./authorization.js";
 export {
+  EVENT_REGISTRY,
+  boundaryOf,
+  registeredEvent,
+  type EventClassification,
+  type RegisteredEvent,
+} from "./event-registry.js";
+export {
   MEDIA_BOUNDARY,
   uploadReceivedEventSchema,
   uploadReceivedPayloadSchema,

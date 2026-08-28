@@ -18,7 +18,8 @@ import { connectDatabase, createDatabase, type Database } from "../../lib/databa
 import type { ConsumedEvent } from "../../lib/messaging/consumer.js";
 import { createUser } from "../../testing/fixtures.js";
 import { systemContext } from "../../types/request-context.js";
-import { checkArrivedMedia } from "./check-media.js";
+import { deliverThroughBroker } from "../../testing/broker.js";
+import { checkArrivedMedia, MEDIA_CHECKER_BOUNDARIES } from "./check-media.js";
 
 /**
  * Opening real files, end to end.
@@ -364,5 +365,82 @@ describe("handling a note from the queue", () => {
   it("ignores a note whose contents do not match the contract", async () => {
     // Retrying cannot repair a malformed message, so it must not loop.
     await checkArrivedMedia(uploads, noteAbout({ nonsense: true }));
+  });
+});
+
+describe("a file that arrives over the broker rather than by hand", () => {
+  let database: Database;
+  let uploads: UploadService;
+  let repository: UploadRepository;
+  let storage: StorageClient;
+
+  beforeAll(async () => {
+    database = createDatabase({
+      host: process.env.POSTGRES_HOST ?? "localhost",
+      port: Number(process.env.POSTGRES_PORT ?? "5432"),
+      database: process.env.POSTGRES_DATABASE ?? "chronologity",
+      user: process.env.POSTGRES_USER ?? "chronologity",
+      password: process.env.POSTGRES_PASSWORD ?? "chronologity",
+    });
+    await connectDatabase(database);
+
+    storage = createStorageClient(storageConfig);
+    repository = new UploadRepository(database.dataSource);
+    uploads = new UploadService(
+      database.dataSource,
+      repository,
+      storage,
+      {
+        registrationTtlSeconds: 3_600,
+        maxImageBytes: 26_214_400,
+        maxVideoBytes: 524_288_000,
+      },
+      { metadata: createMetadataClient(), derivatives: createDerivativeClient() },
+    );
+  });
+
+  afterAll(async () => {
+    storage.close();
+    await database.close();
+  });
+
+  it("is opened and measured after travelling outbox, broker, and worker", async () => {
+    // Everything above this proves the checking. This proves the wiring: the
+    // boundary comes from the worker's own exported list, which is what
+    // `index.ts` subscribes with, so a wrong topic name fails here and only
+    // here.
+    const { userId: ownerUserId } = await createUser(database.dataSource);
+    const bytes = await readFile(fixture("photo.jpg"));
+
+    const authorization = await uploads.register(ownerUserId, {
+      contentType: "image/jpeg",
+      declaredByteSize: bytes.byteLength,
+    });
+
+    await fetch(authorization.uploadUrl, {
+      method: "PUT",
+      body: bytes,
+      headers: { "content-type": "image/jpeg" },
+    });
+
+    await uploads.finalize(
+      authorization.uploadId,
+      ownerUserId,
+      systemContext(randomUUID(), new Date()),
+    );
+
+    const delivered = await deliverThroughBroker({
+      dataSource: database.dataSource,
+      boundaries: MEDIA_CHECKER_BOUNDARIES,
+      aggregateId: authorization.uploadId,
+      handler: (event) => checkArrivedMedia(uploads, event),
+      clientId: "media-checker-broker",
+    });
+
+    const upload = await repository.findById(authorization.uploadId);
+
+    assert.ok(delivered > 0);
+    assert.equal(upload?.state, "ready");
+    assert.equal(upload?.width, 640);
   });
 });

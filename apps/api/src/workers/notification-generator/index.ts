@@ -4,13 +4,6 @@
 import "reflect-metadata";
 
 import { ConfigurationError } from "@chronologity/config";
-import {
-  COMMENTS_BOUNDARY,
-  MODERATION_BOUNDARY,
-  REACTIONS_BOUNDARY,
-  SECURITY_BOUNDARY,
-  SOCIAL_BOUNDARY,
-} from "@chronologity/contracts";
 import { loadConfig } from "../../config/app-config.js";
 import { LocationRepository } from "../../features/locations/location.repository.js";
 import { ModerationRepository } from "../../features/moderation/moderation.repository.js";
@@ -31,7 +24,7 @@ import { connectDatabase, createDatabase } from "../../lib/database/postgres.js"
 import { createEventConsumer } from "../../lib/messaging/consumer.js";
 import { createMessaging } from "../../lib/messaging/kafka.js";
 import { topicName } from "../../lib/messaging/topics.js";
-import { notifyFromEvent } from "./generate.js";
+import { NOTIFICATION_GENERATOR_BOUNDARIES, notifyFromEvent } from "./generate.js";
 
 /**
  * The notification-generating worker.
@@ -98,13 +91,7 @@ async function main(): Promise<void> {
   const consumer = createEventConsumer({
     kafka: messaging.kafka,
     groupId: GROUP_ID,
-    topics: [
-      topicName(REACTIONS_BOUNDARY),
-      topicName(COMMENTS_BOUNDARY),
-      topicName(SOCIAL_BOUNDARY),
-      topicName(MODERATION_BOUNDARY),
-      topicName(SECURITY_BOUNDARY),
-    ],
+    topics: NOTIFICATION_GENERATOR_BOUNDARIES.map((boundary) => topicName(boundary)),
     handler: (event) => notifyFromEvent(generator, event),
   });
 

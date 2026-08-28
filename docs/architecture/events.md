@@ -804,6 +804,14 @@ operational
 
 The registry can be code-driven rather than a separate runtime service.
 
+It is: `packages/contracts/src/event-registry.ts`. `EVENT_REGISTRY` holds one
+entry per event — type, version, envelope schema, payload schema, boundary,
+owner, classification, and a payload the schema accepts — and is the only place
+that knows the mapping.
+
+Being data rather than prose is the point. A property asserted over the table
+holds for every event, including the ones added after the assertion was written.
+
 ---
 
 # Event Registry Benefits
@@ -815,6 +823,21 @@ A registry helps prevent:
 - missing runtime validation;
 - unclear ownership;
 - undocumented event proliferation.
+
+Each of those is a test over the registry rather than a hope. Uniqueness and
+version collision are checked directly. Runtime validation cannot be missing,
+because registration is what supplies the schema. Ownership is a required field.
+Proliferation is caught from the other side, by an integration test that reads
+every event type the outbox has ever held and refuses one that is not registered
+— an event added without registering it fails the first time anything publishes
+one.
+
+Two further properties are held there, which the list above does not name.
+Removing a field from a payload, or adding a required one, is refused: every
+field of every documented example is dropped in turn and must be rejected.
+And no registered payload may carry a property whose name suggests a secret or
+erasable personal data, following ADR-095, asserted over every schema rather
+than per event.
 
 ---
 

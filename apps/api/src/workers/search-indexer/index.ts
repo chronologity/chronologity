@@ -4,13 +4,6 @@
 import "reflect-metadata";
 
 import { ConfigurationError } from "@chronologity/config";
-import {
-  LOCATIONS_BOUNDARY,
-  MODERATION_BOUNDARY,
-  MOMENTS_BOUNDARY,
-  REAL_WORLD_EVENTS_BOUNDARY,
-  USERS_BOUNDARY,
-} from "@chronologity/contracts";
 import { loadConfig } from "../../config/app-config.js";
 import { SearchIndexer } from "../../features/search/search.indexer.js";
 import { SearchRepository } from "../../features/search/search.repository.js";
@@ -19,7 +12,7 @@ import { connectDatabase, createDatabase } from "../../lib/database/postgres.js"
 import { createEventConsumer } from "../../lib/messaging/consumer.js";
 import { createMessaging } from "../../lib/messaging/kafka.js";
 import { topicName } from "../../lib/messaging/topics.js";
-import { indexFromEvent } from "./index-event.js";
+import { indexFromEvent, SEARCH_INDEXER_BOUNDARIES } from "./index-event.js";
 
 /**
  * The Search indexing worker.
@@ -60,13 +53,7 @@ async function main(): Promise<void> {
   const consumer = createEventConsumer({
     kafka: messaging.kafka,
     groupId: GROUP_ID,
-    topics: [
-      topicName(MOMENTS_BOUNDARY),
-      topicName(USERS_BOUNDARY),
-      topicName(REAL_WORLD_EVENTS_BOUNDARY),
-      topicName(LOCATIONS_BOUNDARY),
-      topicName(MODERATION_BOUNDARY),
-    ],
+    topics: SEARCH_INDEXER_BOUNDARIES.map((boundary) => topicName(boundary)),
     handler: (event) => indexFromEvent(indexer, event),
   });
 

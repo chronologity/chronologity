@@ -1,3 +1,10 @@
+import {
+  LOCATIONS_BOUNDARY,
+  MODERATION_BOUNDARY,
+  MOMENTS_BOUNDARY,
+  REAL_WORLD_EVENTS_BOUNDARY,
+  USERS_BOUNDARY,
+} from "@chronologity/contracts";
 import type { Logger } from "../../lib/logger/logger.js";
 import type { ConsumedEvent } from "../../lib/messaging/consumer.js";
 import type { SearchIndexer } from "../../features/search/search.indexer.js";
@@ -29,6 +36,58 @@ const MODERATION_SUBJECTS: Readonly<Record<string, SearchEntityType | undefined>
 };
 
 /**
+ * What this worker understands, and where it reads each one from.
+ *
+ * A table rather than a switch, because the set of types a worker handles has
+ * to be readable by something other than a person. With it written down, a test
+ * can check every one against the registry and against what this worker
+ * subscribes to — which is how a topic added to the contracts and forgotten
+ * here, or subscribed to and never handled, becomes a failing test rather than
+ * silence.
+ */
+const HANDLED: Readonly<
+  Record<string, (payload: Record<string, unknown>) => Subject | undefined>
+> = {
+  MomentRecorded: (payload) => identify("moment", payload.momentId),
+  MomentRevised: (payload) => identify("moment", payload.momentId),
+  MomentVisibilityChanged: (payload) => identify("moment", payload.momentId),
+  MomentRemoved: (payload) => identify("moment", payload.momentId),
+  UserCreated: (payload) => identify("user", payload.userId),
+  UserProfileChanged: (payload) => identify("user", payload.userId),
+  UserStatusChanged: (payload) => identify("user", payload.userId),
+  RealWorldEventRecorded: (payload) => identify("event", payload.realWorldEventId),
+  RealWorldEventRevised: (payload) => identify("event", payload.realWorldEventId),
+  LocationRecorded: (payload) => identify("location", payload.locationId),
+  LocationRevised: (payload) => identify("location", payload.locationId),
+  ModerationStateChanged: (payload) => {
+    const entityType = MODERATION_SUBJECTS[String(payload.subjectType)];
+
+    return entityType === undefined ? undefined : identify(entityType, payload.subjectId);
+  },
+};
+
+/** The event types this worker knows what to do with. */
+export const SEARCH_INDEXER_EVENTS: readonly string[] = Object.keys(HANDLED);
+
+/**
+ * The boundaries this worker subscribes to.
+ *
+ * Declared beside the handlers rather than inside the process entry point, so
+ * that the two can be compared. `index.ts` runs on import; a list held there is
+ * a list nothing can read.
+ *
+ * Every domain boundary, because a document is built from several tables and
+ * any of them changing can change it.
+ */
+export const SEARCH_INDEXER_BOUNDARIES: readonly string[] = [
+  MOMENTS_BOUNDARY,
+  USERS_BOUNDARY,
+  REAL_WORLD_EVENTS_BOUNDARY,
+  LOCATIONS_BOUNDARY,
+  MODERATION_BOUNDARY,
+];
+
+/**
  * Read which entity a message concerns.
  *
  * @param event - The message.
@@ -38,32 +97,9 @@ const MODERATION_SUBJECTS: Readonly<Record<string, SearchEntityType | undefined>
  *   one it has not been taught about turns an additive change into an outage.
  */
 export function subjectOf(event: ConsumedEvent): Subject | undefined {
-  const payload = event.envelope.payload as Record<string, unknown>;
+  const read = HANDLED[event.envelope.eventType];
 
-  switch (event.envelope.eventType) {
-    case "MomentRecorded":
-    case "MomentRevised":
-    case "MomentVisibilityChanged":
-    case "MomentRemoved":
-      return identify("moment", payload.momentId);
-    case "UserCreated":
-    case "UserProfileChanged":
-    case "UserStatusChanged":
-      return identify("user", payload.userId);
-    case "RealWorldEventRecorded":
-    case "RealWorldEventRevised":
-      return identify("event", payload.realWorldEventId);
-    case "LocationRecorded":
-    case "LocationRevised":
-      return identify("location", payload.locationId);
-    case "ModerationStateChanged": {
-      const entityType = MODERATION_SUBJECTS[String(payload.subjectType)];
-
-      return entityType === undefined ? undefined : identify(entityType, payload.subjectId);
-    }
-    default:
-      return undefined;
-  }
+  return read?.(event.envelope.payload as Record<string, unknown>);
 }
 
 /**

@@ -1,4 +1,4 @@
-import { uploadReceivedPayloadSchema } from "@chronologity/contracts";
+import { MEDIA_BOUNDARY, uploadReceivedPayloadSchema } from "@chronologity/contracts";
 import type { UploadService } from "../../features/uploads/upload.service.js";
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
 import type { ConsumedEvent } from "../../lib/messaging/consumer.js";
@@ -10,6 +10,25 @@ import type { Logger } from "../../lib/logger/logger.js";
  * Kept apart from the process that runs it so it can be called directly by a
  * test, without a broker in the way.
  */
+
+/**
+ * The event types this worker knows what to do with.
+ *
+ * One, and it is the only thing published to the media boundary. Stated as data
+ * anyway, so the same test that checks the other two workers checks this one:
+ * a second media event added later and never handled here would otherwise be
+ * silence rather than a failure.
+ */
+export const MEDIA_CHECKER_EVENTS: readonly string[] = ["UploadReceived"];
+
+/**
+ * The boundaries this worker subscribes to.
+ *
+ * Declared beside the handler rather than inside the process entry point, so
+ * that the two can be compared. `index.ts` runs on import; a list held there is
+ * a list nothing can read.
+ */
+export const MEDIA_CHECKER_BOUNDARIES: readonly string[] = [MEDIA_BOUNDARY];
 
 /**
  * Examine the upload a message refers to.
