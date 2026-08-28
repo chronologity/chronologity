@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import { assertWorkspacePackagesBuilt } from "./vitest.workspace-build.js";
 
 /**
  * Unit tests only.
@@ -10,6 +11,11 @@ import { defineConfig } from "vitest/config";
  * has to say it does not want them. A unit run must never require
  * infrastructure.
  */
+// Before anything is collected. A stale `dist` fails as a missing symbol
+// several minutes into a run, which reads as a defect in whatever test
+// happened to touch it first.
+assertWorkspacePackagesBuilt();
+
 export default defineConfig({
   test: {
     setupFiles: ["./src/testing/setup.ts"],

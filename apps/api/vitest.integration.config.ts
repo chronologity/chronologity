@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
+import { assertWorkspacePackagesBuilt } from "./vitest.workspace-build.js";
 
 /**
  * Integration tests, against real infrastructure.
@@ -18,6 +19,11 @@ const envFile = fileURLToPath(new URL("../../.env", import.meta.url));
 if (existsSync(envFile)) {
   process.loadEnvFile(envFile);
 }
+
+// Before anything is collected. A stale `dist` fails as a missing symbol
+// several minutes into a run, which reads as a defect in whatever test
+// happened to touch it first.
+assertWorkspacePackagesBuilt();
 
 export default defineConfig({
   test: {
