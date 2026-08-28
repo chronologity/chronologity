@@ -10,7 +10,7 @@ All commands run from the repository root.
 
 | Command               | Effect                                                   |
 | --------------------- | -------------------------------------------------------- |
-| `pnpm infra:up`       | Start everything and wait until every service is healthy |
+| `pnpm infra:up`       | Start everything, wait until healthy, and provision the bucket |
 | `pnpm infra:ps`       | Show service status and published ports                  |
 | `pnpm infra:logs`     | Follow logs from all services                            |
 | `pnpm infra:down`     | Stop and remove containers, **keeping** data volumes     |
@@ -18,6 +18,14 @@ All commands run from the repository root.
 | `pnpm infra:validate` | Connect to each service from the host and exercise it    |
 
 `infra:up` exits non-zero if any service fails to become healthy, so it is safe to chain.
+
+### The media bucket
+
+A healthy stack is not the same as a usable one. PostgreSQL arrives with its database already created, because the image does that from `POSTGRES_DB`; object storage has no equivalent, so `infra:up` creates the media bucket itself.
+
+Until it did, the bucket existed only because whichever integration suite ran first happened to create it — and on a stack with fresh storage that was not the suite that needed it. Account erasure runs earlier in the alphabet than the media worker's tests, so it always ran first, always found no bucket, and always failed: erasing a Moment deletes its media, storage answered "The specified bucket does not exist", and the erasure retried forever. It failed every CI run and no local one, because a developer's storage volume already held the bucket from the last time.
+
+Creating a bucket that already exists changes nothing, so this runs every time rather than only the first. The bucket is then asked for rather than assumed: `weed shell` exits zero whatever happens — a bogus command, an unreachable master, a bucket it never created — so its exit status is worth nothing and the script lists the buckets and looks for this one instead.
 
 ## Services
 

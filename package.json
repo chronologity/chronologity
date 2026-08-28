@@ -23,7 +23,7 @@
     "clean": "turbo run clean",
     "lint:root": "eslint eslint.config.js prettier.config.js",
     "lint:root:fix": "eslint eslint.config.js prettier.config.js --fix",
-    "infra:up": "bash scripts/compose.sh up --detach --wait",
+    "infra:up": "bash scripts/infra-up.sh",
     "infra:down": "bash scripts/compose.sh down",
     "infra:reset": "bash scripts/compose.sh down --volumes",
     "infra:ps": "bash scripts/compose.sh ps",
