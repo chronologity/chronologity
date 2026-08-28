@@ -409,6 +409,27 @@ export {
   type UserFollowedPayload,
 } from "./domain-events.js";
 export {
+  timelineAroundRequestSchema,
+  timelineAroundSchema,
+  timelineBucketSchema,
+  timelineBucketsRequestSchema,
+  timelineBucketsSchema,
+  timelineDirectionSchema,
+  timelineEntrySchema,
+  timelinePageRequestSchema,
+  timelinePageSchema,
+  timelineScaleSchema,
+  type TimelineAround,
+  type TimelineAroundRequest,
+  type TimelineBuckets,
+  type TimelineBucketsRequest,
+  type TimelineDirection,
+  type TimelineEntry,
+  type TimelinePage,
+  type TimelinePageRequest,
+  type TimelineScale,
+} from "./timeline.js";
+export {
   geoPrecisionSchema,
   matchReasonSchema,
   searchEntityTypeSchema,

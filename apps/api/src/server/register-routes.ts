@@ -8,12 +8,14 @@ import { moderationRoutes } from "../features/moderation/moderation.routes.js";
 import type { ModerationService } from "../features/moderation/moderation.service.js";
 import { searchRoutes } from "../features/search/search.routes.js";
 import { discoveryRoutes } from "../features/discovery/discovery.routes.js";
+import { timelineRoutes } from "../features/timeline/timeline.routes.js";
 import { notificationRoutes } from "../features/notifications/notification.routes.js";
 import type { AccountDeletionService } from "../features/privacy/account-deletion.service.js";
 import type { ExportService } from "../features/privacy/export.service.js";
 import type { NotificationDeliveryService } from "../features/notifications/notification.delivery.service.js";
 import type { NotificationService } from "../features/notifications/notification.service.js";
 import type { DiscoveryService } from "../features/discovery/discovery.service.js";
+import type { TimelineService } from "../features/timeline/timeline.service.js";
 import type { SearchRateLimits } from "../features/search/search.rate-limits.js";
 import type { SearchService } from "../features/search/search.service.js";
 import { locationRoutes } from "../features/locations/location.routes.js";
@@ -69,6 +71,8 @@ import type { UserService } from "../features/users/user.service.js";
  * @param search - Finding history; mounted only alongside users, since every
  *   search resolves eligibility against a Viewer.
  * @param searchRateLimits - How hard the Search surfaces may be pushed.
+ * @param timeline - Navigating your own history; mounted only alongside users,
+ *   since every Timeline read is somebody's own.
  * @param discovery - Recommending history; mounted only alongside users, since
  *   every surface resolves eligibility against a Viewer.
  * @param notifications - Telling somebody something happened; mounted only
@@ -98,6 +102,7 @@ export async function registerRoutes(
   moderation?: ModerationService | undefined,
   search?: SearchService | undefined,
   searchRateLimits?: SearchRateLimits | undefined,
+  timeline?: TimelineService | undefined,
   discovery?: DiscoveryService | undefined,
   notifications?: NotificationService | undefined,
   notificationDelivery?: NotificationDeliveryService | undefined,
@@ -151,6 +156,10 @@ export async function registerRoutes(
 
       if (search !== undefined) {
         await app.register(searchRoutes(search, searchRateLimits));
+      }
+
+      if (timeline !== undefined) {
+        await app.register(timelineRoutes(timeline));
       }
 
       if (discovery !== undefined) {

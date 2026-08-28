@@ -25,6 +25,9 @@ import { AuthorizationService } from "../features/authorization/authorization.se
 import { LocationRepository } from "../features/locations/location.repository.js";
 import { ModerationRepository } from "../features/moderation/moderation.repository.js";
 import { DiscoveryRetrieval } from "../features/discovery/discovery.retrieval.js";
+import { TimelineReadRepository } from "../features/timeline/timeline.read.repository.js";
+import { TimelineService } from "../features/timeline/timeline.service.js";
+import { createAnalytics } from "../lib/clickhouse/clickhouse.js";
 import { AccountDeletionService } from "../features/privacy/account-deletion.service.js";
 import { ErasureRepository } from "../features/privacy/erasure.repository.js";
 import { ExportSourceRepository } from "../features/privacy/export-source.repository.js";
@@ -107,7 +110,11 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
   const database = createDatabase(config.database);
 
   const messaging = createMessaging(config.messaging);
-  const dependencies = [database, messaging];
+  // Timeline reads come from here. Listed as a dependency so readiness asks it
+  // a real question: an API serving requests it cannot answer is worse than one
+  // reporting itself unready.
+  const analytics = createAnalytics(config.clickhouse);
+  const dependencies = [database, messaging, analytics];
 
   const email = createEmailClient(config.email);
   const storage = createStorageClient(config.storage);
@@ -221,6 +228,7 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
       new PostgresSearchRetrieval(database.dataSource),
       moderationRepository,
     ),
+    timeline: new TimelineService(new TimelineReadRepository(analytics.client)),
     discovery: new DiscoveryService(
       new DiscoveryRetrieval(database.dataSource),
       moderationRepository,

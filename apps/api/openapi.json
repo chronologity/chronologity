@@ -45985,6 +45985,1197 @@
         }
       }
     },
+    "/timeline": {
+      "get": {
+        "summary": "Your history, in the order it happened",
+        "tags": [
+          "Timeline"
+        ],
+        "description": "Ordered by when Moments occurred, never by when they were recorded and never by anything resembling relevance. A Moment added today about 1969 appears in 1969.\n\nWithout a cursor this begins at the newest occurrence and walks backwards, which is where a Timeline opens.\n\n**Positions, not page numbers.** A cursor names a place in history rather than a count of rows, because history grows in the middle: a photograph uploaded today may belong to 1969 and lands between two pages you have already seen. Paging by offset would repeat one Moment and skip another every time that happened.\n\n**A cursor is opaque.** It encodes where to resume and nothing a client should read or construct. One this system did not issue is refused rather than interpreted.\n\n**Both directions cost the same.** Every page carries a cursor at each end, so going back towards the present is one request from wherever you are, not a position you had to keep.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "in": "query",
+            "name": "cursor",
+            "required": false
+          },
+          {
+            "schema": {
+              "default": "older",
+              "type": "string",
+              "enum": [
+                "older",
+                "newer"
+              ]
+            },
+            "in": "query",
+            "name": "direction",
+            "required": false
+          },
+          {
+            "schema": {
+              "default": 50,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "moments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "momentId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "occurredAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          },
+                          "occurrenceEnd": {
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          },
+                          "occurrencePrecision": {
+                            "type": "string",
+                            "enum": [
+                              "instant",
+                              "day",
+                              "month",
+                              "year"
+                            ]
+                          },
+                          "occurrenceOffsetMinutes": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "visibility": {
+                            "type": "string",
+                            "enum": [
+                              "private",
+                              "restricted",
+                              "public"
+                            ]
+                          },
+                          "discoverable": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "momentId",
+                          "occurredAt",
+                          "occurrenceEnd",
+                          "occurrencePrecision",
+                          "occurrenceOffsetMinutes",
+                          "visibility",
+                          "discoverable"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "cursor": {
+                      "type": "string"
+                    },
+                    "reverseCursor": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "moments"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation. `details` names the field where it can.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "The request failed validation. `details` names the field where it can."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required, or the session can no longer authenticate a request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authentication is required, or the session can no longer authenticate a request."
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push."
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/timeline/head": {
+      "get": {
+        "summary": "Where your Timeline opens",
+        "tags": [
+          "Timeline"
+        ],
+        "description": "The newest occurrence in your history, which is the default entry point. Not the most recently recorded Moment, and not the most anything else: a Timeline head is a position in time rather than a ranking.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "nullable": true,
+                  "type": "object",
+                  "properties": {
+                    "momentId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "occurredAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "occurrenceEnd": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "occurrencePrecision": {
+                      "type": "string",
+                      "enum": [
+                        "instant",
+                        "day",
+                        "month",
+                        "year"
+                      ]
+                    },
+                    "occurrenceOffsetMinutes": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "visibility": {
+                      "type": "string",
+                      "enum": [
+                        "private",
+                        "restricted",
+                        "public"
+                      ]
+                    },
+                    "discoverable": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "momentId",
+                    "occurredAt",
+                    "occurrenceEnd",
+                    "occurrencePrecision",
+                    "occurrenceOffsetMinutes",
+                    "visibility",
+                    "discoverable"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required, or the session can no longer authenticate a request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authentication is required, or the session can no longer authenticate a request."
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push."
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/timeline/around": {
+      "get": {
+        "summary": "Jump to a moment in time",
+        "tags": [
+          "Timeline"
+        ],
+        "description": "Finds the Moment nearest an instant and returns the history either side of it, so navigation continues immediately rather than after a second request.\n\nThe instant need not be one anything happened at. Asking about a quiet decade lands on whichever Moment is closest; asking about a time before all your history lands on its beginning. A Viewer with no history gets an empty answer rather than an error.\n\n**Positions, not page numbers.** A cursor names a place in history rather than a count of rows, because history grows in the middle: a photograph uploaded today may belong to 1969 and lands between two pages you have already seen. Paging by offset would repeat one Moment and skip another every time that happened.\n\n**A cursor is opaque.** It encodes where to resume and nothing a client should read or construct. One this system did not issue is refused rather than interpreted.\n\n**Both directions cost the same.** Every page carries a cursor at each end, so going back towards the present is one request from wherever you are, not a position you had to keep.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+            },
+            "in": "query",
+            "name": "at",
+            "required": true
+          },
+          {
+            "schema": {
+              "default": 50,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "at": {
+                      "type": "object",
+                      "properties": {
+                        "momentId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "occurredAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        },
+                        "occurrenceEnd": {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        },
+                        "occurrencePrecision": {
+                          "type": "string",
+                          "enum": [
+                            "instant",
+                            "day",
+                            "month",
+                            "year"
+                          ]
+                        },
+                        "occurrenceOffsetMinutes": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "visibility": {
+                          "type": "string",
+                          "enum": [
+                            "private",
+                            "restricted",
+                            "public"
+                          ]
+                        },
+                        "discoverable": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "momentId",
+                        "occurredAt",
+                        "occurrenceEnd",
+                        "occurrencePrecision",
+                        "occurrenceOffsetMinutes",
+                        "visibility",
+                        "discoverable"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "older": {
+                      "type": "object",
+                      "properties": {
+                        "moments": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "momentId": {
+                                "type": "string",
+                                "format": "uuid",
+                                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                              },
+                              "occurredAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                              },
+                              "occurrenceEnd": {
+                                "type": "string",
+                                "format": "date-time",
+                                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                              },
+                              "occurrencePrecision": {
+                                "type": "string",
+                                "enum": [
+                                  "instant",
+                                  "day",
+                                  "month",
+                                  "year"
+                                ]
+                              },
+                              "occurrenceOffsetMinutes": {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              "visibility": {
+                                "type": "string",
+                                "enum": [
+                                  "private",
+                                  "restricted",
+                                  "public"
+                                ]
+                              },
+                              "discoverable": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "momentId",
+                              "occurredAt",
+                              "occurrenceEnd",
+                              "occurrencePrecision",
+                              "occurrenceOffsetMinutes",
+                              "visibility",
+                              "discoverable"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "cursor": {
+                          "type": "string"
+                        },
+                        "reverseCursor": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "moments"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "newer": {
+                      "type": "object",
+                      "properties": {
+                        "moments": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "momentId": {
+                                "type": "string",
+                                "format": "uuid",
+                                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                              },
+                              "occurredAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                              },
+                              "occurrenceEnd": {
+                                "type": "string",
+                                "format": "date-time",
+                                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                              },
+                              "occurrencePrecision": {
+                                "type": "string",
+                                "enum": [
+                                  "instant",
+                                  "day",
+                                  "month",
+                                  "year"
+                                ]
+                              },
+                              "occurrenceOffsetMinutes": {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              "visibility": {
+                                "type": "string",
+                                "enum": [
+                                  "private",
+                                  "restricted",
+                                  "public"
+                                ]
+                              },
+                              "discoverable": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "momentId",
+                              "occurredAt",
+                              "occurrenceEnd",
+                              "occurrencePrecision",
+                              "occurrenceOffsetMinutes",
+                              "visibility",
+                              "discoverable"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "cursor": {
+                          "type": "string"
+                        },
+                        "reverseCursor": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "moments"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "older",
+                    "newer"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation. `details` names the field where it can.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "The request failed validation. `details` names the field where it can."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required, or the session can no longer authenticate a request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authentication is required, or the session can no longer authenticate a request."
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push."
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/timeline/buckets": {
+      "get": {
+        "summary": "How your history is distributed",
+        "tags": [
+          "Timeline"
+        ],
+        "description": "Counts per year or per decade, for navigating at a scale where returning every Moment would be neither useful nor fast.\n\nSpans holding nothing are absent rather than zero: a century you recorded nothing in is not a hundred empty rows. Counts agree with what paging returns.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "year",
+                "decade"
+              ]
+            },
+            "in": "query",
+            "name": "scale",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "buckets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "startsAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          },
+                          "count": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "startsAt",
+                          "count"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "buckets"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation. `details` names the field where it can.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "The request failed validation. `details` names the field where it can."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required, or the session can no longer authenticate a request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authentication is required, or the session can no longer authenticate a request."
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push."
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/discovery/explore": {
       "get": {
         "summary": "History worth exploring",
