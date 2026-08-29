@@ -64,6 +64,25 @@ describe("loadConfig", () => {
     assert.equal(config.storage.bucket, "media");
   });
 
+  it("defaults the projection version, and lets a cutover name another", () => {
+    // Defaulted because the common case is one version and nobody should have
+    // to name it. Nameable because that is the whole of a cutover: build a
+    // second beside the first, validate it, and point readers at it.
+    assert.equal(loadConfig(required()).clickhouse.projectionVersion, "timeline-v1");
+    assert.equal(
+      loadConfig(withEnv({ TIMELINE_PROJECTION_VERSION: "timeline-v2" })).clickhouse
+        .projectionVersion,
+      "timeline-v2",
+    );
+  });
+
+  it("refuses an empty projection version", () => {
+    // An empty string would be accepted by the database and match nothing, so
+    // every read would answer empty and every write would land somewhere no
+    // reader looks — a Timeline that is silently blank rather than broken.
+    assert.ok(issuesFor(withEnv({ TIMELINE_PROJECTION_VERSION: "" })).length > 0);
+  });
+
   it("coerces the numbers that arrive as strings", () => {
     // Everything in an environment is a string. A port that stayed one would
     // fail somewhere much less obvious than here.

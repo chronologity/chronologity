@@ -1,4 +1,5 @@
 import type { AppConfig } from "../config/app-config.js";
+import { TIMELINE_VERSION } from "../features/timeline/timeline-row.js";
 import { TEST_RETENTION_PERIODS } from "./retention.js";
 
 /**
@@ -37,6 +38,7 @@ export function testAppConfig(clientId: string): AppConfig {
       database: process.env.CLICKHOUSE_DATABASE ?? "chronologity",
       username: process.env.CLICKHOUSE_USERNAME ?? "chronologity",
       password: process.env.CLICKHOUSE_PASSWORD ?? "chronologity",
+      projectionVersion: TIMELINE_VERSION,
     },
     messaging: { brokers: ["localhost:9092"], clientId },
     outbox: { retentionMs: 0 },

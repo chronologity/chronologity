@@ -12,4 +12,13 @@ export interface ClickHouseConfig {
   readonly database: string;
   readonly username: string;
   readonly password: string;
+  /**
+   * Which projection version this process reads and writes.
+   *
+   * One value for both, deliberately. A process reading one version while
+   * writing another would produce a Timeline that answered from history it was
+   * no longer maintaining, and the two could drift indefinitely without
+   * anything failing.
+   */
+  readonly projectionVersion: string;
 }

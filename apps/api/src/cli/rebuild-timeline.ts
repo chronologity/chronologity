@@ -9,7 +9,6 @@ import { loadConfig } from "../config/app-config.js";
 import { TimelineProjector } from "../features/timeline/timeline.projector.js";
 import { rebuildTimeline } from "../features/timeline/timeline.rebuild.js";
 import { TimelineRepository } from "../features/timeline/timeline.repository.js";
-import { TIMELINE_VERSION } from "../features/timeline/timeline-row.js";
 import { TimelineSourceRepository } from "../features/timeline/timeline-source.repository.js";
 import { createAnalytics } from "../lib/clickhouse/clickhouse.js";
 import { connectDatabase, createDatabase } from "../lib/database/postgres.js";
@@ -68,7 +67,7 @@ async function main(): Promise<void> {
 
   const analytics = createAnalytics(config.clickhouse);
   const source = new TimelineSourceRepository(database.dataSource);
-  const version = values.version ?? TIMELINE_VERSION;
+  const version = values.version ?? config.clickhouse.projectionVersion;
   const projector = new TimelineProjector(
     database.dataSource,
     new TimelineRepository(analytics.client, version),

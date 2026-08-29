@@ -23,7 +23,8 @@ const config: AppConfig = {
     database: "unused",
     username: "unused",
     password: "unused",
-  },
+    projectionVersion: "timeline-v1",
+    },
   database: {
     host: "unused",
     port: 5432,

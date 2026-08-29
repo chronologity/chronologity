@@ -45,7 +45,7 @@ async function main(): Promise<void> {
 
   const projector = new TimelineProjector(
     database.dataSource,
-    new TimelineRepository(analytics.client),
+    new TimelineRepository(analytics.client, config.clickhouse.projectionVersion),
     new TimelineSourceRepository(database.dataSource),
   );
 

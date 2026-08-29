@@ -1,5 +1,6 @@
 import { booleanSchema, logLevelSchema, nodeEnvSchema, portSchema } from "@chronologity/config";
 import { z } from "zod";
+import { TIMELINE_VERSION } from "../features/timeline/timeline-row.js";
 
 /**
  * The API's environment contract.
@@ -121,6 +122,17 @@ export const envSchema = z.object({
   CLICKHOUSE_DATABASE: z.string().min(1),
   CLICKHOUSE_USERNAME: z.string().min(1),
   CLICKHOUSE_PASSWORD: z.string().min(1),
+
+  /**
+   * Which Timeline projection version this process reads and writes.
+   *
+   * Defaulted rather than required, because the overwhelmingly common case is
+   * one version and an operator should not have to name it. It exists so a
+   * second can be built beside the first, validated, and switched to — the
+   * cutover `deployment.md:809` prescribes, which until now stopped at
+   * "validate" because nothing could be pointed anywhere.
+   */
+  TIMELINE_PROJECTION_VERSION: z.string().min(1).default(TIMELINE_VERSION),
 
   SMTP_HOST: z.string().min(1),
   SMTP_PORT: portSchema,

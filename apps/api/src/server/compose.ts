@@ -237,7 +237,7 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
       moderationRepository,
     ),
     timeline: new TimelineService(
-      new TimelineReadRepository(analytics.client),
+      new TimelineReadRepository(analytics.client, config.clickhouse.projectionVersion),
       new TimelineEligibilityResolver(database.dataSource),
     ),
     discovery: new DiscoveryService(

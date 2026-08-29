@@ -70,6 +70,7 @@ export function loadConfig(source: Record<string, string | undefined> = process.
       database: env.CLICKHOUSE_DATABASE,
       username: env.CLICKHOUSE_USERNAME,
       password: env.CLICKHOUSE_PASSWORD,
+      projectionVersion: env.TIMELINE_PROJECTION_VERSION,
     },
     database: toDatabaseConfig(env),
     messaging: toMessagingConfig(env),
