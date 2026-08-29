@@ -51,6 +51,15 @@ import {
   userProfileChangedPayloadSchema,
   userStatusChangedEventSchema,
   userStatusChangedPayloadSchema,
+  PARTICIPATION_BOUNDARY,
+  participationProposedEventSchema,
+  participationProposedPayloadSchema,
+  participationAcceptedEventSchema,
+  participationAcceptedPayloadSchema,
+  participationRejectedEventSchema,
+  participationRejectedPayloadSchema,
+  participationWithdrawnEventSchema,
+  participationWithdrawnPayloadSchema,
 } from "./domain-events.js";
 import { MEDIA_BOUNDARY, uploadReceivedEventSchema, uploadReceivedPayloadSchema } from "./media-events.js";
 
@@ -127,6 +136,7 @@ const LOCATION_ID = "3e4f5a6b-7c8d-4e9f-8a0b-1c2d3e4f5a6b";
 const REAL_WORLD_EVENT_ID = "4f5a6b7c-8d9e-4f0a-9b1c-2d3e4f5a6b7c";
 const REQUEST_ID = "5a6b7c8d-9e0f-4a1b-8c2d-3e4f5a6b7c8d";
 const UPLOAD_ID = "8b7a6c5d-4e3f-4a29-9b8c-7d6e5f4a3b2c";
+const PARTICIPATION_ID = "6c7d8e9f-0a1b-4c2d-9e3f-4a5b6c7d8e9f";
 const AT = "2026-08-27T09:15:00Z";
 
 /**
@@ -421,6 +431,70 @@ export const EVENT_REGISTRY: readonly RegisteredEvent[] = [
       kind: "image",
       storageKey: "uploads/2026/08/27/original",
       receivedAt: AT,
+    },
+  },
+  {
+    type: "ParticipationProposed",
+    version: 1,
+    envelope: participationProposedEventSchema,
+    payload: participationProposedPayloadSchema,
+    boundary: PARTICIPATION_BOUNDARY,
+    owner: "participation",
+    classification: "integration",
+    example: {
+      participationId: PARTICIPATION_ID,
+      momentId: MOMENT_ID,
+      userId: USER_ID,
+      proposedByUserId: ACTOR_ID,
+      proposedAt: AT,
+    },
+  },
+  {
+    type: "ParticipationAccepted",
+    version: 1,
+    envelope: participationAcceptedEventSchema,
+    payload: participationAcceptedPayloadSchema,
+    boundary: PARTICIPATION_BOUNDARY,
+    owner: "participation",
+    classification: "integration",
+    example: {
+      participationId: PARTICIPATION_ID,
+      momentId: MOMENT_ID,
+      userId: USER_ID,
+      proposedByUserId: ACTOR_ID,
+      acceptedAt: AT,
+    },
+  },
+  {
+    type: "ParticipationRejected",
+    version: 1,
+    envelope: participationRejectedEventSchema,
+    payload: participationRejectedPayloadSchema,
+    boundary: PARTICIPATION_BOUNDARY,
+    owner: "participation",
+    classification: "integration",
+    example: {
+      participationId: PARTICIPATION_ID,
+      momentId: MOMENT_ID,
+      userId: USER_ID,
+      proposedByUserId: ACTOR_ID,
+      rejectedAt: AT,
+    },
+  },
+  {
+    type: "ParticipationWithdrawn",
+    version: 1,
+    envelope: participationWithdrawnEventSchema,
+    payload: participationWithdrawnPayloadSchema,
+    boundary: PARTICIPATION_BOUNDARY,
+    owner: "participation",
+    classification: "integration",
+    example: {
+      participationId: PARTICIPATION_ID,
+      momentId: MOMENT_ID,
+      userId: USER_ID,
+      proposedByUserId: ACTOR_ID,
+      withdrawnAt: AT,
     },
   },
 ];

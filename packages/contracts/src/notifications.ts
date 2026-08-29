@@ -26,6 +26,10 @@ export const notificationTypeSchema = z.enum([
   "user_followed",
   "follow_requested",
   "follow_request_accepted",
+  "participation_proposed",
+  "participation_accepted",
+  "participation_rejected",
+  "participation_withdrawn",
   "upload_ready",
   "upload_rejected",
   "content_moderated",
@@ -46,7 +50,22 @@ export type NotificationType = z.infer<typeof notificationTypeSchema>;
  * (`notifications.md:104`): they carry different preference controls, and one
  * of them cannot be switched off.
  */
-export const notificationCategorySchema = z.enum(["social", "media", "moderation", "security"]);
+export const notificationCategorySchema = z.enum([
+  "social",
+  "media",
+  "moderation",
+  "security",
+  /**
+   * Being named in somebody else's history.
+   *
+   * Its own family rather than social, because a person may reasonably silence
+   * reactions and follows while still needing to hear that somebody has claimed
+   * they were somewhere. Answering such a claim is the consent model working,
+   * and a category switched off alongside likes would make the one notification
+   * that model depends on the easiest to lose.
+   */
+  "participation",
+]);
 
 export type NotificationCategory = z.infer<typeof notificationCategorySchema>;
 
@@ -56,7 +75,21 @@ export const notificationChannelSchema = z.enum(["in_app", "email", "push"]);
 export type NotificationChannel = z.infer<typeof notificationChannelSchema>;
 
 /** What a notification points at. */
-export const notificationSourceTypeSchema = z.enum(["moment", "comment", "user", "upload"]);
+export const notificationSourceTypeSchema = z.enum([
+  "moment",
+  "comment",
+  "user",
+  "upload",
+  /**
+   * A participation, rather than the Moment it concerns.
+   *
+   * Deliberately not the Moment: visibility is re-checked at read time for
+   * anything sourced from one, and the person being asked to confirm they were
+   * somewhere frequently cannot read it — so such a notification would be
+   * written and then never render for the one person who has to see it.
+   */
+  "participation",
+]);
 
 export type NotificationSourceType = z.infer<typeof notificationSourceTypeSchema>;
 

@@ -492,3 +492,100 @@ export const accountSecurityChangedEventSchema = envelopeOf(
   "AccountSecurityChanged",
   accountSecurityChangedPayloadSchema,
 );
+
+/**
+ * The participation boundary.
+ *
+ * Its own rather than folded into `domain-social`, because what these carry is
+ * a claim about where somebody was and who they were with — which
+ * `privacy.md:300` singles out as disclosing more than a name — and a boundary
+ * is the unit a consumer subscribes to. A worker that wants follows should not
+ * have to receive these to get them.
+ */
+export const PARTICIPATION_BOUNDARY = "domain-participation";
+
+/**
+ * A creator has said somebody was part of a Moment.
+ *
+ * Carries who, which Moment, and when it was asked. Deliberately not what the
+ * Moment says, where it happened, or when it happened: the person named
+ * frequently cannot read the Moment, and a message on a topic with its own
+ * retention is the last place to put what the API is careful not to disclose.
+ *
+ * The proposal is a question. Until it is answered this asserts nothing.
+ */
+export const participationProposedPayloadSchema = z.object({
+  participationId: identifierSchema,
+  momentId: identifierSchema,
+  /** Who is said to have been there, and who alone may answer. */
+  userId: identifierSchema,
+  /** The Moment's author, who is the only person who may propose. */
+  proposedByUserId: identifierSchema,
+  proposedAt: timestampSchema,
+});
+
+export type ParticipationProposedPayload = z.infer<typeof participationProposedPayloadSchema>;
+
+export const participationProposedEventSchema = envelopeOf(
+  "ParticipationProposed",
+  participationProposedPayloadSchema,
+);
+
+/** The person named confirmed they were there. */
+export const participationAcceptedPayloadSchema = z.object({
+  participationId: identifierSchema,
+  momentId: identifierSchema,
+  userId: identifierSchema,
+  proposedByUserId: identifierSchema,
+  acceptedAt: timestampSchema,
+});
+
+export type ParticipationAcceptedPayload = z.infer<typeof participationAcceptedPayloadSchema>;
+
+export const participationAcceptedEventSchema = envelopeOf(
+  "ParticipationAccepted",
+  participationAcceptedPayloadSchema,
+);
+
+/**
+ * The person named refused.
+ *
+ * Published, and the creator is told, because silence and refusal are different
+ * facts — a creator who cannot tell them apart will ask again outside the
+ * product, which is the conversation this model deliberately does not carry.
+ */
+export const participationRejectedPayloadSchema = z.object({
+  participationId: identifierSchema,
+  momentId: identifierSchema,
+  userId: identifierSchema,
+  proposedByUserId: identifierSchema,
+  rejectedAt: timestampSchema,
+});
+
+export type ParticipationRejectedPayload = z.infer<typeof participationRejectedPayloadSchema>;
+
+export const participationRejectedEventSchema = envelopeOf(
+  "ParticipationRejected",
+  participationRejectedPayloadSchema,
+);
+
+/**
+ * Somebody has taken back a participation they had accepted.
+ *
+ * A separate fact from a rejection: this one was true and has been retracted,
+ * and whatever was derived from it must be undone rather than never built.
+ */
+export const participationWithdrawnPayloadSchema = z.object({
+  participationId: identifierSchema,
+  momentId: identifierSchema,
+  userId: identifierSchema,
+  proposedByUserId: identifierSchema,
+  withdrawnAt: timestampSchema,
+});
+
+export type ParticipationWithdrawnPayload = z.infer<typeof participationWithdrawnPayloadSchema>;
+
+export const participationWithdrawnEventSchema = envelopeOf(
+  "ParticipationWithdrawn",
+  participationWithdrawnPayloadSchema,
+);
