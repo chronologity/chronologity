@@ -4199,3 +4199,56 @@ Comparing worker subscriptions against publishers rather than against the regist
 **Publishing in a test drains the whole outbox, not one message.** The publisher claims in creation order across the table, so the harness creates topics for every pending message's topic before publishing — otherwise a stale row bound for a topic that no longer exists fails the batch carrying the message under test.
 
 **The registry is now the thing to update when an event is added.** That is the cost, and it is the point: an event added without registering it fails as soon as anything publishes one.
+
+---
+
+# ADR-128 — The Timeline Projection Is Migrated and Rebuilt by Command
+
+## Status
+
+Accepted.
+
+## Context
+
+7C shipped Location and real-world Event Timelines and, with them, two ClickHouse tables: `timeline_moment_contexts`, one row per Moment per scope, and `timeline_suspended_authors`, one row per suspended account. Neither could be created outside the test suite. `migrateAnalytics` had no caller but its own tests, and `apps/api/src/cli/migrate.ts` runs the relational migrations only — so a migration file written for ClickHouse could be committed, reviewed, and merged without any way to apply it to a deployment.
+
+`rebuildTimeline` was in the same position. It has existed since 7A, reads authoritative state rather than the event log so that erasure survives a replay, and had no caller outside tests. The capability `projections.md:799` asks for as "a first-class operational capability" existed as a function nobody could run.
+
+That mattered more than tidiness because of what the suspension table is. Suspending an account "hides what the account contributed and deletes none of it" — `users.status` becomes `suspended` and no Moment's moderation state changes. In a shared-scope Timeline the only thing withholding a suspended author is `timeline_suspended_authors`, and that table was filled exclusively by live `UserStatusChanged` messages. Anybody suspended before the projector first ran would have appeared at every Location and Event they had ever recorded at, and nothing in the system would have said so.
+
+Moments recorded before 7C were in a milder version of the same position: on the Timeline, but in no scope, until something reprojected them.
+
+## Decision
+
+Two commands, both thin wiring over functions that already existed:
+
+- `pnpm --filter @chronologity/api clickhouse:migrate` applies the ClickHouse migrations. A second command beside `migrate` rather than a mode of it, because the two runners are deliberately separate: every statement here is `CREATE TABLE IF NOT EXISTS`, takes no lock and is safe to repeat, which is not true of the relational migrations and must not become their problem.
+- `pnpm --filter @chronologity/api timeline:rebuild [--only <momentId>]` rebuilds the projection.
+
+**A full rebuild reconciles the suspension dimension.** `deployment.md:1292` requires rebuild jobs to preserve moderation, and a rebuild that restored every Moment while leaving that table stale would hand back a Timeline showing history moderation had withheld. It reconciles in both directions — writing a suspension the projection lacks, and clearing one the account no longer has — because only ever adding would leave an account reinstated while the projection was down withheld permanently, with no event still coming to correct it.
+
+**A scoped rebuild does not.** `--only` repairs named rows; an operator fixing one Moment should not have every account reconsidered underneath them.
+
+**The reconciliation is stamped when the rebuild began, not when it writes.** `timeline_suspended_authors` is a `ReplacingMergeTree` ordered by `decided_at`, so the newest decision wins. A row stamped at the point of writing would beat a `UserStatusChanged` that arrived while the rebuild walked, and could undo a reinstatement by restating what was true when it started.
+
+## Alternatives Considered
+
+A separate `timeline:reconcile-suspensions` command; a startup check refusing to boot when the table is empty but accounts are suspended; and folding ClickHouse migrations into the relational runner.
+
+## Rationale
+
+**A separable half is a half that gets skipped.** Reconciliation as its own command would be correct whenever somebody remembered to run it, and the failure of forgetting is invisible: the Timeline looks fine and shows history it should not. Attaching it to the rebuild means the operation that claims to restore the projection actually restores it.
+
+**Reconciling is bounded by suspended accounts, not by Moments.** That is the same property that made the dimension worth separating in 7C — suspending somebody with a decade of history costs one write rather than ten thousand — and it is why a full rebuild can afford to do this every time.
+
+**A full rebuild in place is the slow path, and deliberately not optimised here.** Measured against 7,357 Moments locally it ran at 2.3 Moments a second — around fifty minutes — because every Moment already on the Timeline pays a ClickHouse mutation to make room for its replacement. That cost is per Moment and does not shrink with data, so an in-place rebuild of a real corpus is not a thing anybody should plan to do.
+
+The command therefore takes `--version`, and building into a fresh one is the flow `deployment.md:809` already prescribes: build beside the live version, validate, switch readers, retire the old. Writing into empty tables finds nothing to replace, so the mutations disappear and the walk is insert-only.
+
+Measured, that is worth **twice the throughput and no more** — 4.6 Moments a second against 2.3. The mutation was one cost among several, and what remains is per-Moment round trips: one PostgreSQL read, two existence probes, two inserts, all sequential. Making a rebuild genuinely fast means batching those, which is a change to how the projector writes rather than to how a rebuild is invoked, and is not attempted here.
+
+Pointing readers at a version is configuration and is not done here. A version built this way is complete and read by nothing, which is the honest half of a cutover to have: the building half works, and the switch is still to come.
+
+Run against a development database of 7,357 Moments, the first full rebuild reported `Projected 7178, removed 179, withheld 1, released 0` in twenty-six minutes. The `1` is the gap this ADR exists for, found in real data rather than a fixture: PostgreSQL held 193 suspended accounts and the projection knew of 192, so one account's history was being shown at every Location and occasion it appeared at, and nothing in the system said so. The `179` are Moments erased from PostgreSQL that correctly received no row — erasure surviving a rebuild, which is the property that makes rebuilding from authoritative state rather than from the log worth its cost.
+
+**The read of `users.status` lives in `TimelineSourceRepository` despite its own doc.** That class says it deliberately does not read the author's account status, and that remains true of every Moment row it builds: baking status into a row is precisely what the separate table avoids. Reading the suspended set as its own dimension is a different thing, and the doc now draws that line rather than being contradicted by a method beneath it.

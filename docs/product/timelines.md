@@ -574,6 +574,27 @@ Authorization applies to:
 - counts and summaries; and
 - other derived Timeline representations.
 
+## Navigation Is Not Recommendation
+
+A Timeline shows what a Viewer is authorized to access. It does not additionally
+narrow to what a Moment's author left open to being recommended.
+
+The two rules are distinct and Chronologity keeps them so. Discovery asks a
+further question — may this be *shown* to somebody who did not ask for it — and
+answers it with, among other things, whether the author left the Moment
+discoverable. A Timeline asks only whether the Viewer may see the Moment,
+because the Viewer went to that Location or that occasion deliberately. Nothing
+was surfaced to them; they navigated to it.
+
+Consequently a Moment its author kept out of recommendations still appears at
+the place it happened, to anybody entitled to see the Moment itself. Turning
+discoverability off means "do not put this in front of people", not "hide this
+from the history of the place it belongs to".
+
+A Viewer's own history is subject to the same rule for the same reason, and to
+one more besides: somebody must be able to navigate their own past whatever
+state it is in.
+
 ## Temporal Zoom
 
 Temporal zoom is a **day-one Chronologity product feature**.
