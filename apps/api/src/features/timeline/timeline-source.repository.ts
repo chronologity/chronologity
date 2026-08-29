@@ -16,6 +16,14 @@ export interface TimelineSource {
   readonly locationId: string | undefined;
   /** The real-world Events it names. A Moment may name several. */
   readonly realWorldEventIds: readonly string[];
+  /**
+   * Who has agreed they were part of it.
+   *
+   * Accepted participations only. Their Timelines carry the Moment as much as
+   * the author's does, which is what `timelines.md:176` means by a person's
+   * history being what they authored *together with* what they took part in.
+   */
+  readonly participantUserIds: readonly string[];
 }
 
 /**
@@ -71,6 +79,7 @@ export class TimelineSourceRepository {
       moderation_state: string | null;
       location_id: string | null;
       real_world_event_ids: string[] | null;
+      participant_user_ids: string[] | null;
     }[] = await this.dataSource.query(
       `SELECT m.moment_id, m.author_user_id,
               m.occurrence_start, m.occurrence_end, m.occurrence_precision,
@@ -83,7 +92,22 @@ export class TimelineSourceRepository {
                   FROM moment_real_world_events mre
                  WHERE mre.moment_id = m.moment_id
                  ORDER BY mre.real_world_event_id
-              ) AS real_world_event_ids
+              ) AS real_world_event_ids,
+              -- Accepted only. A proposal is a question between two people, and
+              -- projecting one would put a Moment on the Timeline of somebody
+              -- who has not agreed they were there — which is the assertion the
+              -- whole consent model exists to prevent.
+              --
+              -- Ordered by the account rather than by when it was proposed, so
+              -- the projected set is deterministic: the same Moment reprojected
+              -- must produce the same rows or a rebuild would churn.
+              ARRAY(
+                SELECT mp.user_id
+                  FROM moment_participations mp
+                 WHERE mp.moment_id = m.moment_id
+                   AND mp.status = 'accepted'
+                 ORDER BY mp.user_id
+              ) AS participant_user_ids
          FROM moments m
          LEFT JOIN moderation_states ms
            ON ms.subject_type = 'moment' AND ms.subject_id = m.moment_id
@@ -111,6 +135,7 @@ export class TimelineSourceRepository {
       moderationState: row.moderation_state ?? undefined,
       locationId: row.location_id ?? undefined,
       realWorldEventIds: row.real_world_event_ids ?? [],
+      participantUserIds: row.participant_user_ids ?? [],
     };
   }
 

@@ -1,4 +1,5 @@
 import type { ClickHouseClient } from "@clickhouse/client";
+import type { TimelineScopeRef } from "./timeline.eligibility.js";
 import {
   asClickHouseDateTime,
   TIMELINE_VERSION,
@@ -149,6 +150,33 @@ export class TimelineRepository {
   }
 
   /**
+   * Erase the person rows naming an account, from every projection version.
+   *
+   * Its own removal because no other one reaches these. A person row for a
+   * *participant* carries the Moment's author in `author_user_id` — somebody
+   * else — so sweeping by author leaves it standing, and the Moment is not
+   * being erased so nothing sweeps by Moment either. What would remain is a row
+   * saying this account was part of an experience, which is precisely the
+   * record invariants 7 and 8 of `participation.md` forbid outliving them.
+   *
+   * The relational half is already correct: the account sweep deletes their
+   * `moment_participations`. Without this the projection would go on asserting
+   * something authoritative state no longer said, and nothing would ever
+   * reproject those Moments to correct it.
+   *
+   * @param userId - Whose rows.
+   * @returns Nothing.
+   * @throws {Error} If ClickHouse refuses.
+   */
+  async erasePersonContextsEverywhere(userId: string): Promise<void> {
+    await this.client.command({
+      query: `DELETE FROM timeline_moment_contexts
+               WHERE context_type = 'person' AND context_id = {userId: String}`,
+      query_params: { userId },
+    });
+  }
+
+  /**
    * Erase an account's scope memberships, from every projection version.
    *
    * @param authorUserId - Whose history.
@@ -218,7 +246,7 @@ export class TimelineRepository {
    */
   async projectContexts(
     row: TimelineRow,
-    contexts: readonly { type: "location" | "real_world_event"; id: string }[],
+    contexts: readonly TimelineScopeRef[],
   ): Promise<void> {
     if (await this.holds("timeline_moment_contexts", row.momentId)) {
       await this.removeContexts(row.momentId);

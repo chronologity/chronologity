@@ -690,7 +690,8 @@ describe("erasure", () => {
       );
 
       await projector.project(momentId);
-      assert.equal(await contextCount(momentId), 2, "nothing to erase");
+      // The Location, the occasion, and the author, whose Timeline it is on.
+      assert.equal(await contextCount(momentId), 3, "nothing to erase");
 
       await moments.delete(momentId, author.userId, testContext());
       await erase();

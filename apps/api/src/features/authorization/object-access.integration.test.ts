@@ -117,6 +117,28 @@ const EXEMPT: readonly Exemption[] = [
     because: "Shared reference data, deliberately readable by anybody signed in.",
   })),
 
+  // A person's Timeline. The identifier does name somebody — unlike a Location,
+  // which belongs to nobody — so this is exempt for a different reason than the
+  // scoped Timelines below.
+  //
+  // It is openable by anybody signed in and answers with the Moments that
+  // Viewer was already entitled to see, one at a time, and no others.
+  // Substituting another identifier therefore returns that person's history
+  // filtered for the same Viewer: there is nothing to reach that reaching it
+  // discloses. A person who would rather not be walked through turns their
+  // Timeline off, and it then answers empty — refusing would itself say there
+  // is something there. Driven by timeline.integration.test.ts.
+  ...[
+    "GET /users/:userId/timeline",
+    "GET /users/:userId/timeline/head",
+    "GET /users/:userId/timeline/around",
+    "GET /users/:userId/timeline/buckets",
+  ].map((route) => ({
+    route,
+    because:
+      "A person's Timeline, openable by anybody and filtered per Viewer; timeline.integration.test.ts drives what each may see.",
+  })),
+
   // A shared scope's Timeline. The identifier names a place or an occasion,
   // which belongs to nobody, and the authorization question is not whether the
   // Viewer may read the scope but which of its Moments they may see — decided

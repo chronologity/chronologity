@@ -49,6 +49,22 @@ export interface TimelineRecord {
 }
 
 /**
+ * A stored row, together with what this Viewer may do with it.
+ *
+ * `readable` is not a column and never could be: whether a Moment may be read
+ * depends on who is asking, and the projection stores what is intrinsic to the
+ * Moment. It is computed per query and carried alongside.
+ *
+ * It is 1 for every read that filtered on eligibility, since such a read
+ * returns nothing else. It is 0 only on somebody's own Timeline, where a Moment
+ * they accepted participation in but may not read appears as its date alone —
+ * their own history should not have a hole they cannot see the shape of.
+ */
+export interface TimelineReading extends TimelineRecord {
+  readable: number;
+}
+
+/**
  * ClickHouse wants a naive datetime string, not an ISO instant.
  *
  * `DateTime64(3)` has no zone: it stores what it is given. Handing it an ISO

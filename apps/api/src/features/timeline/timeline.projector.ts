@@ -124,6 +124,17 @@ export class TimelineProjector {
         ? []
         : [{ type: "location" as const, id: source.locationId }]),
       ...source.realWorldEventIds.map((id) => ({ type: "real_world_event" as const, id })),
+      // The people whose Timeline this Moment belongs on: whoever recorded it,
+      // and whoever has agreed they were there. `timelines.md:176` defines a
+      // person's Timeline as exactly that union, and writing both kinds as one
+      // context makes it one contiguous range of the sort key rather than a
+      // query that reads two tables and merges them.
+      //
+      // The author's row is not redundant with `timeline_moments.author_user_id`.
+      // It is what lets one query answer "this person's history" without
+      // knowing in advance which half a row came from.
+      { type: "person" as const, id: source.authorUserId },
+      ...source.participantUserIds.map((id) => ({ type: "person" as const, id })),
     ]);
 
     return "projected";

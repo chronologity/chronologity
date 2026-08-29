@@ -1,5 +1,9 @@
 import type { ClickHouseClient } from "@clickhouse/client";
-import { asClickHouseDateTime, TIMELINE_VERSION, type TimelineRecord } from "./timeline-row.js";
+import {
+  asClickHouseDateTime,
+  TIMELINE_VERSION,
+  type TimelineReading,
+} from "./timeline-row.js";
 import type { TimelinePosition } from "./timeline.cursor.js";
 import type { TimelineEligibility, TimelineScopeRef } from "./timeline.eligibility.js";
 
@@ -47,8 +51,14 @@ export interface TimelineBucket {
  * The join follows the limit rather than preceding it, so it touches only the
  * rows being returned.
  *
- * @param chosen - A query over the contexts table selecting `moment_id` and
- *   `occurred_at`, already filtered, ordered and limited.
+ * Every chosen query supplies a `readable` column. The scoped reads select a
+ * constant 1, because their `WHERE` has already refused everything else; the
+ * personal read selects the eligibility rule itself, because it refuses nothing
+ * and reports instead. One shape either way, so nothing downstream has to know
+ * which family it came from.
+ *
+ * @param chosen - A query over the contexts table selecting `moment_id`,
+ *   `occurred_at` and `readable`, already ordered and limited.
  * @param order - How to order the joined rows, since a join does not preserve
  *   the subquery's order. Qualified with the `moment` alias.
  * @returns The query to run.
@@ -56,7 +66,8 @@ export interface TimelineBucket {
 function withMoments(chosen: string, order: string): string {
   // Columns named one by one rather than `moment.*`, which ClickHouse returns
   // qualified — `moment.moment_id` — and every reader here expects bare names.
-  return `SELECT moment.occurred_at AS occurred_at,
+  return `SELECT scoped.readable AS readable,
+                 moment.occurred_at AS occurred_at,
                  moment.moment_id AS moment_id,
                  moment.author_user_id AS author_user_id,
                  moment.projected_at AS projected_at,
@@ -149,70 +160,75 @@ export class TimelineReadRepository {
   ) {}
 
   /**
-   * Where a Timeline opens.
+   * Where somebody's own Timeline opens.
    *
    * The newest *occurrence*, never the newest recording. A Moment added today
    * about 1969 belongs in 1969, and letting it become the head would put
    * somebody at the wrong end of their own history the moment they backfilled
    * anything.
    *
-   * @param authorUserId - Whose history.
+   * Read from the person context rather than by author, because a person's
+   * Timeline is what they authored **together with** what they agreed they were
+   * part of, and only the context knows the second half.
+   *
+   * @param viewer - Whose history, and what they may see of it.
    * @returns The newest position, or undefined when they have none.
    */
-  async head(authorUserId: string): Promise<TimelineRecord | undefined> {
-    const result = await this.client.query({
-      query: `SELECT * FROM timeline_moments
-               WHERE projection_version = {version: String}
-                 AND author_user_id = {authorUserId: String}
-               ORDER BY occurred_at DESC, moment_id DESC
-               LIMIT 1`,
-      query_params: { version: this.version, authorUserId },
-      format: "JSONEachRow",
-    });
-
-    return (await result.json<TimelineRecord>())[0];
+  async ownHead(viewer: TimelineEligibility): Promise<TimelineReading | undefined> {
+    return (await this.ownSlice(viewer, undefined, "older", 1))[0];
   }
 
   /**
-   * A page of history, running in one direction from a position.
+   * A page of somebody's own history, running in one direction.
    *
-   * @param authorUserId - Whose history.
-   * @param from - Where to resume, or undefined to start at the appropriate
-   *   end for the direction.
+   * **Nothing is filtered.** Everything here is theirs: they recorded it, or
+   * they agreed they were part of it. What varies is whether they may read it,
+   * which comes back as a column rather than as a reason to withhold the row.
+   *
+   * That is safe precisely because nothing is filtered — the page is the same
+   * size either way, so its size cannot disclose what it does not show, which
+   * is the property the eligibility rule exists to protect everywhere else.
+   *
+   * @param viewer - Whose history, and what they may see of it.
+   * @param from - Where to resume, or undefined for the appropriate end.
    * @param direction - `older` walks back through history, `newer` forwards.
    * @param limit - How many rows at most.
-   * @returns The rows, ordered as they were walked — so `older` comes back
-   *   newest-first and `newer` oldest-first, each continuing from `from`.
+   * @returns The rows, each carrying whether it may be read.
    */
-  async slice(
-    authorUserId: string,
+  async ownSlice(
+    viewer: TimelineEligibility,
     from: TimelinePosition | undefined,
     direction: Direction,
     limit: number,
-  ): Promise<TimelineRecord[]> {
+  ): Promise<TimelineReading[]> {
     const older = direction === "older";
-
-    // The tuple comparison is what makes this keyset paging. Both halves are
-    // needed: comparing occurrence alone would skip every Moment sharing an
-    // instant with the cursor, and there is no guarantee history has only one
-    // thing happening at a time.
     const boundary =
       from === undefined
         ? ""
         : older
           ? `AND (occurred_at, moment_id) < ({at: DateTime64(3)}, {momentId: String})`
           : `AND (occurred_at, moment_id) > ({at: DateTime64(3)}, {momentId: String})`;
+    const order = `occurred_at ${older ? "DESC" : "ASC"}, moment_id ${older ? "DESC" : "ASC"}`;
 
     const result = await this.client.query({
-      query: `SELECT * FROM timeline_moments
-               WHERE projection_version = {version: String}
-                 AND author_user_id = {authorUserId: String}
-                 ${boundary}
-               ORDER BY occurred_at ${older ? "DESC" : "ASC"}, moment_id ${older ? "DESC" : "ASC"}
-               LIMIT {limit: UInt32}`,
+      query: withMoments(
+        `SELECT moment_id, occurred_at,
+                ${eligible("timeline_moment_contexts")} AS readable
+           FROM timeline_moment_contexts
+          WHERE projection_version = {version: String}
+            AND context_type = 'person'
+            AND context_id = {viewer: String}
+            ${boundary}
+          ORDER BY ${order}
+          LIMIT {limit: UInt32}`,
+        `moment.occurred_at ${older ? "DESC" : "ASC"}, moment.moment_id ${older ? "DESC" : "ASC"}`,
+      ),
       query_params: {
         version: this.version,
-        authorUserId,
+        viewer: viewer.viewerUserId,
+        blocked: viewer.blocked,
+        audience: viewer.audience,
+        isAdult: viewer.isAdult ? 1 : 0,
         limit,
         ...(from === undefined
           ? {}
@@ -221,95 +237,89 @@ export class TimelineReadRepository {
       format: "JSONEachRow",
     });
 
-    return result.json<TimelineRecord>();
+    return result.json<TimelineReading>();
   }
 
   /**
-   * The Moment nearest an instant.
+   * The Moment nearest an instant on somebody's own Timeline.
    *
-   * What a historical jump resolves to. `timeline.md:601` asks that a jump
-   * return "the closest valid historical context" so ordinary navigation can
-   * continue immediately — so this finds the position, and the caller pages
-   * either side of it without a second round trip.
-   *
-   * @param authorUserId - Whose history.
+   * @param viewer - Whose history, and what they may see of it.
    * @param at - The instant asked for, which need not be one anything happened.
-   * @returns The nearest Moment in either direction, or undefined when they
-   *   have no history at all. Ties break towards the earlier, so a jump lands
-   *   in the same place every time.
+   * @returns The nearest, or undefined when they have no history. Ties break
+   *   towards the earlier, so a jump lands in the same place twice.
    */
-  async nearest(authorUserId: string, at: Date): Promise<TimelineRecord | undefined> {
+  async ownNearest(
+    viewer: TimelineEligibility,
+    at: Date,
+  ): Promise<TimelineReading | undefined> {
     const result = await this.client.query({
-      query: `SELECT * FROM timeline_moments
-               WHERE projection_version = {version: String}
-                 AND author_user_id = {authorUserId: String}
-               ORDER BY abs(dateDiff('millisecond', occurred_at, {at: DateTime64(3)})) ASC,
-                        occurred_at ASC,
-                        moment_id ASC
-               LIMIT 1`,
-      query_params: { version: this.version, authorUserId, at: asClickHouseDateTime(at) },
+      query: withMoments(
+        `SELECT moment_id, occurred_at,
+                ${eligible("timeline_moment_contexts")} AS readable
+           FROM timeline_moment_contexts
+          WHERE projection_version = {version: String}
+            AND context_type = 'person'
+            AND context_id = {viewer: String}
+          ORDER BY abs(dateDiff('millisecond', occurred_at, {at: DateTime64(3)})) ASC,
+                   occurred_at ASC,
+                   moment_id ASC
+          LIMIT 1`,
+        "moment.occurred_at ASC, moment.moment_id ASC",
+      ),
+      query_params: {
+        version: this.version,
+        viewer: viewer.viewerUserId,
+        blocked: viewer.blocked,
+        audience: viewer.audience,
+        isAdult: viewer.isAdult ? 1 : 0,
+        at: asClickHouseDateTime(at),
+      },
       format: "JSONEachRow",
     });
 
-    return (await result.json<TimelineRecord>())[0];
+    return (await result.json<TimelineReading>())[0];
   }
 
   /**
-   * How much history sits in each span.
+   * How somebody's own history is distributed.
    *
-   * What zoomed-out navigation shows instead of Moments. `timeline.md:493`
-   * warns that returning every Moment at a broad scale is neither efficient nor
-   * usable, and counting belongs in the store holding the rows rather than in
-   * an API paging through them to add up.
+   * Counts everything on their Timeline, including Moments they may not read.
+   * Those are theirs and paging returns them, redacted — a count that left them
+   * out would disagree with the pages beneath it, and somebody scrolling a
+   * decade would find Moments the bucket said were not there.
    *
-   * @param authorUserId - Whose history.
+   * The opposite of the rule for a scope, where a count must agree with a
+   * *filtered* page, and for the same underlying reason: a count and its page
+   * must say the same thing.
+   *
+   * @param viewerUserId - Whose history.
    * @param scale - Year or decade.
-   * @returns One bucket per span that holds anything, oldest first. Empty spans
-   *   are absent rather than zero: a century of silence is not ninety-nine rows
-   *   of nothing.
+   * @returns One bucket per span holding anything, oldest first.
    */
-  async buckets(authorUserId: string, scale: Scale): Promise<TimelineBucket[]> {
-    // Interpolated rather than parameterised, because it names a function
-    // rather than a value — and it comes from a union of two literals rather
-    // than from a caller, so there is nothing here to inject.
-    //
-    // **Not `toStartOfInterval(occurred_at, INTERVAL 10 YEAR)`**, which is the
-    // obvious way to write this and is wrong for exactly the history this
-    // product is about. That function counts intervals from the epoch, so a
-    // date before 1970 wraps: measured against ClickHouse 26.4, the moon
-    // landing in July 1969 bucketed to **June 2139**. It is correct from 1970
-    // onwards, which is what makes it dangerous — a test written with recent
-    // fixtures would pass and the defect would surface as somebody's
-    // grandparents appearing in the twenty-second century.
-    //
-    // Taking the year and rounding it down has no epoch in it. Checked at 1901,
-    // 1969 and 2020, which is a century either side of the boundary that breaks.
-    // Both scales, not just the decade: `toStartOfYear` fails the same way,
-    // turning 1901 into 1970. Anything that reduces a date to a boundary by
-    // counting from the epoch is unusable here.
+  async ownBuckets(viewerUserId: string, scale: Scale): Promise<TimelineBucket[]> {
     const years = scale === "decade" ? 10 : 1;
     const bucket = `toDateTime64(concat(toString(intDiv(toYear(occurred_at), ${years}) * ${years}), '-01-01 00:00:00'), 3)`;
 
     const result = await this.client.query({
       query: `SELECT ${bucket} AS starts_at, count() AS count
-                FROM timeline_moments
+                FROM timeline_moment_contexts
                WHERE projection_version = {version: String}
-                 AND author_user_id = {authorUserId: String}
+                 AND context_type = 'person'
+                 AND context_id = {viewerUserId: String}
                GROUP BY starts_at
                ORDER BY starts_at ASC`,
-      query_params: { version: this.version, authorUserId },
+      query_params: { version: this.version, viewerUserId },
       format: "JSONEachRow",
     });
 
     const rows = await result.json<{ starts_at: string; count: string }>();
 
     return rows.map((row) => ({
-      // ClickHouse returns a naive datetime; the projection stores UTC, so it
-      // is read back as UTC rather than as whatever this process is set to.
       startsAt: new Date(`${row.starts_at.replace(" ", "T")}Z`),
       count: Number(row.count),
     }));
   }
+
   /**
    * A page of a scope's history, filtered to what this Viewer may see.
    *
@@ -332,7 +342,7 @@ export class TimelineReadRepository {
     from: TimelinePosition | undefined,
     direction: Direction,
     limit: number,
-  ): Promise<TimelineRecord[]> {
+  ): Promise<TimelineReading[]> {
     const older = direction === "older";
     const boundary =
       from === undefined
@@ -345,7 +355,7 @@ export class TimelineReadRepository {
 
     const result = await this.client.query({
       query: withMoments(
-        `SELECT moment_id, occurred_at
+        `SELECT moment_id, occurred_at, 1 AS readable
            FROM timeline_moment_contexts
           WHERE projection_version = {version: String}
             AND context_type = {contextType: String}
@@ -372,7 +382,7 @@ export class TimelineReadRepository {
       format: "JSONEachRow",
     });
 
-    return result.json<TimelineRecord>();
+    return result.json<TimelineReading>();
   }
 
   /**
@@ -388,7 +398,7 @@ export class TimelineReadRepository {
   async scopedHead(
     scope: TimelineScopeRef,
     viewer: TimelineEligibility,
-  ): Promise<TimelineRecord | undefined> {
+  ): Promise<TimelineReading | undefined> {
     return (await this.scopedSlice(scope, viewer, undefined, "older", 1))[0];
   }
 
@@ -405,10 +415,10 @@ export class TimelineReadRepository {
     scope: TimelineScopeRef,
     viewer: TimelineEligibility,
     at: Date,
-  ): Promise<TimelineRecord | undefined> {
+  ): Promise<TimelineReading | undefined> {
     const result = await this.client.query({
       query: withMoments(
-        `SELECT moment_id, occurred_at
+        `SELECT moment_id, occurred_at, 1 AS readable
            FROM timeline_moment_contexts
           WHERE projection_version = {version: String}
             AND context_type = {contextType: String}
@@ -433,7 +443,7 @@ export class TimelineReadRepository {
       format: "JSONEachRow",
     });
 
-    return (await result.json<TimelineRecord>())[0];
+    return (await result.json<TimelineReading>())[0];
   }
 
   /**

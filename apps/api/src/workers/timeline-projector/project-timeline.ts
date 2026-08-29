@@ -1,4 +1,9 @@
-import { MODERATION_BOUNDARY, MOMENTS_BOUNDARY, USERS_BOUNDARY } from "@chronologity/contracts";
+import {
+  MODERATION_BOUNDARY,
+  MOMENTS_BOUNDARY,
+  PARTICIPATION_BOUNDARY,
+  USERS_BOUNDARY,
+} from "@chronologity/contracts";
 import type { Logger } from "../../lib/logger/logger.js";
 import type { ConsumedEvent } from "../../lib/messaging/consumer.js";
 import type { TimelineProjector } from "../../features/timeline/timeline.projector.js";
@@ -24,6 +29,21 @@ const HANDLED: Readonly<Record<string, (payload: Record<string, unknown>) => str
     // resolved when the Timeline is read rather than written.
     ModerationStateChanged: (payload) =>
       payload.subjectType === "moment" ? momentId(payload.subjectId) : undefined,
+    // Somebody has agreed they were part of a Moment, or taken that back.
+    // Either changes whose Timeline the Moment belongs on, so the Moment is
+    // reprojected and its person rows are rewritten from authoritative state.
+    //
+    // Deliberately routed through the Moment rather than given a path of their
+    // own: a participation-shaped write would be a second way to produce the
+    // same rows, and two ways to write one row eventually disagree. It is also
+    // what makes a rebuild correct for free, since a rebuild walks Moments.
+    //
+    // `ParticipationProposed` and `ParticipationRejected` are absent because
+    // neither changes anything here. They arrive on this boundary now and fall
+    // through as unrecognised, which is the same handling every other event
+    // this worker does not act on gets.
+    ParticipationAccepted: (payload) => momentId(payload.momentId),
+    ParticipationWithdrawn: (payload) => momentId(payload.momentId),
     // Not a Moment, and handled separately below. A suspension changes who may
     // see somebody's history without changing any of it, so it writes one row
     // to the suspended-authors table rather than reprojecting a decade.
@@ -61,6 +81,7 @@ export const TIMELINE_PROJECTOR_BOUNDARIES: readonly string[] = [
   // author's status; 7C adds it because a Location with a hundred contributors
   // cannot ask PostgreSQL about each of them while paging.
   USERS_BOUNDARY,
+  PARTICIPATION_BOUNDARY,
 ];
 
 /**

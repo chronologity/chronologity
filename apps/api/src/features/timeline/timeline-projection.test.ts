@@ -17,6 +17,7 @@ const source = (over: Partial<TimelineSource> = {}): TimelineSource => ({
   moderationState: undefined,
   locationId: undefined,
   realWorldEventIds: [],
+  participantUserIds: [],
   ...over,
 });
 

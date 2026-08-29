@@ -1,4 +1,7 @@
-import type { TimelineEntry as ContractTimelineEntry } from "@chronologity/contracts";
+import type {
+  ReadableTimelineEntry,
+  TimelineEntry as ContractTimelineEntry,
+} from "@chronologity/contracts";
 import type {
   TimelineEligibility,
   TimelineEligibilityResolver,
@@ -12,7 +15,7 @@ import type {
   TimelineBucket,
   TimelineReadRepository,
 } from "./timeline.read.repository.js";
-import type { TimelineRecord } from "./timeline-row.js";
+import type { TimelineReading, TimelineRecord } from "./timeline-row.js";
 
 /**
  * Navigating history.
@@ -133,7 +136,8 @@ export class TimelineService {
    * @returns The newest occurrence, or undefined for somebody with none.
    */
   async head(viewerUserId: string): Promise<TimelineEntry | undefined> {
-    const record = await this.timeline.head(viewerUserId);
+    const viewer = await this.eligibility.resolve(viewerUserId, own(viewerUserId));
+    const record = await this.timeline.ownHead(viewer);
 
     return record === undefined ? undefined : present(record);
   }
@@ -155,7 +159,8 @@ export class TimelineService {
    */
   async around(viewerUserId: string, at: Date, limit?: number): Promise<TimelineAround> {
     const size = this.pageSize(limit);
-    const nearest = await this.timeline.nearest(viewerUserId, at);
+    const viewer = await this.eligibility.resolve(viewerUserId, own(viewerUserId));
+    const nearest = await this.timeline.ownNearest(viewer, at);
 
     if (nearest === undefined) {
       return {
@@ -182,7 +187,7 @@ export class TimelineService {
    * @returns One bucket per span holding anything, oldest first.
    */
   async buckets(viewerUserId: string, scale: Scale): Promise<readonly TimelineBucket[]> {
-    return this.timeline.buckets(viewerUserId, scale);
+    return this.timeline.ownBuckets(viewerUserId, scale);
   }
 
   /**
@@ -206,7 +211,8 @@ export class TimelineService {
     direction: Direction,
     limit: number,
   ): Promise<TimelinePage> {
-    const records = await this.timeline.slice(viewerUserId, from, direction, limit + 1);
+    const viewer = await this.eligibility.resolve(viewerUserId, own(viewerUserId));
+    const records = await this.timeline.ownSlice(viewer, from, direction, limit + 1);
     const page = records.slice(0, limit);
     const first = page[0];
     const last = page[page.length - 1];
@@ -291,6 +297,11 @@ export class TimelineService {
     scope: TimelineScopeRef,
   ): Promise<TimelineEntry | undefined> {
     const viewer = await this.eligibility.resolve(viewerUserId, scope);
+
+    if (!viewer.scopeIsOpen) {
+      return undefined;
+    }
+
     const record = await this.timeline.scopedHead(scope, viewer);
 
     return record === undefined ? undefined : present(record);
@@ -317,7 +328,9 @@ export class TimelineService {
     // two different answers, and a jump whose halves disagreed about
     // eligibility would be worse than one that was merely slow.
     const viewer = await this.eligibility.resolve(viewerUserId, scope);
-    const nearest = await this.timeline.scopedNearest(scope, viewer, at);
+    const nearest = viewer.scopeIsOpen
+      ? await this.timeline.scopedNearest(scope, viewer, at)
+      : undefined;
 
     if (nearest === undefined) {
       return {
@@ -351,6 +364,13 @@ export class TimelineService {
   ): Promise<readonly TimelineBucket[]> {
     const viewer = await this.eligibility.resolve(viewerUserId, scope);
 
+    // Empty rather than refused, exactly as an empty page is. A count is a
+    // disclosure too: "this person has four hundred Moments you may not see"
+    // is the thing a closed Timeline exists to withhold.
+    if (!viewer.scopeIsOpen) {
+      return [];
+    }
+
     return this.timeline.scopedBuckets(scope, viewer, scale);
   }
 
@@ -372,6 +392,12 @@ export class TimelineService {
     direction: Direction,
     limit: number,
   ): Promise<TimelinePage> {
+    if (!viewer.scopeIsOpen) {
+      // Indistinguishable from a person with no history, which is the point:
+      // refusing would say there is something here to refuse.
+      return { moments: [], cursor: undefined, reverseCursor: undefined };
+    }
+
     const records = await this.timeline.scopedSlice(scope, viewer, from, direction, limit + 1);
     const page = records.slice(0, limit);
     const first = page[0];
@@ -409,17 +435,47 @@ function positionOf(record: TimelineRecord): TimelinePosition {
  *   returns only the Viewer's own history, so naming them on every row would
  *   be repeating the request back.
  */
-function present(record: TimelineRecord): TimelineEntry {
+function present(record: TimelineReading): TimelineEntry {
+  if (record.readable === 0) {
+    // Everything but when it happened is withheld, including the UTC offset:
+    // that is a statement about where somebody was rather than when, and this
+    // person was told the occurrence time and nothing else when they were asked.
+    return {
+      readable: false,
+      momentId: record.moment_id,
+      occurredAt: new Date(`${record.occurred_at.replace(" ", "T")}Z`).toISOString(),
+      occurrenceEnd: new Date(`${record.occurrence_end.replace(" ", "T")}Z`).toISOString(),
+      occurrencePrecision:
+        record.occurrence_precision as ReadableTimelineEntry["occurrencePrecision"],
+    };
+  }
+
   return {
+    readable: true,
     momentId: record.moment_id,
     occurredAt: new Date(`${record.occurred_at.replace(" ", "T")}Z`).toISOString(),
     occurrenceEnd: new Date(`${record.occurrence_end.replace(" ", "T")}Z`).toISOString(),
     // Narrowed rather than validated. The projector wrote these from values the
     // contract had already checked, and a Timeline row is not a boundary — the
     // boundary was the request that created the Moment.
-    occurrencePrecision: record.occurrence_precision as TimelineEntry["occurrencePrecision"],
+    occurrencePrecision:
+      record.occurrence_precision as ReadableTimelineEntry["occurrencePrecision"],
     occurrenceOffsetMinutes: record.occurrence_offset_minutes,
-    visibility: record.visibility as TimelineEntry["visibility"],
+    visibility: record.visibility as ReadableTimelineEntry["visibility"],
     discoverable: record.discoverable === 1,
   };
+}
+
+/**
+ * Somebody's own Timeline, as a scope.
+ *
+ * A person is the third kind of scope, after a Location and a real-world Event,
+ * and their own reading of it is the one case that filters nothing: everything
+ * there is theirs, whether they recorded it or agreed they were part of it.
+ *
+ * @param userId - Whose.
+ * @returns The scope reference the resolver takes.
+ */
+function own(userId: string): TimelineScopeRef {
+  return { type: "person", id: userId };
 }

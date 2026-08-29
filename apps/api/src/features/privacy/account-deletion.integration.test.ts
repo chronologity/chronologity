@@ -264,6 +264,20 @@ describe("account deletion", () => {
     return moment.momentId;
   };
 
+  /** How many Moments the projection says are on somebody's Timeline. */
+  const personRows = async (userId: string): Promise<number> => {
+    const result = await analytics.client.query({
+      query: `SELECT count() AS count FROM timeline_moment_contexts
+               WHERE context_type = 'person' AND context_id = {userId: String}
+                 AND projection_version = {version: String}`,
+      query_params: { userId, version: timelineVersion },
+      format: "JSONEachRow",
+    });
+    const rows = await result.json<{ count: string }>();
+
+    return Number(rows[0]?.count ?? 0);
+  };
+
   /** How many scopes the projection still says a Moment belonged to. */
   const contextCount = async (momentId: string): Promise<number> => {
     const result = await analytics.client.query({
@@ -783,6 +797,49 @@ describe("account deletion", () => {
       });
 
       assert.equal(still.statusCode, 200, still.body);
+    });
+
+    it("takes them off the Timelines of Moments they only took part in", async () => {
+      // The removal nothing else reaches. A person row for a participant names
+      // somebody else as the author, so the sweep by author misses it, and the
+      // Moment is not being erased so the sweep by Moment never runs. What
+      // would remain is a row saying this account was part of an experience —
+      // the record invariants 7 and 8 forbid outliving them.
+      const author = await onboard();
+      const leaver = await onboard();
+      const momentId = randomUUID();
+      const occurredAt = new Date("1998-06-01T00:00:00.000Z");
+      const row = {
+        momentId,
+        authorUserId: author.userId,
+        occurredAt,
+        occurrenceEnd: occurredAt,
+        occurrencePrecision: "day" as const,
+        occurrenceOffsetMinutes: 0,
+        visibility: "public" as const,
+        moderationState: "allowed",
+        discoverable: true,
+      };
+
+      await timeline.project(row);
+      await timeline.projectContexts(row, [
+        { type: "person", id: author.userId },
+        { type: "person", id: leaver.userId },
+      ]);
+
+      assert.equal(await personRows(leaver.userId), 1, "nothing to erase");
+
+      await deleteAccount(leaver);
+      await erase(leaver.userId);
+
+      assert.equal(
+        await personRows(leaver.userId),
+        0,
+        "a projection still says they were part of something",
+      );
+      // The author's own row stays. The Moment is their history and was never
+      // the other person's to delete.
+      assert.equal(await personRows(author.userId), 1, "the author lost their own Moment");
     });
 
     it("erases participations naming it, including questions nobody answered", async () => {

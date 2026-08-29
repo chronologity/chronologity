@@ -361,6 +361,10 @@ async function eraseAccount(
   // history left in the one nobody is pointed at is history left standing.
   await options.timeline.eraseEverythingByEverywhere(userId);
   await options.timeline.eraseContextsByEverywhere(userId);
+  // And the Moments they were merely part of. Those rows name somebody else as
+  // the author, so neither sweep above reaches them, and the Moments themselves
+  // are other people's history and stay.
+  await options.timeline.erasePersonContextsEverywhere(userId);
   // And any record that this account was ever suspended. A moderation decision
   // about somebody who has asked to be forgotten is exactly the kind of record
   // that must not outlive them.

@@ -277,8 +277,17 @@ describe("navigating your own history", () => {
       new TimelineEligibilityResolver(database.dataSource),
     );
 
+    // Both stores, because a person's Timeline is read from the person context
+    // rather than by author: the projector writes both together and a fixture
+    // that wrote only the row would produce an empty Timeline for everything
+    // below.
+    const place = async (row: TimelineRow) => {
+      await timeline.project(row);
+      await timeline.projectContexts(row, [{ type: "person", id: row.authorUserId }]);
+    };
+
     for (const entry of history) {
-      await timeline.project({
+      await place({
         momentId: entry.id,
         authorUserId: author,
         occurredAt: new Date(entry.at),
@@ -292,9 +301,9 @@ describe("navigating your own history", () => {
     }
 
     // Somebody else's history, at the same instants, so that a query which
-    // forgot to filter by author would return it and be caught.
+    // forgot to scope to one person would return it and be caught.
     for (const entry of history) {
-      await timeline.project({
+      await place({
         momentId: randomUUID(),
         authorUserId: somebodyElse,
         occurredAt: new Date(entry.at),
@@ -311,6 +320,10 @@ describe("navigating your own history", () => {
   afterAll(async () => {
     await analytics.client.command({
       query: `DELETE FROM timeline_moments WHERE projection_version = {version: String}`,
+      query_params: { version },
+    });
+    await analytics.client.command({
+      query: `DELETE FROM timeline_moment_contexts WHERE projection_version = {version: String}`,
       query_params: { version },
     });
     await analytics.close();
@@ -559,17 +572,20 @@ describe("the Timeline over HTTP", () => {
     const person = await onboard();
 
     for (const at of ["1901-03-05", "1969-07-20", "2020-01-01"]) {
-      await timeline.project({
+      const row = {
         momentId: randomUUID(),
         authorUserId: person.userId,
         occurredAt: new Date(`${at}T00:00:00.000Z`),
         occurrenceEnd: new Date(`${at}T00:00:00.000Z`),
-        occurrencePrecision: "day",
+        occurrencePrecision: "day" as const,
         occurrenceOffsetMinutes: 0,
-        visibility: "private",
+        visibility: "private" as const,
         moderationState: "allowed",
         discoverable: false,
-      });
+      };
+
+      await timeline.project(row);
+      await timeline.projectContexts(row, [{ type: "person", id: person.userId }]);
     }
 
     return person;
@@ -927,6 +943,213 @@ describe("the Timeline over HTTP", () => {
     });
 
     assert.deepEqual(page.json().moments, []);
+  });
+
+  /**
+   * Put a Moment on somebody's Timeline as a participation.
+   *
+   * Written the way the projector writes it — the row, plus a person context
+   * for the author and one for the participant — so what is under test is the
+   * read rather than a shape invented here.
+   */
+  const participatedIn = async (
+    authorUserId: string,
+    participantUserId: string,
+    year: number,
+    over: Partial<TimelineRow> = {},
+  ): Promise<string> => {
+    const row: TimelineRow = {
+      momentId: randomUUID(),
+      authorUserId,
+      occurredAt: new Date(`${year}-06-01T00:00:00.000Z`),
+      occurrenceEnd: new Date(`${year}-06-01T00:00:00.000Z`),
+      occurrencePrecision: "day",
+      occurrenceOffsetMinutes: 0,
+      visibility: "public",
+      moderationState: "allowed",
+      discoverable: true,
+      ...over,
+    };
+
+    await timeline.project(row);
+    await timeline.projectContexts(row, [
+      { type: "person", id: authorUserId },
+      { type: "person", id: participantUserId },
+    ]);
+
+    return row.momentId;
+  };
+
+  it("puts a Moment somebody agreed to on their own Timeline", async () => {
+    const author = await onboard();
+    const participant = await onboard();
+    const momentId = await participatedIn(author.userId, participant.userId, 1994);
+
+    const page = await app.inject({
+      method: "GET",
+      url: "/timeline",
+      headers: authed(participant.accessToken),
+    });
+
+    assert.equal(page.statusCode, 200, page.body);
+    assert.deepEqual(
+      page.json().moments.map((moment: { momentId: string }) => moment.momentId),
+      [momentId],
+      "a Moment they were part of is missing from their own history",
+    );
+  });
+
+  it("shows one they cannot read as its date and nothing else", async () => {
+    // Being named is not being admitted. They accepted, so they are entitled to
+    // know it happened — their own history should not have a hole they cannot
+    // see the shape of — but what it says stays shut.
+    const author = await onboard();
+    const participant = await onboard();
+
+    await participatedIn(author.userId, participant.userId, 1995, { visibility: "private" });
+
+    const page = await app.inject({
+      method: "GET",
+      url: "/timeline",
+      headers: authed(participant.accessToken),
+    });
+
+    const [entry] = page.json().moments;
+
+    assert.equal(entry.readable, false, "a private Moment came back readable");
+    assert.match(entry.occurredAt, /^1995-06-01/);
+    assert.equal(entry.visibility, undefined, "visibility leaked");
+    assert.equal(entry.discoverable, undefined, "discoverability leaked");
+    // A UTC offset says something about where somebody was rather than when.
+    assert.equal(entry.occurrenceOffsetMinutes, undefined, "the offset leaked");
+  });
+
+  it("counts what it cannot show", async () => {
+    // A bucket that left out the redacted ones would disagree with the pages
+    // beneath it, and somebody scrolling a decade would find Moments the count
+    // said were not there.
+    const author = await onboard();
+    const participant = await onboard();
+
+    await participatedIn(author.userId, participant.userId, 1960, { visibility: "private" });
+
+    const buckets = await app.inject({
+      method: "GET",
+      url: "/timeline/buckets?scale=decade",
+      headers: authed(participant.accessToken),
+    });
+
+    assert.deepEqual(
+      buckets.json().buckets.map((bucket: { startsAt: string; count: number }) => [
+        bucket.startsAt.slice(0, 4),
+        bucket.count,
+      ]),
+      [["1960", 1]],
+    );
+  });
+
+  it("shows a stranger only what the Moment itself would have shown them", async () => {
+    const author = await onboard();
+    const participant = await onboard();
+    const stranger = await onboard();
+
+    const open = await participatedIn(author.userId, participant.userId, 1970);
+    await participatedIn(author.userId, participant.userId, 1971, { visibility: "private" });
+
+    const page = await app.inject({
+      method: "GET",
+      url: `/users/${participant.userId}/timeline`,
+      headers: authed(stranger.accessToken),
+    });
+
+    assert.equal(page.statusCode, 200, page.body);
+    assert.deepEqual(
+      page.json().moments.map((moment: { momentId: string }) => moment.momentId),
+      [open],
+      "participation widened somebody else's audience",
+    );
+  });
+
+  it("never redacts on somebody else's Timeline", async () => {
+    // Redaction exists so a person's own history has no invisible hole. To
+    // anybody else a Moment they may not read is simply absent, because its
+    // existence is not theirs to know.
+    const author = await onboard();
+    const participant = await onboard();
+    const stranger = await onboard();
+
+    await participatedIn(author.userId, participant.userId, 1972, { visibility: "private" });
+
+    const page = await app.inject({
+      method: "GET",
+      url: `/users/${participant.userId}/timeline`,
+      headers: authed(stranger.accessToken),
+    });
+
+    assert.deepEqual(page.json().moments, []);
+  });
+
+  it("answers a Timeline turned off the same as one with nothing in it", async () => {
+    const author = await onboard();
+    const participant = await onboard();
+    const stranger = await onboard();
+
+    await participatedIn(author.userId, participant.userId, 1980);
+
+    const closed = await app.inject({
+      method: "PUT",
+      url: "/users/me/preferences",
+      headers: authed(participant.accessToken),
+      payload: { timelineIsPublic: false },
+    });
+
+    // Asserted, because a request that quietly did nothing would leave every
+    // assertion below passing for the wrong reason.
+    assert.equal(closed.statusCode, 200, closed.body);
+
+    const page = await app.inject({
+      method: "GET",
+      url: `/users/${participant.userId}/timeline`,
+      headers: authed(stranger.accessToken),
+    });
+    const buckets = await app.inject({
+      method: "GET",
+      url: `/users/${participant.userId}/timeline/buckets?scale=decade`,
+      headers: authed(stranger.accessToken),
+    });
+
+    assert.equal(page.statusCode, 200, page.body);
+    assert.deepEqual(page.json().moments, [], "a closed Timeline still handed history out");
+    // A count is a disclosure too: "four hundred Moments you may not see" is
+    // exactly what closing it withholds.
+    assert.deepEqual(buckets.json().buckets, [], "a closed Timeline still counted itself");
+  });
+
+  it("still shows somebody their own Timeline when they have closed it", async () => {
+    const author = await onboard();
+    const participant = await onboard();
+    const momentId = await participatedIn(author.userId, participant.userId, 1985);
+
+    const closed = await app.inject({
+      method: "PUT",
+      url: "/users/me/preferences",
+      headers: authed(participant.accessToken),
+      payload: { timelineIsPublic: false },
+    });
+
+    // Asserted, because a request that quietly did nothing would leave every
+    // assertion below passing for the wrong reason.
+    assert.equal(closed.statusCode, 200, closed.body);
+
+    for (const url of ["/timeline", `/users/${participant.userId}/timeline`]) {
+      const page = await app.inject({ method: "GET", url, headers: authed(participant.accessToken) });
+
+      assert.deepEqual(
+        page.json().moments.map((moment: { momentId: string }) => moment.momentId),
+        [momentId],
+        `${url} withheld their own history from them`,
+      );
+    }
   });
 
   it("refuses a scoped request with no session", async () => {

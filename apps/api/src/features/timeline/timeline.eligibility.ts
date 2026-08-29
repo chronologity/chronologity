@@ -50,11 +50,39 @@ export interface TimelineEligibility {
    * security-sensitive state denies.
    */
   readonly isAdult: boolean;
+  /**
+   * Whether this Viewer may open this scope at all.
+   *
+   * False only for a person's Timeline, and for reasons the per-row rule cannot
+   * express. That rule tests suspension and Blocks against a Moment's *author*,
+   * but a person's Timeline also carries Moments authored by other people that
+   * they merely took part in — so a suspended person's participations would go
+   * on being shown under their name, and blocking somebody would not hide
+   * theirs.
+   *
+   * A fact about the scope rather than about any row, resolved once here.
+   * Nobody's own Timeline is ever closed to them: a suspended person still
+   * navigates their own past, which is also what makes an appeal possible.
+   */
+  readonly scopeIsOpen: boolean;
 }
+
+/**
+ * The kinds of thing a Timeline can be read for.
+ *
+ * Declared once and imported wherever a scope is named, because it was written
+ * twice before this and the copies had already begun to be edited separately.
+ *
+ * A Location and a real-world Event belong to nobody: recording the first
+ * Moment at a place confers no authority over anybody else's history of it. A
+ * **person** does not belong to nobody, which is why their Timeline carries a
+ * check the other two have no need of.
+ */
+export type TimelineScopeType = "location" | "real_world_event" | "person";
 
 /** Which scope is being read. */
 export interface TimelineScopeRef {
-  readonly type: "location" | "real_world_event";
+  readonly type: TimelineScopeType;
   readonly id: string;
 }
 
@@ -90,7 +118,61 @@ export class TimelineEligibilityResolver {
       this.isAdult(viewerUserId),
     ]);
 
-    return { viewerUserId, blocked, audience, isAdult };
+    return {
+      viewerUserId,
+      blocked,
+      audience,
+      isAdult,
+      scopeIsOpen: await this.scopeIsOpen(viewerUserId, scope, blocked),
+    };
+  }
+
+  /**
+   * Whether this Viewer may open this scope at all.
+   *
+   * A Location and a real-world Event belong to nobody and are always open;
+   * what a Viewer sees in one is decided row by row. A person is different,
+   * because a person can be suspended and can be blocked, and neither fact is
+   * visible from a Moment they merely participated in.
+   *
+   * @param viewerUserId - Who is asking.
+   * @param scope - Which scope.
+   * @param blocked - Accounts separated from the Viewer, already resolved.
+   * @returns Whether to read at all. A closed scope answers empty rather than
+   *   refusing, because refusing would disclose that there is something there.
+   * @throws {Error} If the database refuses.
+   */
+  private async scopeIsOpen(
+    viewerUserId: string,
+    scope: TimelineScopeRef,
+    blocked: readonly string[],
+  ): Promise<boolean> {
+    if (scope.type !== "person" || scope.id === viewerUserId) {
+      return true;
+    }
+
+    if (blocked.includes(scope.id)) {
+      return false;
+    }
+
+    const rows: { open: boolean }[] = await this.dataSource.query(
+      // Three facts in one read, because all three close the same door and a
+      // round trip each would be three where one does.
+      //
+      // Suspension is worded to match every other reading of that column.
+      // The preference decides whether the chronological aggregate is offered
+      // at all; `COALESCE` because preferences are created with the account and
+      // its absence should read as the default rather than as closed.
+      `SELECT u.status <> 'suspended' AND COALESCE(p.timeline_is_public, true) AS open
+         FROM users u
+         LEFT JOIN user_preferences p ON p.user_id = u.user_id
+        WHERE u.user_id = $1`,
+      [scope.id],
+    );
+
+    // An account nobody can find reads as closed. There is nothing to show for
+    // it either way, and denying is the right direction to be wrong in.
+    return rows[0]?.open === true;
   }
 
   /**
@@ -122,14 +204,31 @@ export class TimelineEligibilityResolver {
     viewerUserId: string,
     scope: TimelineScopeRef,
   ): Promise<string[]> {
-    // Two shapes rather than one query with a branch, because the join differs.
-    // The predicate is identical, which is what matters: a rule written twice
-    // eventually disagrees with itself, and a join written twice does not.
+    // Three shapes rather than one query with a branch, because the join
+    // differs. The predicate is identical, which is what matters: a rule
+    // written twice eventually disagrees with itself, and a join written three
+    // times does not.
+    //
+    // The bound is weaker for a person than for a place. "Restricted Moments at
+    // this Location naming me" is bounded by somewhere; "restricted Moments I
+    // participated in naming me" is bounded by a relationship, and somebody who
+    // records restricted history and names the same person each time grows it
+    // without a ceiling. It fails in the safe direction — a Moment missing from
+    // this list is withheld rather than shown — but it is a bound worth
+    // watching rather than one to rely on.
     const membership =
       scope.type === "location"
         ? `JOIN moment_locations ml ON ml.moment_id = a.moment_id AND ml.location_id = $2`
-        : `JOIN moment_real_world_events mre ON mre.moment_id = a.moment_id
-             AND mre.real_world_event_id = $2`;
+        : scope.type === "real_world_event"
+          ? `JOIN moment_real_world_events mre ON mre.moment_id = a.moment_id
+               AND mre.real_world_event_id = $2`
+          : // A person's Timeline is what they authored together with what they
+            // agreed they were part of, so its membership is a union rather
+            // than a single join. Authored Moments need no audience row to be
+            // readable by their own author — the rule admits them first — so
+            // only the participated half can contribute anything here.
+            `JOIN moment_participations mp ON mp.moment_id = a.moment_id
+               AND mp.user_id = $2 AND mp.status = 'accepted'`;
 
     const rows: { moment_id: string }[] = await this.dataSource.query(
       `SELECT a.moment_id

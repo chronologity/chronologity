@@ -372,5 +372,112 @@ export function timelineRoutes(timeline: TimelineService) {
       }),
     );
 
+
+    const person = scopeDescriptions("person");
+    const personParams = z.object({ userId: identifierSchema });
+
+    /**
+     * A person's Timeline, as a scope.
+     *
+     * @param userId - Whose history.
+     * @returns The reference the service takes.
+     */
+    const ofPerson = (userId: string): TimelineScopeRef => ({ type: "person", id: userId });
+
+    const personNote = [
+      "**Their history is what they recorded together with what they agreed they were part of.** Somebody who was at an occasion but did not photograph it was still there, and a product where only the person holding the camera owns the memory would record who documented history rather than what happened.",
+      "",
+      "**You see only what you were already entitled to see.** Being on somebody's Timeline widens nothing: each Moment's own audience still decides, so this can never show you something you could not have opened one at a time.",
+      "",
+      "**A Timeline you may see nothing in answers empty rather than refusing** — as does one belonging to somebody who has turned theirs off, or blocked you, or been suspended. Refusing would itself say there is something here.",
+    ].join("\n");
+
+    app.get(
+      "/users/:userId/timeline",
+      {
+        schema: {
+          summary: "A person's history, in the order it happened",
+          description: [person.page, "", personNote].join("\n"),
+          params: personParams,
+          querystring: timelinePageRequestSchema,
+          response: { 200: timelinePageSchema, ...errors(400, 401) },
+        },
+        preHandler: requireUser,
+      },
+      async (request) =>
+        // Their own Timeline is read by the own path rather than this one.
+        // Otherwise a Moment they participated in but cannot read would be
+        // filtered out here while `/timeline` returns it redacted, and the two
+        // surfaces would disagree about the same person's history.
+        request.params.userId === request.user.userId
+          ? timeline.page(request.user.userId, request.query)
+          : timeline.scopedPage(request.user.userId, ofPerson(request.params.userId), request.query),
+    );
+
+    app.get(
+      "/users/:userId/timeline/head",
+      {
+        schema: {
+          summary: "Where a person's Timeline opens",
+          description: [person.head, "", personNote].join("\n"),
+          params: personParams,
+          response: { 200: timelineEntrySchema.nullable(), ...errors(400, 401) },
+        },
+        preHandler: requireUser,
+      },
+      async (request) =>
+        (request.params.userId === request.user.userId
+          ? await timeline.head(request.user.userId)
+          : await timeline.scopedHead(request.user.userId, ofPerson(request.params.userId))) ?? null,
+    );
+
+    app.get(
+      "/users/:userId/timeline/around",
+      {
+        schema: {
+          summary: "Jump to a moment in a person's history",
+          description: [person.around, "", personNote].join("\n"),
+          params: personParams,
+          querystring: timelineAroundRequestSchema,
+          response: { 200: timelineAroundSchema, ...errors(400, 401) },
+        },
+        preHandler: requireUser,
+      },
+      async (request) =>
+        request.params.userId === request.user.userId
+          ? timeline.around(request.user.userId, new Date(request.query.at), request.query.limit)
+          : timeline.scopedAround(
+              request.user.userId,
+              ofPerson(request.params.userId),
+              new Date(request.query.at),
+              request.query.limit,
+            ),
+    );
+
+    app.get(
+      "/users/:userId/timeline/buckets",
+      {
+        schema: {
+          summary: "How a person's history is distributed",
+          description: [person.buckets, "", personNote].join("\n"),
+          params: personParams,
+          querystring: timelineBucketsRequestSchema,
+          response: { 200: timelineBucketsSchema, ...errors(400, 401) },
+        },
+        preHandler: requireUser,
+      },
+      async (request) => ({
+        buckets: (
+          request.params.userId === request.user.userId
+            ? await timeline.buckets(request.user.userId, request.query.scale)
+            : await timeline.scopedBuckets(
+                request.user.userId,
+                ofPerson(request.params.userId),
+                request.query.scale,
+              )
+        ).map((bucket) => ({ startsAt: bucket.startsAt.toISOString(), count: bucket.count })),
+      }),
+    );
+
   };
 }

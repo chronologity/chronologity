@@ -437,6 +437,10 @@ describe("a Moment reaching the Timeline", () => {
       contexts.map((row) => [row.context_type, row.context_id]).sort(),
       [
         ["location", locationId],
+        // The author's own row. A Moment belongs on its author's Timeline as
+        // much as at the place it happened, and both are written as contexts so
+        // that reading either is one query rather than two.
+        ["person", author.userId],
         ["real_world_event", realWorldEventId],
       ].sort(),
     );
@@ -464,7 +468,9 @@ describe("a Moment reaching the Timeline", () => {
     await projector.project(momentId);
 
     assert.deepEqual(
-      (await contextsOf(momentId)).map((row) => row.context_id),
+      (await contextsOf(momentId))
+        .filter((row) => row.context_type === "location")
+        .map((row) => row.context_id),
       [second],
     );
   });
@@ -478,7 +484,8 @@ describe("a Moment reaching the Timeline", () => {
     const momentId = await recordWithin(author, { locationId });
 
     await projector.project(momentId);
-    assert.equal((await contextsOf(momentId)).length, 1);
+    // The Location and the author.
+    assert.equal((await contextsOf(momentId)).length, 2);
 
     await database.dataSource.query(
       `INSERT INTO moderation_states (subject_type, subject_id, state, reason, decided_at)
