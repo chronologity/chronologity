@@ -4252,3 +4252,37 @@ Pointing readers at a version is configuration and is not done here. A version b
 Run against a development database of 7,357 Moments, the first full rebuild reported `Projected 7178, removed 179, withheld 1, released 0` in twenty-six minutes. The `1` is the gap this ADR exists for, found in real data rather than a fixture: PostgreSQL held 193 suspended accounts and the projection knew of 192, so one account's history was being shown at every Location and occasion it appeared at, and nothing in the system said so. The `179` are Moments erased from PostgreSQL that correctly received no row — erasure surviving a rebuild, which is the property that makes rebuilding from authoritative state rather than from the log worth its cost.
 
 **The read of `users.status` lives in `TimelineSourceRepository` despite its own doc.** That class says it deliberately does not read the author's account status, and that remains true of every Moment row it builds: baking status into a row is precisely what the separate table avoids. Reading the suspended set as its own dimension is a different thing, and the doc now draws that line rather than being contradicted by a method beneath it.
+
+---
+
+# ADR-129 — Which Projection Version Is Read Is Configuration, and Erasure Ignores It
+
+## Status
+
+Accepted.
+
+## Context
+
+ADR-128 recorded the flow `deployment.md:809` prescribes for changing a projection: build a new version beside the live one, validate it, switch readers over, retire the old. It stopped at "validate". `TIMELINE_VERSION` was a constant with a constructor default, and the reader was built in `compose.ts` with no argument, so nothing could be pointed anywhere. The rebuild command took `--version` and could therefore *build* a second version that nothing was able to read.
+
+That was tolerable while the projection's shape was settled. It stopped being tolerable as soon as a change was needed that alters what a row means rather than what it contains — where the choice is between a cutover and every Timeline in the product going blank between deploying and finishing a rebuild that runs at 2.3 Moments a second.
+
+## Decision
+
+`TIMELINE_PROJECTION_VERSION` is an environment variable, defaulted to the current version so an operator with one version never names it, and read by the reader, the projector and the erasure worker alike. The rebuild command defaults to it, so `--version` now means "build a different one" rather than "restate the one in use".
+
+One value for reading and writing rather than two. A process reading one version while writing another would answer from history it was no longer maintaining, and the two could drift indefinitely with nothing failing.
+
+**Erasure ignores it entirely.** `remove`, `removeContexts`, `removeEverythingBy` and `removeContextsBy` were each scoped to `projection_version`, and each served two callers with opposite needs. They are now split. The projector keeps the version-scoped ones — a writer building a second version must not delete the live one's rows, which is the whole point of building it beside. Erasure calls `eraseMomentEverywhere`, `eraseContextsEverywhere`, `eraseEverythingByEverywhere` and `eraseContextsByEverywhere`, which name no version at all.
+
+## Alternatives Considered
+
+Leaving erasure version-scoped and requiring an operator to run it once per live version; and dual-writing every projection to both versions during a cutover.
+
+## Rationale
+
+**A projection version is not a copy that may lag. It is the same derived store built twice.** `privacy.md` requires erasure to reach a derived store rather than leave it to expire, and a version nobody happens to be pointed at is still that store. A Moment erased while two versions stood, removed from only the configured one, would return the moment readers were switched — and nothing anywhere would say so. The failure is silent, arrives later than the cause, and lands on exactly the person who asked to be forgotten.
+
+**The split is not a rename.** An integration test writes a Moment into a second projection version — what a half-finished cutover leaves behind — and asserts erasure reaches it. Pointing erasure back at the version-scoped removal fails it. CI would never have caught this otherwise, because CI has only ever had one version.
+
+**Dual-writing was rejected** as the more complex answer to a question the rebuild already answers. A rebuild into a fresh version reads authoritative state, so a second pass after the cutover picks up anything recorded during the window, and the deployment sequence is: build the new version, validate it, set the variable, deploy, run the rebuild once more to catch the gap. Idempotent throughout, and it needs no writer that understands two versions at once.
