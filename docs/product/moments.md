@@ -325,9 +325,11 @@ Editing descriptive text should not change occurrence time or move the Moment th
 
 A Moment may involve people other than the creator.
 
-Chronologity may eventually represent participants, people appearing in media, contributors, or other relationships between Users and Moments. These relationships require careful product and privacy design.
-
 Being depicted in a Moment, being tagged in a Moment, contributing to a Moment, and owning a Moment are not necessarily the same relationship and should not be collapsed into one generic association.
+
+Of those, Chronologity represents one: **participation**, meaning that a person was part of the experience. A creator proposes it and only the named person can establish it. `participation.md` is canonical for what it means, how consent works, and what it does to a Timeline.
+
+The others — depiction, contribution — remain unrepresented, each for a reason `participation.md` records rather than leaves to inference.
 
 ## Moment Creation
 
@@ -612,7 +614,6 @@ The following behaviors should remain open until deliberately designed rather th
 - What should happen when some media assets succeed during upload or processing and others fail?
 - How should extremely large Moments be presented without making Moment depth difficult to navigate?
 - How should historical corrections be presented to users?
-- How should participation, tagging, and consent work when other people appear in a Moment?
 - Can multiple users collaboratively contribute to the same Moment?
 - How should Moments participate in automatically derived location and event groupings?
 

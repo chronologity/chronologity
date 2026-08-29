@@ -54,6 +54,7 @@ docs/
 │   ├── vision.md
 │   ├── concepts.md
 │   ├── moments.md
+│   ├── participation.md
 │   ├── timelines.md
 │   ├── timeline.md
 │   ├── timeline-first-curation-and-discovery.md
@@ -149,6 +150,10 @@ It provides a common semantic foundation for more detailed product specification
 Defines Moment identity, occurrence semantics, media behavior, lifecycle, editing, historical integrity, and product invariants.
 
 A Moment represents an experience rather than a file or social-media post. A Moment may contain an unlimited number of images and videos at the product-model level, while each individual video has a maximum duration of 90 seconds.
+
+## `product/participation.md`
+
+What it means for somebody to be part of a Moment they did not record. Defines participation as the one relationship Chronologity represents between a person and another person's history, the propose-and-accept consent model, withdrawal, erasure, and what an accepted participation does to a Timeline. Canonical for a question `moments.md`, `identity.md` and `privacy.md` each deferred.
 
 ## `product/timelines.md`
 

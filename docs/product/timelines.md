@@ -173,6 +173,50 @@ Following never grants access. A follower hears about Moments they were already
 permitted to see, and `social-graph.md` is explicit that a Follow "must never
 bypass the visibility rules of individual Moments".
 
+## A Person's Timeline
+
+A person's Timeline is the history they **authored** together with the history
+they **participated in**.
+
+```text
+Moments they recorded
+        +
+Moments they accepted participation in
+        ▼
+   Their Timeline
+```
+
+This is what "accessible history" means above, and it is deliberately not "the
+Moments they created". Somebody who was at an occasion but did not photograph it
+was still there, and a model where only the person holding the camera owns the
+memory would make Chronologity a record of who documented history rather than of
+what happened.
+
+`participation.md` defines how somebody comes to be a participant, and the short
+answer is that only they can decide it: a creator proposes, and nothing exists
+until the named person accepts.
+
+### What Another Viewer Sees Of It
+
+A Moment reaches somebody else's reading of your Timeline only if that person
+could see the Moment anyway. The Moment's own audience still governs, and neither
+authorship nor participation widens it.
+
+```text
+On your Timeline          ──▶ you see it
+Visible to another Viewer ──▶ only if the Moment itself is
+```
+
+This follows from `privacy.md`, which forbids using a visible relationship to
+reveal an inaccessible Moment. A Timeline is a visible relationship. Were it
+otherwise, accepting a participation would publish somebody else's private
+Moment to your followers, and the person who chose that audience would not have
+agreed to it.
+
+It also means a Timeline is not one list with a filter applied afterwards.
+Nothing is assembled and then thinned: what a Viewer may see is part of what
+produces the Timeline, which the next section describes.
+
 ## Viewer-Specific Timelines
 
 Two viewers may see different chronological representations of what appears to be the same broader historical context because they have access to different Moments.

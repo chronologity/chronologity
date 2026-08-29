@@ -229,7 +229,7 @@ A creator may propose an association between a Moment and another User.
 
 The creator's assertion alone should not grant unlimited public visibility to that association. A tagged User should have meaningful control over whether their account identity is publicly associated with another User's Moment.
 
-The exact day-one consent workflow remains open, but the model should support the conceptual distinction between a proposed and accepted association.
+That control is now defined. Chronologity calls the relationship **participation** rather than tagging, because the word should describe a fact somebody confirms rather than an act performed on them, and a creator's proposal is visible to nobody but the two people in it until the named person accepts. `participation.md` is canonical.
 
 ### Tagging a Non-User Person
 
@@ -490,11 +490,6 @@ The following questions require deliberate resolution:
 - Can a User opt out of recommendations while remaining searchable?
 - What identity information appears beside comments and reactions?
 - What identity information appears in shared Event contexts?
-- What is the exact consent workflow when another User tags someone in a Moment?
-- Is a proposed tag visible to anyone before the tagged User accepts it?
-- Can a tagged User remove their association permanently?
-- Can the creator re-propose a declined tag?
-- Can a User block future tag requests from another User?
 - How are non-User people named within private personal history?
 - Can non-User Person representations ever be shared publicly?
 - Can multiple Users independently create representations of the same non-User person?

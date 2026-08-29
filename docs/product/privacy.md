@@ -309,7 +309,7 @@ That can reveal:
 
 Chronologity should therefore treat tagging as a privacy-sensitive action.
 
-The exact consent model remains an open product decision, but the architecture should not assume that one user's decision to identify another person is sufficient to make that association universally visible.
+The consent model is now decided, and it is stricter than "tag now, remove later". Chronologity calls the relationship **participation**: a creator proposes it, the proposal is visible to nobody but the two people in it, and it exists only when the named person accepts. Removal afterwards is not consent — a claim published and then retracted has already disclosed everything listed above. `participation.md` is canonical, including what an accepted participation does and does not do to a Timeline.
 
 ## Bystanders
 
@@ -989,8 +989,6 @@ The following questions should be resolved deliberately:
 - What location precision options should users have?
 - Should Chronologity retain exact coordinates when only a named place is displayed?
 - When should device or media location metadata be offered during Moment creation?
-- What is the consent model for tagging another user?
-- Can tagged users remove their identity association from another user's Moment?
 - Can users request removal or obscuring of themselves from media?
 - What privacy model applies to comments and reactions?
 - Can users see who viewed a Moment?
