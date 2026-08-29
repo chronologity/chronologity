@@ -115,6 +115,18 @@ function eligible(alias: string): string {
         OR has({audience: Array(String)}, ${alias}.moment_id)
       )
       AND (${alias}.moderation_state != 'age_restricted' OR {isAdult: UInt8} = 1)
+      -- Hidden from everybody but its author while it stands. The moderation
+      -- policy says so of this state and of removal; removal never reaches
+      -- ClickHouse, because a removed Moment is refused projection. This one
+      -- does reach it, which is what made its absence here a leak rather than a
+      -- redundancy: a public Moment taken down pending a decision went on being
+      -- shown to strangers at the place it happened.
+      --
+      -- Outside the visibility branch above rather than inside it. That branch
+      -- is satisfied either by being public or by naming the Viewer, so a rule
+      -- written inside it would withhold a public Moment and show a restricted
+      -- one to the very person it named.
+      AND ${alias}.moderation_state != 'temporarily_unavailable'
     )
   )`;
 }

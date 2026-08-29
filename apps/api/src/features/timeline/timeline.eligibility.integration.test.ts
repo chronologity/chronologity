@@ -115,6 +115,31 @@ describe("who may see a scope's history", () => {
     await place("blocked", { authorUserId: blockedAuthor }, 2006);
     await place("suspended", { authorUserId: suspendedAuthor }, 2007);
     await place("ownPrivate", { authorUserId: viewer, visibility: "private" }, 2008);
+    // Taken down pending a decision. Public, so nothing but the moderation
+    // state withholds it — which is exactly the case that was missing.
+    await place(
+      "temporarilyUnavailable",
+      { authorUserId: author, moderationState: "temporarily_unavailable" },
+      2009,
+    );
+    // The same state on a Moment naming the Viewer. Its own branch, because
+    // being named satisfies the visibility test on its own: a rule written
+    // inside that branch would withhold the public one and show this one.
+    await place(
+      "unavailableNamed",
+      {
+        authorUserId: author,
+        visibility: "restricted",
+        moderationState: "temporarily_unavailable",
+      },
+      2010,
+    );
+    // And one of the Viewer's own, so the rule can be shown to stop at them.
+    await place(
+      "ownUnavailable",
+      { authorUserId: viewer, moderationState: "temporarily_unavailable" },
+      2011,
+    );
 
     // A Block, in one direction only — the rule withholds in both.
     await database.dataSource.query(
@@ -124,8 +149,11 @@ describe("who may see a scope's history", () => {
 
     // Named in exactly one restricted Moment.
     await database.dataSource.query(
-      `INSERT INTO moment_audience (moment_id, user_id) VALUES ($1, $2)`,
-      [moments.restrictedNamed, viewer],
+      `INSERT INTO moment_audience (moment_id, user_id) VALUES ($1, $2), ($3, $2)`,
+      // The second names the Viewer in a Moment that is *also* taken down, so
+      // that withholding it proves the moderation state and not merely that
+      // they were left off the list.
+      [moments.restrictedNamed, viewer, moments.unavailableNamed],
     );
 
     await timeline.recordSuspension(suspendedAuthor, true, new Date());
@@ -167,6 +195,31 @@ describe("who may see a scope's history", () => {
     // whose author blocked this Viewer — the Block is against `viewer` rather
     // than this account, so it is visible here and withheld in the case below.
     assert.deepEqual(await visibleTo(stranger), ["blocked", "public"]);
+  });
+
+  it("withholds a Moment taken down pending a decision", async () => {
+    // `hidesFromOthers` says this state hides a Moment from everybody but its
+    // author, and until this test existed the Timeline did not: the state
+    // reaches ClickHouse — only `removed` is refused projection — and the
+    // eligibility rule tested every other state but this one. A public Moment
+    // taken down went on being shown at the place it happened.
+    const stranger = (await createUser(database.dataSource)).userId;
+
+    assert.equal((await visibleTo(viewer)).includes("temporarilyUnavailable"), false);
+    assert.equal((await visibleTo(stranger)).includes("temporarilyUnavailable"), false);
+  });
+
+  it("withholds it even from somebody named in it", async () => {
+    // The case a rule written inside the visibility branch would miss. Being
+    // named satisfies that branch on its own, so the check has to sit outside
+    // it or a restricted Moment would outlive a public one.
+    assert.equal((await visibleTo(viewer)).includes("unavailableNamed"), false);
+  });
+
+  it("still shows it to its own author", async () => {
+    // Somebody must be able to navigate their own past even where nobody else
+    // may — which is also what makes an appeal possible.
+    assert.equal((await visibleTo(viewer)).includes("ownUnavailable"), true);
   });
 
   it("withholds a private Moment from everybody but its author", async () => {
