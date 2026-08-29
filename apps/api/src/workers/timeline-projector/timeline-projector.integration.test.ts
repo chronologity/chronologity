@@ -4,7 +4,10 @@ import { afterAll, beforeAll, describe, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { TimelineProjector } from "../../features/timeline/timeline.projector.js";
 import { TimelineRepository } from "../../features/timeline/timeline.repository.js";
-import { rebuildTimeline } from "../../features/timeline/timeline.rebuild.js";
+import {
+  rebuildTimeline,
+  reconcileSuspensions,
+} from "../../features/timeline/timeline.rebuild.js";
 import { TimelineSourceRepository } from "../../features/timeline/timeline-source.repository.js";
 import { LocationRepository } from "../../features/locations/location.repository.js";
 import { ModerationRepository } from "../../features/moderation/moderation.repository.js";
@@ -29,6 +32,7 @@ import {
   createLocation,
   createReadyUpload,
   createRealWorldEvent,
+  createUser,
 } from "../../testing/fixtures.js";
 import { USERS_BOUNDARY } from "@chronologity/contracts";
 import { projectFromEvent, TIMELINE_PROJECTOR_BOUNDARIES } from "./project-timeline.js";
@@ -486,6 +490,98 @@ describe("a Moment reaching the Timeline", () => {
     await projector.project(momentId);
 
     assert.deepEqual(await contextsOf(momentId), []);
+  });
+
+
+  /**
+   * Somebody whose account is suspended in PostgreSQL.
+   *
+   * Written through the same column moderation writes — `users.status` — rather
+   * than through the HTTP route, because what is under test is a rebuild
+   * reading authoritative state, not how that state came to be.
+   */
+  const suspendedAccount = async (): Promise<string> => {
+    const { userId } = await createUser(database.dataSource);
+    suspensions.add(userId);
+
+    await database.dataSource.query("UPDATE users SET status = 'suspended' WHERE user_id = $1", [
+      userId,
+    ]);
+
+    return userId;
+  };
+
+  it("tells the projection about an account suspended while it was not listening", async () => {
+    // The gap 7C left: the dimension is filled only by live events, so anybody
+    // suspended before the projector existed stayed visible at every place they
+    // recorded.
+    const userId = await suspendedAccount();
+
+    assert.equal(await suspensionOf(userId), undefined, "nothing to reconcile");
+
+    await reconcileSuspensions(projector, sources, new Date());
+
+    assert.equal(await suspensionOf(userId), 1, "a suspended account is still shown");
+  });
+
+  it("releases an account the projection was still withholding", async () => {
+    // The other direction, and the one only-ever-adding would never fix: the
+    // decision to reinstate has already been taken, so no event is still coming
+    // to correct it.
+    const { userId } = await createUser(database.dataSource);
+    suspensions.add(userId);
+
+    await projector.recordStatus(userId, "suspended", new Date("2026-01-01T00:00:00.000Z"));
+    assert.equal(await suspensionOf(userId), 1);
+
+    await reconcileSuspensions(projector, sources, new Date());
+
+    assert.equal(await suspensionOf(userId), 0, "a reinstated account is still withheld");
+  });
+
+  it("changes nothing when the two already agree", async () => {
+    await suspendedAccount();
+    await reconcileSuspensions(projector, sources, new Date());
+
+    const second = await reconcileSuspensions(projector, sources, new Date());
+
+    assert.deepEqual(second, { suspended: 0, reinstated: 0 });
+  });
+
+  it("does not undo a reinstatement that arrived while it was walking", async () => {
+    // The race the timestamp exists for. A rebuild reads PostgreSQL, walks for
+    // a while, and writes — and what it read may have stopped being true in
+    // between. Stamping its rows with the moment it began means a decision
+    // taken during the walk carries a later time and wins; stamping them as
+    // they are written means the rebuild wins, and reimposes a suspension
+    // somebody has already lifted.
+    //
+    // Modelled with times well apart rather than milliseconds, so what decides
+    // the outcome is the ordering rule and not how long the test took to run.
+    const userId = await suspendedAccount();
+    const startedAt = new Date(Date.now() - 600_000);
+
+    await projector.recordStatus(userId, "active", new Date(Date.now() - 300_000));
+    assert.equal(await suspensionOf(userId), 0, "nothing to overturn");
+
+    await reconcileSuspensions(projector, sources, startedAt);
+
+    assert.equal(await suspensionOf(userId), 0, "a rebuild reimposed a lifted suspension");
+  });
+
+  it("leaves the suspension dimension alone on a scoped rebuild", async () => {
+    // A scoped rebuild repairs rows. An operator fixing one Moment should not
+    // have every account reconsidered underneath them.
+    const author = await onboard();
+    const momentId = await record(author);
+    await suspendedAccount();
+
+    const report = await rebuildTimeline(projector, sources, { only: [momentId] });
+
+    assert.deepEqual(
+      { suspended: report.suspended, reinstated: report.reinstated },
+      { suspended: 0, reinstated: 0 },
+    );
   });
 
   it("records a suspension as one row rather than reprojecting a history", async () => {

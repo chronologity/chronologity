@@ -149,6 +149,21 @@ export class TimelineProjector {
   }
 
   /**
+   * Which accounts the projection currently withholds.
+   *
+   * Read by a rebuild so it can reconcile in both directions rather than only
+   * add. Exposed here rather than reaching past the projector to the
+   * repository, so a rebuild goes through the same object the worker writes
+   * through and cannot drift from it.
+   *
+   * @returns The identifiers of accounts whose newest decision is a suspension.
+   * @throws {Error} If ClickHouse refuses.
+   */
+  async suspendedAuthors(): Promise<string[]> {
+    return this.timeline.suspendedAuthors();
+  }
+
+  /**
    * Whether a message has already been applied.
    *
    * @param eventId - The message's identifier.

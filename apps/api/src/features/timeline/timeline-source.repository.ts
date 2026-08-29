@@ -27,7 +27,7 @@ export interface TimelineSource {
  * resurrecting a stale one, and adding a column to the projection is a change
  * here rather than a new version of every event that could affect it.
  *
- * **What this deliberately does not read is the author's account status.**
+ * **No Timeline row this builds carries the author's account status.**
  * `search.eligibility.ts` establishes the shape: a projection carries what is
  * intrinsic to the thing — its occurrence, its visibility, whether moderation
  * permits it at all — and everything depending on who is asking, or on state
@@ -35,6 +35,11 @@ export interface TimelineSource {
  * Author suspension is the second kind. Baking it into the row would mean
  * reprojecting every Moment somebody ever recorded each time their account was
  * suspended or restored, and leaving the Timeline wrong in between.
+ *
+ * `everySuspendedAuthor` reads that status all the same, and does not
+ * contradict the above: it feeds the separate dimension the query joins, one
+ * row per suspended account rather than a field on every Moment. The rule is
+ * that status never enters a Moment's row, not that this file never asks.
  */
 export class TimelineSourceRepository {
   /**
@@ -107,6 +112,44 @@ export class TimelineSourceRepository {
       locationId: row.location_id ?? undefined,
       realWorldEventIds: row.real_world_event_ids ?? [],
     };
+  }
+
+  /**
+   * Every Moment that belongs on the Timeline, oldest first.
+   *
+   * For rebuilding. Ordered by occurrence so a partial rebuild fills history
+   * from its beginning rather than in whatever order the table returns.
+   *
+   * @param after - Resume from the Moment after this occurrence and identifier,
+   *   so a rebuild is resumable rather than restarting.
+   * @param limit - How many at most.
+   * @returns Identifiers, oldest first.
+   */
+  /**
+   * Every account whose history is currently withheld.
+   *
+   * Read by a full rebuild, which has to restore the suspension dimension
+   * alongside the Moments — a rebuild that put every Moment back and left this
+   * stale would return a projection showing history moderation had withheld.
+   *
+   * Unbounded on purpose, and safe to be: this is the count of suspended
+   * accounts rather than of Moments, and the whole reason the dimension exists
+   * as its own table is that the first number stays small while the second
+   * does not.
+   *
+   * @returns The identifiers, in no particular order.
+   * @throws {Error} If the database refuses.
+   */
+  async everySuspendedAuthor(): Promise<string[]> {
+    const rows: { user_id: string }[] = await this.dataSource.query(
+      // Suspension and nothing else, worded to match `moderationPermits` in
+      // `moment.repository.ts` and `isSuspended` in the moderation repository.
+      // A twin here that also caught `deactivated` would quietly change what
+      // deactivation means.
+      `SELECT user_id FROM users WHERE status = 'suspended'`,
+    );
+
+    return rows.map((row) => row.user_id);
   }
 
   /**

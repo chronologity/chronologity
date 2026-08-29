@@ -248,6 +248,31 @@ export class TimelineRepository {
   }
 
   /**
+   * Every account the projection currently withholds.
+   *
+   * Read by a rebuild so it can reconcile rather than overwrite: an account
+   * reinstated while the projection was down needs its row cleared, and one
+   * suspended then needs a row written. Without both halves a rebuild could
+   * only ever add.
+   *
+   * `final = 1` because a reinstatement is written as a newer row rather than
+   * as a delete — reading the parts unmerged would return an account as both
+   * suspended and not.
+   *
+   * @returns The identifiers of accounts whose newest decision is a suspension.
+   * @throws {Error} If ClickHouse refuses.
+   */
+  async suspendedAuthors(): Promise<string[]> {
+    const result = await this.client.query({
+      query: `SELECT user_id FROM timeline_suspended_authors
+               WHERE suspended = 1 SETTINGS final = 1`,
+      format: "JSONEachRow",
+    });
+
+    return (await result.json<{ user_id: string }>()).map((row) => row.user_id);
+  }
+
+  /**
    * Forget an account entirely.
    *
    * Used by erasure. A row saying somebody was suspended outlives the account

@@ -28,10 +28,21 @@ export interface TimelineRebuildReport {
   readonly projected: number;
   /** Moments the Timeline must not hold, whose rows were removed if present. */
   readonly removed: number;
+  /** Accounts the projection did not know were suspended, and now does. */
+  readonly suspended: number;
+  /** Accounts it was still withholding, whose suspension had been lifted. */
+  readonly reinstated: number;
 }
 
 export interface TimelineRebuildOptions {
-  /** Rebuild exactly these Moments rather than walking every one. */
+  /**
+   * Rebuild exactly these Moments rather than walking every one.
+   *
+   * A scoped rebuild repairs rows; it does not restore the projection, so it
+   * leaves the suspension dimension alone. Reconciling every account while
+   * fixing one Moment would be work nobody asked for, and a surprise in a
+   * command an operator reaches for when something is already wrong.
+   */
   readonly only?: readonly string[];
   /** Called after each page, so a long rebuild can be watched. */
   readonly onProgress?: (done: number) => void;
@@ -53,6 +64,13 @@ export async function rebuildTimeline(
   source: TimelineSourceRepository,
   options: TimelineRebuildOptions = {},
 ): Promise<TimelineRebuildReport> {
+  // Taken before anything is read, not after. The suspension rows are ordered
+  // by when the decision was taken and the newest wins, so a rebuild stamped at
+  // the end could beat a `UserStatusChanged` that arrived while it ran — and
+  // undo a reinstatement by restating what was true when it started. Stamped at
+  // the start, anything that happens during the rebuild is newer and wins.
+  const startedAt = new Date();
+
   let projected = 0;
   let removed = 0;
   let done = 0;
@@ -82,7 +100,7 @@ export async function rebuildTimeline(
       await apply(options.only.slice(index, index + PAGE));
     }
 
-    return { projected, removed };
+    return { projected, removed, suspended: 0, reinstated: 0 };
   }
 
   // Paged by the same tuple the Timeline is ordered by, so a rebuild resumes
@@ -94,7 +112,7 @@ export async function rebuildTimeline(
     const page = await source.everyMoment(after, PAGE);
 
     if (page.length === 0) {
-      return { projected, removed };
+      return { projected, removed, ...(await reconcileSuspensions(projector, source, startedAt)) };
     }
 
     await apply(page);
@@ -105,9 +123,64 @@ export async function rebuildTimeline(
       // Erased between being listed and being read. Ordinary rather than
       // exceptional, and there is nothing left to resume from — so the walk
       // stops rather than looping on a cursor it cannot advance.
-      return { projected, removed };
+      return { projected, removed, ...(await reconcileSuspensions(projector, source, startedAt)) };
     }
 
     after = { occurredAt: last.occurrenceStart, momentId: last.momentId };
   }
+}
+
+/**
+ * Put the projection's idea of who is suspended back in step with the database.
+ *
+ * Part of a rebuild rather than a command of its own, because
+ * `deployment.md:1292` requires a rebuild to preserve moderation and a rebuild
+ * that restored every Moment while leaving this stale would hand back a
+ * Timeline showing history somebody had withheld. A separable half is a half
+ * that gets skipped.
+ *
+ * Reconciles in both directions. Only ever adding would leave an account
+ * reinstated while the projection was down withheld for good, and there is no
+ * event still coming to correct it — the decision has already been taken.
+ *
+ * Bounded by the number of suspended accounts rather than of Moments, which is
+ * why the dimension is one row per account in the first place.
+ *
+ * Exported so it can be driven directly. Reaching it through a full rebuild
+ * would mean walking every Moment in the database to assert something about
+ * accounts, which is slow enough that the test would stop being run.
+ *
+ * @param projector - Writes the rows, the same one the worker uses.
+ * @param source - Reads who is suspended now.
+ * @param decidedAt - When the rebuild began, which orders its rows against any
+ *   decision taken while it ran. Deliberately not the time of writing.
+ * @returns How many accounts were newly withheld and how many released.
+ * @throws {Error} If either store refuses.
+ */
+export async function reconcileSuspensions(
+  projector: TimelineProjector,
+  source: TimelineSourceRepository,
+  decidedAt: Date,
+): Promise<{ suspended: number; reinstated: number }> {
+  const authoritative = new Set(await source.everySuspendedAuthor());
+  const projected = new Set(await projector.suspendedAuthors());
+
+  let suspended = 0;
+  let reinstated = 0;
+
+  for (const userId of authoritative) {
+    if (!projected.has(userId)) {
+      await projector.recordStatus(userId, "suspended", decidedAt);
+      suspended += 1;
+    }
+  }
+
+  for (const userId of projected) {
+    if (!authoritative.has(userId)) {
+      await projector.recordStatus(userId, "active", decidedAt);
+      reinstated += 1;
+    }
+  }
+
+  return { suspended, reinstated };
 }
