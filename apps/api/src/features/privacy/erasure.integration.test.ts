@@ -8,7 +8,11 @@ import { connectDatabase, createDatabase, type Database } from "../../lib/databa
 import { withTransaction } from "../../lib/database/transaction.js";
 import { createStorageClient } from "../../integrations/storage/storage-client.js";
 import type { StorageClient } from "../../integrations/storage/storage-client.js";
-import { createUser } from "../../testing/fixtures.js";
+import {
+  createLocation,
+  createRealWorldEvent,
+  createUser,
+} from "../../testing/fixtures.js";
 import { eraseDueRequests } from "../../workers/erasure/erase.js";
 import { LocationRepository } from "../locations/location.repository.js";
 import { ModerationRepository } from "../moderation/moderation.repository.js";
@@ -177,6 +181,10 @@ describe("erasure", () => {
       query: `DELETE FROM timeline_moments WHERE projection_version = {version: String}`,
       query_params: { version: timelineVersion },
     });
+    await analytics.client.command({
+      query: `DELETE FROM timeline_moment_contexts WHERE projection_version = {version: String}`,
+      query_params: { version: timelineVersion },
+    });
     await analytics.close();
     await database.close();
   });
@@ -219,6 +227,47 @@ describe("erasure", () => {
     } as never, testContext());
 
     return moment.momentId;
+  };
+
+  /** Record a Moment that belongs to a place, an occasion, or both. */
+  const recordWithin = async (
+    authorUserId: string,
+    uploadIds: readonly string[],
+    scopes: { locationId?: string; realWorldEventIds?: string[] },
+  ): Promise<string> => {
+    const moment = await moments.record(
+      authorUserId,
+      {
+        caption: "somewhere in particular",
+        occurrence,
+        occurrenceOffsetMinutes: 0,
+        uploadIds: [...uploadIds],
+        visibility: "public",
+        locationDisclosure: "exact",
+        ...scopes,
+      } as never,
+      testContext(),
+    );
+
+    return moment.momentId;
+  };
+
+  /**
+   * How many scopes the projection still says a Moment belonged to.
+   *
+   * Raw rows rather than merged ones. Erasure must leave none at all, and
+   * `final = 1` would hide a row a merge had not yet folded away.
+   */
+  const contextCount = async (momentId: string): Promise<number> => {
+    const result = await analytics.client.query({
+      query: `SELECT count() AS count FROM timeline_moment_contexts
+               WHERE moment_id = {momentId: String} AND projection_version = {version: String}`,
+      query_params: { momentId, version: timelineVersion },
+      format: "JSONEachRow",
+    });
+    const rows = await result.json<{ count: string }>();
+
+    return Number(rows[0]?.count ?? 0);
   };
 
   /** Run the worker until nothing is due, as the worker process itself does. */
@@ -576,6 +625,30 @@ describe("erasure", () => {
       await erase();
 
       assert.equal(await timeline.find(momentId), undefined, "the Timeline still holds it");
+    });
+
+    it("takes the Moment out of the places and occasions it happened at", async () => {
+      // A row saying "this Moment was here" outlives the Moment unless erasure
+      // reaches it, and it is a record that the Moment existed and roughly
+      // when — which is the thing erasure removes. It lives in a second table
+      // keyed by scope rather than by Moment, so removing the Timeline row does
+      // not remove it.
+      const author = await createUser(database.dataSource);
+      const locationId = await createLocation(database.dataSource, author.userId);
+      const realWorldEventId = await createRealWorldEvent(database.dataSource, author.userId);
+      const momentId = await recordWithin(
+        author.userId,
+        [await uploadWithObjects(author.userId)],
+        { locationId, realWorldEventIds: [realWorldEventId] },
+      );
+
+      await projector.project(momentId);
+      assert.equal(await contextCount(momentId), 2, "nothing to erase");
+
+      await moments.delete(momentId, author.userId, testContext());
+      await erase();
+
+      assert.equal(await contextCount(momentId), 0, "the places still say it happened");
     });
 
     it("resists a replay: rebuilding the Timeline afterwards restores nothing", async () => {

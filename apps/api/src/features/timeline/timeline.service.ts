@@ -1,4 +1,9 @@
 import type { TimelineEntry as ContractTimelineEntry } from "@chronologity/contracts";
+import type {
+  TimelineEligibility,
+  TimelineEligibilityResolver,
+  TimelineScopeRef,
+} from "./timeline.eligibility.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
 import { decodeCursor, encodeCursor, type TimelinePosition } from "./timeline.cursor.js";
 import type {
@@ -80,15 +85,26 @@ export interface TimelineAround {
 }
 
 /**
- * Navigating somebody's own history: pages, jumps, and how it is distributed.
+ * Navigating history: pages, jumps, and how it is distributed.
+ *
+ * Two families of method over one store. The unprefixed ones read your own
+ * history, where the author is the Viewer and nothing else needs deciding. The
+ * `scoped` ones read a Location's or a real-world Event's, written by many
+ * people, so they resolve who the Viewer is first and hand that to the query
+ * rather than filtering what comes back.
  */
 export class TimelineService {
   /**
    * Build the service.
    *
    * @param timeline - Where the rows are read from.
+   * @param eligibility - Resolves what a Viewer may see in a shared scope. Not
+   *   consulted for a Viewer's own history, which needs nothing from it.
    */
-  constructor(private readonly timeline: TimelineReadRepository) {}
+  constructor(
+    private readonly timeline: TimelineReadRepository,
+    private readonly eligibility: TimelineEligibilityResolver,
+  ) {}
 
   /**
    * A page of somebody's own history.
@@ -224,6 +240,149 @@ export class TimelineService {
     }
 
     return limit;
+  }
+
+  /**
+   * A page of a scope's history, as this Viewer may see it.
+   *
+   * The Viewer's context is resolved first, in PostgreSQL, and handed to the
+   * ClickHouse query as parameters — so eligibility filters inside the same
+   * statement that orders and pages. A page comes back full whenever enough
+   * eligible history remains, which is what stops its size disclosing what was
+   * withheld.
+   *
+   * @param viewerUserId - Who is asking.
+   * @param scope - Which Location or real-world Event.
+   * @param request - Where to resume, which way, and how many.
+   * @returns The page, and cursors for either direction.
+   * @throws {ValidationError} If the page size is out of bounds, or the cursor
+   *   is not one this system issued.
+   */
+  async scopedPage(
+    viewerUserId: string,
+    scope: TimelineScopeRef,
+    request: {
+      cursor?: string | undefined;
+      direction?: Direction | undefined;
+      limit?: number | undefined;
+    },
+  ): Promise<TimelinePage> {
+    const limit = this.pageSize(request.limit);
+    const direction = request.direction ?? "older";
+    const from = request.cursor === undefined ? undefined : decodeCursor(request.cursor);
+    const viewer = await this.eligibility.resolve(viewerUserId, scope);
+
+    return this.scopedPageFrom(scope, viewer, from, direction, limit);
+  }
+
+  /**
+   * Where a scope's Timeline opens for this Viewer.
+   *
+   * Their newest eligible occurrence rather than the scope's. A head naming a
+   * Moment they may not see would disclose that it exists, which is what the
+   * rule exists to prevent.
+   *
+   * @param viewerUserId - Who is asking.
+   * @param scope - Which Location or real-world Event.
+   * @returns The newest eligible Moment, or undefined when they may see none.
+   */
+  async scopedHead(
+    viewerUserId: string,
+    scope: TimelineScopeRef,
+  ): Promise<TimelineEntry | undefined> {
+    const viewer = await this.eligibility.resolve(viewerUserId, scope);
+    const record = await this.timeline.scopedHead(scope, viewer);
+
+    return record === undefined ? undefined : present(record);
+  }
+
+  /**
+   * Jump to a moment in time within a scope.
+   *
+   * @param viewerUserId - Who is asking.
+   * @param scope - Which Location or real-world Event.
+   * @param at - The instant asked for, which need not be one anything happened.
+   * @param limit - How many Moments either side.
+   * @returns Where it landed and the eligible history around it.
+   * @throws {ValidationError} If the page size is out of bounds.
+   */
+  async scopedAround(
+    viewerUserId: string,
+    scope: TimelineScopeRef,
+    at: Date,
+    limit?: number,
+  ): Promise<TimelineAround> {
+    const size = this.pageSize(limit);
+    // Resolved once and reused for both halves. Resolving twice could produce
+    // two different answers, and a jump whose halves disagreed about
+    // eligibility would be worse than one that was merely slow.
+    const viewer = await this.eligibility.resolve(viewerUserId, scope);
+    const nearest = await this.timeline.scopedNearest(scope, viewer, at);
+
+    if (nearest === undefined) {
+      return {
+        at: undefined,
+        older: { moments: [], cursor: undefined, reverseCursor: undefined },
+        newer: { moments: [], cursor: undefined, reverseCursor: undefined },
+      };
+    }
+
+    const position = positionOf(nearest);
+
+    return {
+      at: present(nearest),
+      older: await this.scopedPageFrom(scope, viewer, position, "older", size),
+      newer: await this.scopedPageFrom(scope, viewer, position, "newer", size),
+    };
+  }
+
+  /**
+   * How a scope's history is distributed, counting only what this Viewer sees.
+   *
+   * @param viewerUserId - Who is asking.
+   * @param scope - Which Location or real-world Event.
+   * @param scale - Year or decade.
+   * @returns One bucket per span holding anything eligible, oldest first.
+   */
+  async scopedBuckets(
+    viewerUserId: string,
+    scope: TimelineScopeRef,
+    scale: Scale,
+  ): Promise<readonly TimelineBucket[]> {
+    const viewer = await this.eligibility.resolve(viewerUserId, scope);
+
+    return this.timeline.scopedBuckets(scope, viewer, scale);
+  }
+
+  /**
+   * A scoped page from an already-resolved context.
+   *
+   * @param scope - Which Location or real-world Event.
+   * @param viewer - The already-resolved context.
+   * @param from - Where to resume, or undefined to start at the end the
+   *   direction implies.
+   * @param direction - Which way.
+   * @param limit - How many the caller asked for.
+   * @returns The page, with a cursor at each end.
+   */
+  private async scopedPageFrom(
+    scope: TimelineScopeRef,
+    viewer: TimelineEligibility,
+    from: TimelinePosition | undefined,
+    direction: Direction,
+    limit: number,
+  ): Promise<TimelinePage> {
+    const records = await this.timeline.scopedSlice(scope, viewer, from, direction, limit + 1);
+    const page = records.slice(0, limit);
+    const first = page[0];
+    const last = page[page.length - 1];
+
+    return {
+      moments: page.map(present),
+      cursor:
+        records.length > limit && last !== undefined ? encodeCursor(positionOf(last)) : undefined,
+      reverseCursor: first === undefined ? undefined : encodeCursor(positionOf(first)),
+    };
   }
 }
 

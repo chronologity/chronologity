@@ -25,7 +25,12 @@ import { buildApp } from "../../server/app.js";
 import { MAILPIT, testAppConfig } from "../../testing/app-config.js";
 import { createTestAuthentication, type TestAuthentication } from "../../testing/authentication.js";
 import { deliverThroughBroker } from "../../testing/broker.js";
-import { createReadyUpload } from "../../testing/fixtures.js";
+import {
+  createLocation,
+  createReadyUpload,
+  createRealWorldEvent,
+} from "../../testing/fixtures.js";
+import { USERS_BOUNDARY } from "@chronologity/contracts";
 import { projectFromEvent, TIMELINE_PROJECTOR_BOUNDARIES } from "./project-timeline.js";
 
 /**
@@ -61,6 +66,10 @@ describe("a Moment reaching the Timeline", () => {
   let timeline: TimelineRepository;
   let sources: TimelineSourceRepository;
   const version = `test-${randomUUID().slice(0, 8)}`;
+  // `timeline_suspended_authors` carries no projection version — a suspension
+  // is one row per account and the read joins it without one. So the accounts
+  // this suite writes are tracked and removed by hand.
+  const suspensions = new Set<string>();
 
   beforeAll(async () => {
     database = createDatabase(config.database);
@@ -107,6 +116,14 @@ describe("a Moment reaching the Timeline", () => {
     await analytics.client.command({
       query: `DELETE FROM timeline_moments WHERE projection_version = {version: String}`,
       query_params: { version },
+    });
+    await analytics.client.command({
+      query: `DELETE FROM timeline_moment_contexts WHERE projection_version = {version: String}`,
+      query_params: { version },
+    });
+    await analytics.client.command({
+      query: `DELETE FROM timeline_suspended_authors WHERE has({users: Array(String)}, user_id)`,
+      query_params: { users: [...suspensions] },
     });
     await app.close();
     await authentication.close();
@@ -192,6 +209,71 @@ describe("a Moment reaching the Timeline", () => {
     assert.equal(recorded.statusCode, 201, recorded.body);
 
     return recorded.json().momentId as string;
+  };
+
+  /**
+   * Record a Moment that belongs to a place, an occasion, or both.
+   *
+   * Separate from `record` because scope membership travels through the Moment
+   * payload, and the rows it produces live in a different table from the one
+   * every other test here reads.
+   */
+  const recordWithin = async (
+    author: { accessToken: string; userId: string },
+    scopes: { locationId?: string; realWorldEventIds?: string[] },
+  ) => {
+    const uploadId = await createReadyUpload(database.dataSource, author.userId);
+    const recorded = await app.inject({
+      method: "POST",
+      url: "/moments",
+      headers: authed(author.accessToken),
+      payload: {
+        caption: "Something that happened somewhere",
+        occurrence: summer1998,
+        occurrenceOffsetMinutes: 0,
+        uploadIds: [uploadId],
+        visibility: "public",
+        ...scopes,
+      },
+    });
+
+    assert.equal(recorded.statusCode, 201, recorded.body);
+
+    return recorded.json().momentId as string;
+  };
+
+  /** The scope rows the projection holds for a Moment, in a stable order. */
+  const contextsOf = async (momentId: string) => {
+    const result = await analytics.client.query({
+      query: `SELECT context_type, context_id, author_user_id, visibility, moderation_state
+                FROM timeline_moment_contexts
+               WHERE moment_id = {momentId: String} AND projection_version = {version: String}
+               ORDER BY context_type, context_id
+               SETTINGS final = 1`,
+      query_params: { momentId, version },
+      format: "JSONEachRow",
+    });
+
+    return result.json<{
+      context_type: string;
+      context_id: string;
+      author_user_id: string;
+      visibility: string;
+      moderation_state: string;
+    }>();
+  };
+
+  /** Whether the projection currently withholds an account's history. */
+  const suspensionOf = async (userId: string) => {
+    const result = await analytics.client.query({
+      query: `SELECT suspended FROM timeline_suspended_authors
+               WHERE user_id = {userId: String} SETTINGS final = 1`,
+      query_params: { userId },
+      format: "JSONEachRow",
+    });
+    const rows = await result.json<{ suspended: number }>();
+
+    return rows[0]?.suspended;
   };
 
   it("arrives through the broker the deployed worker subscribes to", async () => {
@@ -333,4 +415,122 @@ describe("a Moment reaching the Timeline", () => {
 
     assert.equal(found.length, 1);
   });
+
+  it("records which places and occasions a Moment belongs to", async () => {
+    const author = await onboard();
+    const locationId = await createLocation(database.dataSource, author.userId);
+    const realWorldEventId = await createRealWorldEvent(database.dataSource, author.userId);
+    const momentId = await recordWithin(author, {
+      locationId,
+      realWorldEventIds: [realWorldEventId],
+    });
+
+    await projector.project(momentId);
+
+    const contexts = await contextsOf(momentId);
+
+    assert.deepEqual(
+      contexts.map((row) => [row.context_type, row.context_id]).sort(),
+      [
+        ["location", locationId],
+        ["real_world_event", realWorldEventId],
+      ].sort(),
+    );
+    assert.ok(contexts.every((row) => row.author_user_id === author.userId));
+    assert.ok(contexts.every((row) => row.visibility === "public"));
+  });
+
+  it("does not leave a Moment at a place it has been moved from", async () => {
+    // The scope is part of the sort key, so a changed Location writes a new row
+    // rather than replacing the old one. Without the delete the Moment would
+    // appear at both places, and the place it left would still say it was
+    // there — which is a claim about somebody's history that is simply false.
+    const author = await onboard();
+    const first = await createLocation(database.dataSource, author.userId);
+    const second = await createLocation(database.dataSource, author.userId);
+    const momentId = await recordWithin(author, { locationId: first });
+
+    await projector.project(momentId);
+
+    await database.dataSource.query(
+      "UPDATE moment_locations SET location_id = $1 WHERE moment_id = $2",
+      [second, momentId],
+    );
+
+    await projector.project(momentId);
+
+    assert.deepEqual(
+      (await contextsOf(momentId)).map((row) => row.context_id),
+      [second],
+    );
+  });
+
+  it("takes a Moment out of its places when moderation removes it", async () => {
+    // A row saying a withheld Moment happened at a place is a record that it
+    // exists, along with roughly when. Removing the Moment without removing
+    // these would leave the disclosure the removal was for.
+    const author = await onboard();
+    const locationId = await createLocation(database.dataSource, author.userId);
+    const momentId = await recordWithin(author, { locationId });
+
+    await projector.project(momentId);
+    assert.equal((await contextsOf(momentId)).length, 1);
+
+    await database.dataSource.query(
+      `INSERT INTO moderation_states (subject_type, subject_id, state, reason, decided_at)
+       VALUES ('moment', $1, 'removed', 'projector integration test', now())
+       ON CONFLICT (subject_type, subject_id) DO UPDATE SET state = 'removed'`,
+      [momentId],
+    );
+
+    await projector.project(momentId);
+
+    assert.deepEqual(await contextsOf(momentId), []);
+  });
+
+  it("records a suspension as one row rather than reprojecting a history", async () => {
+    const userId = randomUUID();
+    suspensions.add(userId);
+
+    await projectFromEvent(projector, {
+      topic: USERS_BOUNDARY,
+      partition: 0,
+      offset: "0",
+      envelope: {
+        eventId: randomUUID(),
+        eventType: "UserStatusChanged",
+        eventVersion: 1,
+        occurredAt: "2026-01-01T00:00:00.000Z",
+        aggregate: { type: "user", id: userId, version: 1 },
+        payload: { userId, status: "suspended" },
+      },
+    });
+
+    assert.equal(await suspensionOf(userId), 1);
+  });
+
+  it("lets a reinstatement win over the suspension it lifted", async () => {
+    const userId = randomUUID();
+    suspensions.add(userId);
+
+    await projector.recordStatus(userId, "suspended", new Date("2026-01-01T00:00:00.000Z"));
+    await projector.recordStatus(userId, "active", new Date("2026-02-01T00:00:00.000Z"));
+
+    assert.equal(await suspensionOf(userId), 0, "a lifted suspension still withholds history");
+  });
+
+  it("ignores a suspension message that arrives after it was overtaken", async () => {
+    // At-least-once delivery reorders. A stale suspension redelivered after a
+    // reinstatement must not withhold a reinstated account's history, which is
+    // why the row carries when the decision was taken rather than when it
+    // arrived.
+    const userId = randomUUID();
+    suspensions.add(userId);
+
+    await projector.recordStatus(userId, "active", new Date("2026-02-01T00:00:00.000Z"));
+    await projector.recordStatus(userId, "suspended", new Date("2026-01-01T00:00:00.000Z"));
+
+    assert.equal(await suspensionOf(userId), 0, "a stale message resurrected a suspension");
+  });
+
 });

@@ -115,6 +115,28 @@ const EXEMPT: readonly Exemption[] = [
     because: "Shared reference data, deliberately readable by anybody signed in.",
   })),
 
+  // A shared scope's Timeline. The identifier names a place or an occasion,
+  // which belongs to nobody, and the authorization question is not whether the
+  // Viewer may read the scope but which of its Moments they may see — decided
+  // inside the query, per Viewer, and driven by the eligibility matrix. There
+  // is no IDOR here to attempt: substituting another Location's identifier
+  // returns that Location's history filtered for the same Viewer, which is what
+  // the endpoint is for.
+  ...[
+    "GET /locations/:locationId/timeline",
+    "GET /locations/:locationId/timeline/head",
+    "GET /locations/:locationId/timeline/around",
+    "GET /locations/:locationId/timeline/buckets",
+    "GET /real-world-events/:realWorldEventId/timeline",
+    "GET /real-world-events/:realWorldEventId/timeline/head",
+    "GET /real-world-events/:realWorldEventId/timeline/around",
+    "GET /real-world-events/:realWorldEventId/timeline/buckets",
+  ].map((route) => ({
+    route,
+    because:
+      "A shared scope read per Viewer; timeline.eligibility.integration.test.ts drives which Moments each may see.",
+  })),
+
   // Naming somebody else is the whole point. The authorization question on
   // these is a Block, and follow.integration.test.ts drives that.
   ...[

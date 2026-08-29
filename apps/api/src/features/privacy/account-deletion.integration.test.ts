@@ -174,6 +174,10 @@ describe("account deletion", () => {
       query: `DELETE FROM timeline_moments WHERE projection_version = {version: String}`,
       query_params: { version: timelineVersion },
     });
+    await analytics.client.command({
+      query: `DELETE FROM timeline_moment_contexts WHERE projection_version = {version: String}`,
+      query_params: { version: timelineVersion },
+    });
     await analytics.close();
     await app.close();
     await mail.close();
@@ -258,6 +262,37 @@ describe("account deletion", () => {
     } as never, testContext());
 
     return moment.momentId;
+  };
+
+  /** How many scopes the projection still says a Moment belonged to. */
+  const contextCount = async (momentId: string): Promise<number> => {
+    const result = await analytics.client.query({
+      query: `SELECT count() AS count FROM timeline_moment_contexts
+               WHERE moment_id = {momentId: String} AND projection_version = {version: String}`,
+      query_params: { momentId, version: timelineVersion },
+      format: "JSONEachRow",
+    });
+    const rows = await result.json<{ count: string }>();
+
+    return Number(rows[0]?.count ?? 0);
+  };
+
+  /**
+   * How many rows record moderation decisions about an account.
+   *
+   * Counted rather than read, because erasure must leave none — a row saying
+   * "reinstated" is still a record that there was something to reinstate.
+   */
+  const suspensionRows = async (userId: string): Promise<number> => {
+    const result = await analytics.client.query({
+      query: `SELECT count() AS count FROM timeline_suspended_authors
+               WHERE user_id = {userId: String}`,
+      query_params: { userId },
+      format: "JSONEachRow",
+    });
+    const rows = await result.json<{ count: string }>();
+
+    return Number(rows[0]?.count ?? 0);
   };
 
   /** Ask to delete, read the link, and confirm. */
@@ -674,6 +709,59 @@ describe("account deletion", () => {
       assert.deepEqual(
         states.map((row) => row.state),
         ["deleted"],
+      );
+    });
+
+    it("sweeps the Timeline of everything the account left, scopes included", async () => {
+      // The sweep behind the per-Moment path rather than a duplicate of it.
+      // Each Moment removes its own rows as it is erased; this catches what a
+      // pass that failed partway left behind, so it is written the way that
+      // failure leaves things — rows in ClickHouse with the account already on
+      // its way out of PostgreSQL.
+      const account = await onboard();
+      const momentId = randomUUID();
+      const locationId = randomUUID();
+
+      await timeline.project({
+        momentId,
+        authorUserId: account.userId,
+        occurredAt: new Date("1998-06-01T00:00:00.000Z"),
+        occurrenceEnd: new Date("1998-06-01T00:00:00.000Z"),
+        occurrencePrecision: "day",
+        occurrenceOffsetMinutes: 0,
+        visibility: "public",
+        moderationState: "allowed",
+        discoverable: true,
+      });
+      await timeline.projectContexts(
+        {
+          momentId,
+          authorUserId: account.userId,
+          occurredAt: new Date("1998-06-01T00:00:00.000Z"),
+          occurrenceEnd: new Date("1998-06-01T00:00:00.000Z"),
+          occurrencePrecision: "day",
+          occurrenceOffsetMinutes: 0,
+          visibility: "public",
+          moderationState: "allowed",
+          discoverable: true,
+        },
+        [{ type: "location", id: locationId }],
+      );
+      await timeline.recordSuspension(account.userId, true, new Date("2026-01-01T00:00:00.000Z"));
+
+      assert.notEqual(await timeline.find(momentId), undefined, "nothing to sweep");
+      assert.equal(await contextCount(momentId), 1, "nothing to sweep");
+      assert.equal(await suspensionRows(account.userId), 1, "nothing to sweep");
+
+      await deleteAccount(account);
+      await erase(account.userId);
+
+      assert.equal(await timeline.find(momentId), undefined, "the Timeline still holds it");
+      assert.equal(await contextCount(momentId), 0, "a place still says they were there");
+      assert.equal(
+        await suspensionRows(account.userId),
+        0,
+        "a moderation decision outlived the account it was about",
       );
     });
 

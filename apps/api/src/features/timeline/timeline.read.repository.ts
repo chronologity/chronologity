@@ -35,6 +35,46 @@ export interface TimelineBucket {
 }
 
 /**
+ * Fill a scope's chosen Moments back out into whole Timeline rows.
+ *
+ * `timeline_moment_contexts` is an index, not a record: it carries what
+ * eligibility and ordering need — when, whose, how visible — and nothing a
+ * Moment is presented with. Duplicating the presentation columns into it would
+ * mean two rows to keep in step and a correction that could land in one and not
+ * the other, so the scope query chooses and pages, and this joins back to
+ * `timeline_moments` for the rest.
+ *
+ * The join follows the limit rather than preceding it, so it touches only the
+ * rows being returned.
+ *
+ * @param chosen - A query over the contexts table selecting `moment_id` and
+ *   `occurred_at`, already filtered, ordered and limited.
+ * @param order - How to order the joined rows, since a join does not preserve
+ *   the subquery's order. Qualified with the `moment` alias.
+ * @returns The query to run.
+ */
+function withMoments(chosen: string, order: string): string {
+  // Columns named one by one rather than `moment.*`, which ClickHouse returns
+  // qualified — `moment.moment_id` — and every reader here expects bare names.
+  return `SELECT moment.occurred_at AS occurred_at,
+                 moment.moment_id AS moment_id,
+                 moment.author_user_id AS author_user_id,
+                 moment.projected_at AS projected_at,
+                 moment.occurrence_end AS occurrence_end,
+                 moment.occurrence_precision AS occurrence_precision,
+                 moment.occurrence_offset_minutes AS occurrence_offset_minutes,
+                 moment.visibility AS visibility,
+                 moment.moderation_state AS moderation_state,
+                 moment.discoverable AS discoverable,
+                 moment.projection_version AS projection_version
+            FROM (${chosen}) AS scoped
+           INNER JOIN timeline_moments AS moment
+              ON moment.moment_id = scoped.moment_id
+             AND moment.projection_version = {version: String}
+           ORDER BY ${order}`;
+}
+
+/**
  * The condition deciding what a Viewer may be shown in a scope.
  *
  * One fragment, used by every scoped read. `visibleToViewer` is one fragment
@@ -289,15 +329,21 @@ export class TimelineReadRepository {
           ? `AND (occurred_at, moment_id) < ({at: DateTime64(3)}, {momentId: String})`
           : `AND (occurred_at, moment_id) > ({at: DateTime64(3)}, {momentId: String})`;
 
+    const order = `occurred_at ${older ? "DESC" : "ASC"}, moment_id ${older ? "DESC" : "ASC"}`;
+
     const result = await this.client.query({
-      query: `SELECT * FROM timeline_moment_contexts
-               WHERE projection_version = {version: String}
-                 AND context_type = {contextType: String}
-                 AND context_id = {contextId: String}
-                 AND ${eligible("timeline_moment_contexts")}
-                 ${boundary}
-               ORDER BY occurred_at ${older ? "DESC" : "ASC"}, moment_id ${older ? "DESC" : "ASC"}
-               LIMIT {limit: UInt32}`,
+      query: withMoments(
+        `SELECT moment_id, occurred_at
+           FROM timeline_moment_contexts
+          WHERE projection_version = {version: String}
+            AND context_type = {contextType: String}
+            AND context_id = {contextId: String}
+            AND ${eligible("timeline_moment_contexts")}
+            ${boundary}
+          ORDER BY ${order}
+          LIMIT {limit: UInt32}`,
+        `moment.${older ? "occurred_at DESC" : "occurred_at ASC"}, moment.moment_id ${older ? "DESC" : "ASC"}`,
+      ),
       query_params: {
         version: this.version,
         contextType: scope.type,
@@ -349,15 +395,19 @@ export class TimelineReadRepository {
     at: Date,
   ): Promise<TimelineRecord | undefined> {
     const result = await this.client.query({
-      query: `SELECT * FROM timeline_moment_contexts
-               WHERE projection_version = {version: String}
-                 AND context_type = {contextType: String}
-                 AND context_id = {contextId: String}
-                 AND ${eligible("timeline_moment_contexts")}
-               ORDER BY abs(dateDiff('millisecond', occurred_at, {at: DateTime64(3)})) ASC,
-                        occurred_at ASC,
-                        moment_id ASC
-               LIMIT 1`,
+      query: withMoments(
+        `SELECT moment_id, occurred_at
+           FROM timeline_moment_contexts
+          WHERE projection_version = {version: String}
+            AND context_type = {contextType: String}
+            AND context_id = {contextId: String}
+            AND ${eligible("timeline_moment_contexts")}
+          ORDER BY abs(dateDiff('millisecond', occurred_at, {at: DateTime64(3)})) ASC,
+                   occurred_at ASC,
+                   moment_id ASC
+          LIMIT 1`,
+        "moment.occurred_at ASC, moment.moment_id ASC",
+      ),
       query_params: {
         version: this.version,
         contextType: scope.type,

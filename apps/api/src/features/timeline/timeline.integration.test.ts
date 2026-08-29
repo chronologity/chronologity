@@ -11,6 +11,8 @@ import { UserRepository } from "../users/user.repository.js";
 import { UserService } from "../users/user.service.js";
 import { migrateAnalytics } from "../../lib/clickhouse/migrations.js";
 import { MAILPIT, testAppConfig } from "../../testing/app-config.js";
+import { createLocation, createRealWorldEvent } from "../../testing/fixtures.js";
+import { TimelineEligibilityResolver } from "./timeline.eligibility.js";
 import { TimelineReadRepository } from "./timeline.read.repository.js";
 import { TimelineRepository } from "./timeline.repository.js";
 import { TimelineService } from "./timeline.service.js";
@@ -237,6 +239,7 @@ describe("the Timeline projection", () => {
 });
 
 describe("navigating your own history", () => {
+  let database: Database;
   let analytics: Analytics;
   let timeline: TimelineRepository;
   let service: TimelineService;
@@ -259,10 +262,20 @@ describe("navigating your own history", () => {
   ];
 
   beforeAll(async () => {
+    // Your own history never consults the resolver — every Moment here is
+    // yours, and the rule that lets you read it needs nothing from PostgreSQL.
+    // The connection exists so the service is built the way production builds
+    // it, rather than with a stand-in that could drift.
+    database = createDatabase(config.database);
+    await connectDatabase(database);
+
     analytics = createAnalytics(config.clickhouse);
     await migrateAnalytics(analytics.client);
     timeline = new TimelineRepository(analytics.client, version);
-    service = new TimelineService(new TimelineReadRepository(analytics.client, version));
+    service = new TimelineService(
+      new TimelineReadRepository(analytics.client, version),
+      new TimelineEligibilityResolver(database.dataSource),
+    );
 
     for (const entry of history) {
       await timeline.project({
@@ -301,6 +314,7 @@ describe("navigating your own history", () => {
       query_params: { version },
     });
     await analytics.close();
+    await database.close();
   });
 
   const idsOf = (page: { moments: readonly { momentId: string }[] }) =>
@@ -463,13 +477,20 @@ describe("the Timeline over HTTP", () => {
       users: new UserService(database.dataSource, new UserRepository(database.dataSource), {
         minimumAgeYears: config.minimumAgeYears,
       }),
-      timeline: new TimelineService(new TimelineReadRepository(analytics.client, version)),
+      timeline: new TimelineService(
+        new TimelineReadRepository(analytics.client, version),
+        new TimelineEligibilityResolver(database.dataSource),
+      ),
     });
   });
 
   afterAll(async () => {
     await analytics.client.command({
       query: `DELETE FROM timeline_moments WHERE projection_version = {version: String}`,
+      query_params: { version },
+    });
+    await analytics.client.command({
+      query: `DELETE FROM timeline_moment_contexts WHERE projection_version = {version: String}`,
       query_params: { version },
     });
     await app.close();
@@ -658,6 +679,275 @@ describe("the Timeline over HTTP", () => {
 
     // A refusal, not a five hundred and not somebody else's history.
     assert.equal(forged.statusCode, 400, forged.body);
+  });
+
+  /**
+   * Put a Moment at a place and, optionally, an occasion.
+   *
+   * Written to both stores. The projection is what the Timeline reads, and
+   * PostgreSQL is what eligibility reads — a fixture in one only would make
+   * every rule here pass for the wrong reason.
+   */
+  const placeAt = async (
+    scopes: { locationId?: string; realWorldEventId?: string },
+    author: string,
+    year: number,
+    over: Partial<TimelineRow> = {},
+  ): Promise<string> => {
+    const momentId = randomUUID();
+    const row: TimelineRow = {
+      momentId,
+      authorUserId: author,
+      occurredAt: new Date(`${year}-06-01T00:00:00.000Z`),
+      occurrenceEnd: new Date(`${year}-06-01T00:00:00.000Z`),
+      occurrencePrecision: "day",
+      occurrenceOffsetMinutes: 0,
+      visibility: "public",
+      moderationState: "allowed",
+      discoverable: true,
+      ...over,
+    };
+
+    await database.dataSource.query(
+      `INSERT INTO moments (moment_id, author_user_id, caption, occurrence_start,
+                            occurrence_end, occurrence_precision, occurrence_offset_minutes,
+                            visibility, discoverable, created_at, updated_at)
+       VALUES ($1, $2, 'fixture', $3, $3, 'day', 0, $4, true, now(), now())`,
+      [momentId, row.authorUserId, row.occurredAt, row.visibility],
+    );
+
+    if (scopes.locationId !== undefined) {
+      await database.dataSource.query(
+        `INSERT INTO moment_locations (moment_id, location_id) VALUES ($1, $2)`,
+        [momentId, scopes.locationId],
+      );
+    }
+
+    if (scopes.realWorldEventId !== undefined) {
+      await database.dataSource.query(
+        `INSERT INTO moment_real_world_events (moment_id, real_world_event_id) VALUES ($1, $2)`,
+        [momentId, scopes.realWorldEventId],
+      );
+    }
+
+    await timeline.project(row);
+    await timeline.projectContexts(row, [
+      ...(scopes.locationId === undefined
+        ? []
+        : [{ type: "location" as const, id: scopes.locationId }]),
+      ...(scopes.realWorldEventId === undefined
+        ? []
+        : [{ type: "real_world_event" as const, id: scopes.realWorldEventId }]),
+    ]);
+
+    return momentId;
+  };
+
+  const idsIn = (body: { moments: { momentId: string }[] }) =>
+    body.moments.map((moment) => moment.momentId);
+
+  it("shows a place's history to somebody who was never there", async () => {
+    const author = await onboard();
+    const stranger = await onboard();
+    const locationId = await createLocation(database.dataSource, author.userId);
+    const momentId = await placeAt({ locationId }, author.userId, 1999);
+
+    const page = await app.inject({
+      method: "GET",
+      url: `/locations/${locationId}/timeline`,
+      headers: authed(stranger.accessToken),
+    });
+
+    assert.equal(page.statusCode, 200, page.body);
+    assert.deepEqual(idsIn(page.json()), [momentId]);
+  });
+
+  it("shows the same place differently to two people", async () => {
+    // The point of the whole sub-phase, over HTTP: eligibility is applied
+    // inside the query, so what comes back differs by who asked and neither
+    // page carries a trace of what the other saw.
+    const author = await onboard();
+    const stranger = await onboard();
+    const locationId = await createLocation(database.dataSource, author.userId);
+    const open = await placeAt({ locationId }, author.userId, 1990);
+    const closed = await placeAt({ locationId }, author.userId, 1991, { visibility: "private" });
+
+    const theirs = await app.inject({
+      method: "GET",
+      url: `/locations/${locationId}/timeline`,
+      headers: authed(author.accessToken),
+    });
+    const others = await app.inject({
+      method: "GET",
+      url: `/locations/${locationId}/timeline`,
+      headers: authed(stranger.accessToken),
+    });
+
+    assert.deepEqual(idsIn(theirs.json()).sort(), [open, closed].sort());
+    assert.deepEqual(idsIn(others.json()), [open]);
+  });
+
+  it("counts a place's history the same way it pages it", async () => {
+    // A count that disagreed with the page would advertise what the page
+    // withheld: twelve in a bucket where four can be opened says eight exist.
+    const author = await onboard();
+    const stranger = await onboard();
+    const locationId = await createLocation(database.dataSource, author.userId);
+
+    await placeAt({ locationId }, author.userId, 1980);
+    await placeAt({ locationId }, author.userId, 1981, { visibility: "private" });
+
+    const buckets = await app.inject({
+      method: "GET",
+      url: `/locations/${locationId}/timeline/buckets?scale=decade`,
+      headers: authed(stranger.accessToken),
+    });
+
+    assert.equal(buckets.statusCode, 200, buckets.body);
+    assert.deepEqual(
+      buckets.json().buckets.map((bucket: { startsAt: string; count: number }) => [
+        bucket.startsAt.slice(0, 4),
+        bucket.count,
+      ]),
+      [["1980", 1]],
+    );
+  });
+
+  it("opens a place's Timeline at the newest Moment the Viewer may see", async () => {
+    // Not the newest Moment there. A head naming something they cannot open
+    // would disclose that it exists, and roughly when.
+    const author = await onboard();
+    const stranger = await onboard();
+    const locationId = await createLocation(database.dataSource, author.userId);
+
+    await placeAt({ locationId }, author.userId, 1970);
+    await placeAt({ locationId }, author.userId, 2010, { visibility: "private" });
+
+    const head = await app.inject({
+      method: "GET",
+      url: `/locations/${locationId}/timeline/head`,
+      headers: authed(stranger.accessToken),
+    });
+
+    assert.equal(head.statusCode, 200, head.body);
+    assert.match(head.json().occurredAt, /^1970-06-01/);
+  });
+
+  it("lands a jump on something the Viewer may open", async () => {
+    const author = await onboard();
+    const stranger = await onboard();
+    const locationId = await createLocation(database.dataSource, author.userId);
+
+    const open = await placeAt({ locationId }, author.userId, 1960);
+    await placeAt({ locationId }, author.userId, 1975, { visibility: "private" });
+
+    const around = await app.inject({
+      method: "GET",
+      url: `/locations/${locationId}/timeline/around?at=1976-01-01T00:00:00.000Z`,
+      headers: authed(stranger.accessToken),
+    });
+
+    assert.equal(around.statusCode, 200, around.body);
+    assert.equal(around.json().at.momentId, open, "a jump landed on a withheld Moment");
+  });
+
+  it("answers a place a Viewer may see nothing in, rather than refusing", async () => {
+    // Refusing would itself say there is something there. An empty Timeline is
+    // indistinguishable from a place nothing was ever recorded at, which is the
+    // point.
+    const author = await onboard();
+    const stranger = await onboard();
+    const locationId = await createLocation(database.dataSource, author.userId);
+
+    await placeAt({ locationId }, author.userId, 1995, { visibility: "private" });
+
+    const page = await app.inject({
+      method: "GET",
+      url: `/locations/${locationId}/timeline`,
+      headers: authed(stranger.accessToken),
+    });
+    const head = await app.inject({
+      method: "GET",
+      url: `/locations/${locationId}/timeline/head`,
+      headers: authed(stranger.accessToken),
+    });
+
+    assert.equal(page.statusCode, 200, page.body);
+    assert.deepEqual(page.json().moments, []);
+    assert.equal(head.statusCode, 200);
+    assert.equal(head.json(), null);
+  });
+
+  it("answers a place that does not exist the same way as an empty one", async () => {
+    // A Location nobody has recorded and one a Viewer may see nothing in must
+    // be indistinguishable, or existence itself becomes readable.
+    const stranger = await onboard();
+
+    const page = await app.inject({
+      method: "GET",
+      url: `/locations/${randomUUID()}/timeline`,
+      headers: authed(stranger.accessToken),
+    });
+
+    assert.equal(page.statusCode, 200, page.body);
+    assert.deepEqual(page.json().moments, []);
+  });
+
+  it("navigates a real-world Event's history the same way", async () => {
+    const author = await onboard();
+    const stranger = await onboard();
+    const realWorldEventId = await createRealWorldEvent(database.dataSource, author.userId);
+
+    const open = await placeAt({ realWorldEventId }, author.userId, 1985);
+    await placeAt({ realWorldEventId }, author.userId, 1986, { visibility: "private" });
+
+    const page = await app.inject({
+      method: "GET",
+      url: `/real-world-events/${realWorldEventId}/timeline`,
+      headers: authed(stranger.accessToken),
+    });
+
+    assert.equal(page.statusCode, 200, page.body);
+    assert.deepEqual(idsIn(page.json()), [open]);
+  });
+
+  it("keeps a place's Moments out of an Event's Timeline", async () => {
+    // The scope is part of the sort key rather than a filter applied after, so
+    // this is the test that the key is being used the way it is written.
+    const author = await onboard();
+    const locationId = await createLocation(database.dataSource, author.userId);
+    const realWorldEventId = await createRealWorldEvent(database.dataSource, author.userId);
+
+    await placeAt({ locationId }, author.userId, 1940);
+
+    const page = await app.inject({
+      method: "GET",
+      url: `/real-world-events/${realWorldEventId}/timeline`,
+      headers: authed(author.accessToken),
+    });
+
+    assert.deepEqual(page.json().moments, []);
+  });
+
+  it("refuses a scoped request with no session", async () => {
+    const response = await app.inject({
+      method: "GET",
+      url: `/locations/${randomUUID()}/timeline`,
+    });
+
+    assert.equal(response.statusCode, 401);
+  });
+
+  it("refuses a scope identifier that is not one", async () => {
+    const stranger = await onboard();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/locations/not-an-identifier/timeline",
+      headers: authed(stranger.accessToken),
+    });
+
+    assert.equal(response.statusCode, 400, response.body);
   });
 
   it("refuses a page larger than the ceiling", async () => {
