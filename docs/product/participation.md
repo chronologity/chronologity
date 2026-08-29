@@ -78,14 +78,14 @@ viewer          ✓  already the audience
 Adding another relationship later is an addition. Collapsing two of them
 together is not reversible, because the record no longer says which was meant.
 
-## Proposing, Accepting, Declining
+## Proposing, Accepting, Rejecting
 
 A creator **proposes** participation. Only the person named can establish it.
 
 ```text
 proposed ──accept──▶ accepted
     │
-    └────decline───▶ declined
+    └────reject────▶ rejected
 ```
 
 `identity.md` requires that the model "support the conceptual distinction between
@@ -112,10 +112,11 @@ A participant may withdraw at any time, and withdrawal ends the matter for that
 Moment: the creator may not propose again.
 
 A refusal that can be repeated is not a refusal, it is a delay. Somebody who
-declines and is asked again each week has no control, only a recurring task.
+rejects a proposal and is asked again each week has no control, only a
+recurring task.
 
 ```text
-declined  ──▶  cannot be proposed again
+rejected  ──▶  cannot be proposed again
 withdrawn ──▶  cannot be proposed again
 ```
 
@@ -250,7 +251,7 @@ participation count would be engagement wearing a different name.
    they may see it.
 2. Only the person named may establish their own participation.
 3. A proposal is visible to the creator and the named person, and to nobody else.
-4. A declined or withdrawn participation cannot be proposed again for that
+4. A rejected or withdrawn participation cannot be proposed again for that
    Moment.
 5. Participation never widens a Moment's audience.
 6. Accepting participation never grants access to a Moment.
@@ -262,17 +263,59 @@ participation count would be engagement wearing a different name.
 11. Participant, depicted person, contributor, creator and viewer remain distinct
     concepts, and one is not evidence of another.
 
-## Open Questions
+## What Was Left Open, and How It Was Settled
 
-- Should a participant be able to add a note to their participation — "I took
-  this photograph", "I was there for the first half" — or is the relationship
-  binary?
-- Should a creator see that a proposal was declined, or only that it was not
-  accepted? Declining is information about the person declining.
-- May a participant propose that somebody else participated, or only the
-  creator?
-- Should participation be limited in number per Moment, as the audience is?
-- What should a participant see of a Moment they cannot read — the occurrence
-  time alone, or also who else accepted?
-- Should accepting participation in a Moment that is later made private remove
-  it from the participant's Timeline, or leave it visible to them alone?
+**Participation is binary.** No note, no "I took this photograph", no "I was
+there for the first half". A note is a second thing to consent to, written by
+the person it describes but read in a context the creator controls, and the
+relationship it qualifies is already the smallest claim the product can make.
+
+**Only the creator proposes.** A participant may not name somebody else. One
+authority per Moment, and no chains of assertion nobody authored.
+
+**The creator sees a rejection as a rejection**, not as an absence of an answer.
+Silence and refusal are different facts, and a creator who cannot tell them
+apart will ask again outside the product — which is the conversation this model
+deliberately does not carry.
+
+**A Moment holds at most one hundred participations**, counting proposals and
+acceptances together, so that a pending proposal reserves its place. Not a
+performance limit. A proposal is an unsolicited assertion about a person
+delivered to that person, and uncapped, one Moment reaches everybody. The number
+matches the audience's, which is a different kind of limit — a bound on one
+request rather than a running total — but there is no reason for the two to
+differ and a second number would only invite the question of why.
+
+**A participant sees a Moment they cannot read as its occurrence time and
+nothing else**, exactly as the proposal showed it, and no more on acceptance
+than before it. Not who else accepted: naming them would disclose their
+participation to somebody who cannot read the Moment binding them, and they
+consented to being in the creator's Moment rather than to being disclosed to
+each other. Accepting grants no access, and a rule that revealed something on
+acceptance would be true in letter only.
+
+**That holds however the Moment came to be unreadable.** A Moment made private
+after acceptance stays on the participant's Timeline, visible to them alone as a
+date. The participant cannot tell that case apart from one that was private all
+along, and two situations indistinguishable from the inside should not behave
+differently.
+
+**An accepted participation is visible to whoever may read the Moment.** The
+restriction in invariant 3 is on proposals, which are a question between two
+people. An acceptance is the record this whole document exists to keep.
+
+Three further decisions, taken when the relationship was built:
+
+**A creator may cancel a proposal nobody has answered, and cancelling leaves
+nothing behind.** A retracted question is not a refusal, so it does not spend
+the one chance the creator gets; and a record of a question nobody answered and
+the asker took back is a record of the association, which invariant 8 forbids.
+
+**A creator may not remove a participation somebody accepted.** That record
+belongs to the participant. The creator's recourse is to delete the Moment.
+
+**Blocking somebody rejects their unanswered proposals, permanently.** A block
+is a refusal and a stronger one than a rejection. Unblocking restores nothing,
+as it already restores no severed reaction — so even a brief block forecloses
+those Moments for good. That is the named person's prerogative, and it is
+written down here because it would otherwise be discovered.
