@@ -97,7 +97,7 @@ async function main(): Promise<void> {
       uploads,
       documents: new SearchRepository(database.dataSource),
       indexVersion: INDEX_VERSION,
-      timeline: new TimelineRepository(analytics.client),
+      timeline: new TimelineRepository(analytics.client, config.clickhouse.projectionVersion),
       batchSize: BATCH_SIZE,
     });
 

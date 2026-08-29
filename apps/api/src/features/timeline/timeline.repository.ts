@@ -63,11 +63,16 @@ export class TimelineRepository {
   }
 
   /**
-   * Take a Moment off the Timeline.
+   * Take a Moment out of *this* projection version.
    *
-   * Used by projection to make room for a corrected row, and by erasure to make
-   * a Moment gone. `privacy.md` requires that derived stores be reachable by
-   * erasure rather than left to expire, and this is how this one is reached.
+   * For projection, making room for a corrected row. Deliberately scoped to the
+   * version this instance carries: while a second version is being built beside
+   * the live one, a writer that deleted across both would destroy the very
+   * thing the cutover exists to preserve.
+   *
+   * **Not the erasure path.** Erasure calls `eraseMomentEverywhere`, which
+   * spans versions, because personal history left standing in a version nobody
+   * happens to be pointed at is personal history left standing.
    *
    * @param momentId - Which Moment.
    * @returns Nothing.
@@ -91,6 +96,69 @@ export class TimelineRepository {
     await this.client.command({
       query: `DELETE FROM timeline_moments WHERE author_user_id = {authorUserId: String} AND projection_version = {version: String}`,
       query_params: { authorUserId, version: this.version },
+    });
+  }
+
+  /**
+   * Erase a Moment from every projection version.
+   *
+   * Unscoped on purpose, and the difference from `remove` is the whole point.
+   * A projection version is not a copy that may lag; it is the same derived
+   * store built twice, and `privacy.md` requires erasure to reach a derived
+   * store rather than leave it to expire. A Moment erased while two versions
+   * stood, removed from only the configured one, would come back the moment
+   * readers were pointed at the other — and nothing would ever say so.
+   *
+   * @param momentId - Which Moment.
+   * @returns Nothing.
+   * @throws {Error} If ClickHouse refuses.
+   */
+  async eraseMomentEverywhere(momentId: string): Promise<void> {
+    await this.client.command({
+      query: `DELETE FROM timeline_moments WHERE moment_id = {momentId: String}`,
+      query_params: { momentId },
+    });
+  }
+
+  /**
+   * Erase everything an account contributed, from every projection version.
+   *
+   * @param authorUserId - Whose history.
+   * @returns Nothing.
+   * @throws {Error} If ClickHouse refuses.
+   */
+  async eraseEverythingByEverywhere(authorUserId: string): Promise<void> {
+    await this.client.command({
+      query: `DELETE FROM timeline_moments WHERE author_user_id = {authorUserId: String}`,
+      query_params: { authorUserId },
+    });
+  }
+
+  /**
+   * Erase a Moment's scope memberships, from every projection version.
+   *
+   * @param momentId - Which Moment.
+   * @returns Nothing.
+   * @throws {Error} If ClickHouse refuses.
+   */
+  async eraseContextsEverywhere(momentId: string): Promise<void> {
+    await this.client.command({
+      query: `DELETE FROM timeline_moment_contexts WHERE moment_id = {momentId: String}`,
+      query_params: { momentId },
+    });
+  }
+
+  /**
+   * Erase an account's scope memberships, from every projection version.
+   *
+   * @param authorUserId - Whose history.
+   * @returns Nothing.
+   * @throws {Error} If ClickHouse refuses.
+   */
+  async eraseContextsByEverywhere(authorUserId: string): Promise<void> {
+    await this.client.command({
+      query: `DELETE FROM timeline_moment_contexts WHERE author_user_id = {authorUserId: String}`,
+      query_params: { authorUserId },
     });
   }
 

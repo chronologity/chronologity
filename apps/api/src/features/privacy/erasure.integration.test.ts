@@ -628,6 +628,52 @@ describe("erasure", () => {
       assert.equal(await timeline.find(momentId), undefined, "the Timeline still holds it");
     });
 
+    it("erases it from a projection version nobody is pointed at", async () => {
+      // The hole that being able to configure a version would otherwise open.
+      // A cutover means two versions of the same derived store standing at
+      // once; erasure scoped to the configured one would leave the Moment in
+      // the other, and it would come back the moment readers were switched —
+      // with nothing anywhere saying so.
+      //
+      // Written through a second repository on a different version, which is
+      // exactly what a half-finished cutover leaves behind.
+      const author = await createUser(database.dataSource);
+      const momentId = await record(author.userId, "a caption", [
+        await uploadWithObjects(author.userId),
+      ]);
+
+      await projector.project(momentId);
+
+      const otherVersion = new TimelineRepository(analytics.client, `${timelineVersion}-next`);
+      const row = await timeline.find(momentId);
+
+      assert.notEqual(row, undefined, "nothing to copy");
+
+      await otherVersion.project({
+        momentId,
+        authorUserId: author.userId,
+        occurredAt: new Date("1998-06-01T00:00:00.000Z"),
+        occurrenceEnd: new Date("1998-06-01T00:00:00.000Z"),
+        occurrencePrecision: "day",
+        occurrenceOffsetMinutes: 0,
+        visibility: "public",
+        moderationState: "allowed",
+        discoverable: true,
+      });
+
+      assert.notEqual(await otherVersion.find(momentId), undefined, "nothing to erase");
+
+      await moments.delete(momentId, author.userId, testContext());
+      await erase();
+
+      assert.equal(await timeline.find(momentId), undefined, "the live version still holds it");
+      assert.equal(
+        await otherVersion.find(momentId),
+        undefined,
+        "a version nobody was pointed at kept the Moment",
+      );
+    });
+
     it("takes the Moment out of the places and occasions it happened at", async () => {
       // A row saying "this Moment was here" outlives the Moment unless erasure
       // reaches it, and it is a record that the Moment existed and roughly

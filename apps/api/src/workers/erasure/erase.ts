@@ -355,8 +355,12 @@ async function eraseAccount(
   // would otherwise sit on the Timeline with nothing left to say it should not.
   // Keyed on the author rather than on Moments, so it needs no list of what to
   // look for.
-  await options.timeline.removeEverythingBy(userId);
-  await options.timeline.removeContextsBy(userId);
+  //
+  // And across every projection version, not merely the one this process is
+  // configured to write. A version is the same derived store built twice, so
+  // history left in the one nobody is pointed at is history left standing.
+  await options.timeline.eraseEverythingByEverywhere(userId);
+  await options.timeline.eraseContextsByEverywhere(userId);
   // And any record that this account was ever suspended. A moderation decision
   // about somebody who has asked to be forgotten is exactly the kind of record
   // that must not outlive them.
@@ -412,10 +416,10 @@ async function eraseMoment(options: ErasureOptions, momentId: string): Promise<v
   // projection to rebuild; a row gone while the Timeline still shows it is
   // history nobody can erase, because the thing that said what to remove has
   // itself been removed.
-  await options.timeline.remove(momentId);
+  await options.timeline.eraseMomentEverywhere(momentId);
   // And every scope it belonged to. A row saying an erased Moment was at a
   // place is a record that it existed, which is what erasure removes.
-  await options.timeline.removeContexts(momentId);
+  await options.timeline.eraseContextsEverywhere(momentId);
 
   await withTransaction(options.dataSource, async (tx) => {
     // Directly, rather than waiting for the indexer to notice. Deletion must
