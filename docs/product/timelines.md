@@ -196,6 +196,27 @@ what happened.
 answer is that only they can decide it: a creator proposes, and nothing exists
 until the named person accepts.
 
+### Whether It May Be Opened At All
+
+A person decides whether other people may open their Timeline. It is open unless
+they say otherwise, as a Moment is public unless its author says otherwise.
+
+What the choice governs is narrower than it sounds, and worth stating plainly: a
+Timeline can only ever show a Viewer Moments they could already have opened one
+at a time. Closing it hides nothing that was visible; it withholds the **walk** —
+moving through a life in order, zooming out over decades, jumping to a date.
+
+That is a real distinction rather than a technicality. Moments made public one
+by one are a different disclosure from a navigable record of where somebody was
+and when, and choosing the first is not consent to the second. Somebody who
+wants their history findable without being walkable turns theirs off.
+
+A closed Timeline answers **empty**, exactly as one belonging to somebody with
+no history does, and exactly as a Location a Viewer may see nothing in does.
+Refusing would say there was something there to refuse.
+
+Nobody's own Timeline is ever closed to them.
+
 ### What Another Viewer Sees Of It
 
 A Moment reaches somebody else's reading of your Timeline only if that person
