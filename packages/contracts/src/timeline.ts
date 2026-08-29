@@ -31,7 +31,8 @@ export type TimelineScale = z.infer<typeof timelineScaleSchema>;
  * keeps the read model narrow and keeps somebody's words out of a store that
  * exists to be rebuilt.
  */
-export const timelineEntrySchema = z.object({
+export const readableTimelineEntrySchema = z.object({
+  readable: z.literal(true),
   momentId: identifierSchema,
   /** When it happened. Never when it was recorded. */
   occurredAt: timestampSchema,
@@ -42,6 +43,47 @@ export const timelineEntrySchema = z.object({
   visibility: momentVisibilitySchema,
   discoverable: z.boolean(),
 });
+
+export type ReadableTimelineEntry = z.infer<typeof readableTimelineEntrySchema>;
+
+/**
+ * A Moment somebody was part of and may not read.
+ *
+ * Appears only on that person's own Timeline, and carries when it happened and
+ * nothing else. They accepted participation, so they are entitled to know it
+ * happened — their own history should not have a hole they cannot see the shape
+ * of — but accepting granted them nothing, so what it says stays shut.
+ *
+ * Deliberately a separate shape rather than the same one with fields left out.
+ * A client cannot read a field that is absent, and a missing field is
+ * indistinguishable from one that was never sent; a tag cannot be mistaken for
+ * either.
+ *
+ * **No `occurrenceOffsetMinutes`.** A UTC offset is a weak statement about
+ * where somebody was, and it is the one field in the occurrence set that says
+ * anything about place rather than time. Times come back in UTC.
+ */
+export const withheldTimelineEntrySchema = z.object({
+  readable: z.literal(false),
+  momentId: identifierSchema,
+  occurredAt: timestampSchema,
+  occurrenceEnd: timestampSchema,
+  occurrencePrecision: temporalPrecisionSchema,
+});
+
+export type WithheldTimelineEntry = z.infer<typeof withheldTimelineEntrySchema>;
+
+/**
+ * A Moment as a Timeline presents it.
+ *
+ * Two shapes, told apart by `readable`. Everything a scope Timeline returns is
+ * readable, because such a read filters rather than reports; only somebody's
+ * own Timeline can carry the other.
+ */
+export const timelineEntrySchema = z.discriminatedUnion("readable", [
+  readableTimelineEntrySchema,
+  withheldTimelineEntrySchema,
+]);
 
 export type TimelineEntry = z.infer<typeof timelineEntrySchema>;
 
