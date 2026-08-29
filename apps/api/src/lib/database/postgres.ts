@@ -14,6 +14,10 @@ import { AuthorizationAuditEvent, RoleAssignment } from "../../features/authoriz
 import { Location } from "../../features/locations/location.model.js";
 import { UserBlock } from "../../features/social/block.model.js";
 import {
+  MomentParticipation,
+  ParticipationRefusal,
+} from "../../features/participation/participation.model.js";
+import {
   FollowRequest,
   LocationFollow,
   RealWorldEventFollow,
@@ -131,6 +135,8 @@ const entities = [
   RealWorldEventFollow,
   LocationFollow,
   UserBlock,
+  MomentParticipation,
+  ParticipationRefusal,
   ModerationStateRow,
   ModerationAction,
   ModerationReportRow,

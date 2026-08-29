@@ -45,6 +45,8 @@ import { SearchService } from "../features/search/search.service.js";
 import { ModerationService } from "../features/moderation/moderation.service.js";
 import { LocationService } from "../features/locations/location.service.js";
 import { FollowRepository } from "../features/social/follow.repository.js";
+import { ParticipationRepository } from "../features/participation/participation.repository.js";
+import { ParticipationService } from "../features/participation/participation.service.js";
 import { FollowService } from "../features/social/follow.service.js";
 import { MomentRepository } from "../features/moments/moment.repository.js";
 import { MomentCommentRepository } from "../features/moments/moment-comment.repository.js";
@@ -168,6 +170,11 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
   );
 
   const momentReactionRepository = new MomentReactionRepository(database.dataSource);
+  // Shared, because blocking reaches participations and participations read
+  // Blocks: two instances would be two objects over one table, which is
+  // harmless until one of them grows a cache.
+  const followRepository = new FollowRepository(database.dataSource);
+  const participationRepository = new ParticipationRepository(database.dataSource);
 
   const momentSignificanceRepository = new MomentSignificanceRepository(database.dataSource);
 
@@ -279,7 +286,7 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
     ),
     follows: new FollowService(
       database.dataSource,
-      new FollowRepository(database.dataSource),
+      followRepository,
       accounts,
       realWorldEventRepository,
       locationRepository,
@@ -288,6 +295,14 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
       // the follows and requests it already severs.
       momentReactionRepository,
       momentCommentRepository,
+      participationRepository,
+    ),
+    participations: new ParticipationService(
+      database.dataSource,
+      participationRepository,
+      moments,
+      accounts,
+      followRepository,
     ),
     moments,
     momentRelationships: new MomentRelationshipService(

@@ -21,7 +21,9 @@ import type { SearchService } from "../features/search/search.service.js";
 import { locationRoutes } from "../features/locations/location.routes.js";
 import type { LocationService } from "../features/locations/location.service.js";
 import { followRoutes } from "../features/social/follow.routes.js";
+import { participationRoutes } from "../features/participation/participation.routes.js";
 import type { FollowService } from "../features/social/follow.service.js";
+import type { ParticipationService } from "../features/participation/participation.service.js";
 import { momentRoutes } from "../features/moments/moment.routes.js";
 import type { MomentCommentService } from "../features/moments/moment-comment.service.js";
 import type { MomentReactionService } from "../features/moments/moment-reaction.service.js";
@@ -84,6 +86,8 @@ import type { UserService } from "../features/users/user.service.js";
  * @param dataExport - Asking for a copy of an account's history; mounted only
  *   alongside users, since it exports one.
  * @returns Nothing.
+ * @param participations - Participation; mounted only alongside authentication
+ *   and users, since every route here needs an authenticated caller.
  */
 export async function registerRoutes(
   app: FastifyInstance,
@@ -108,6 +112,7 @@ export async function registerRoutes(
   notificationDelivery?: NotificationDeliveryService | undefined,
   accountDeletion?: AccountDeletionService | undefined,
   dataExport?: ExportService | undefined,
+  participations?: ParticipationService | undefined,
 ): Promise<void> {
   await app.register(healthRoutes);
 
@@ -144,6 +149,10 @@ export async function registerRoutes(
             momentComments,
             momentSignificance,
           ));
+      }
+
+      if (participations !== undefined) {
+        await app.register(participationRoutes(participations));
       }
 
       if (follows !== undefined) {

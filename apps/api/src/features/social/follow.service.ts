@@ -13,6 +13,7 @@ import type { DataSource } from "typeorm";
 import { withTransaction, type Transaction } from "../../lib/database/transaction.js";
 import { enqueueOutboxMessage } from "../../lib/database/outbox.js";
 import { topicName } from "../../lib/messaging/topics.js";
+import type { ParticipationRepository } from "../participation/participation.repository.js";
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
 import type { LocationRepository } from "../locations/location.repository.js";
@@ -58,6 +59,8 @@ export class FollowService {
    * @param comments - Optional. Blocking severs the reactions two people left
    *   on each other's comments; the comments themselves are hidden at read time
    *   rather than removed.
+   * @param participations - Optional. Blocking settles unanswered proposals
+   *   between the two people, permanently and in both directions.
    */
   constructor(
     private readonly dataSource: DataSource,
@@ -68,6 +71,7 @@ export class FollowService {
     private readonly clock: () => Date = () => new Date(),
     private readonly reactions?: MomentReactionRepository,
     private readonly comments?: MomentCommentRepository,
+    private readonly participations?: ParticipationRepository,
   ) {}
 
   /**
@@ -404,6 +408,13 @@ export class FollowService {
       // rewrite a conversation other people took part in
       // (`comments.md:459`).
       await this.comments?.severReactionsBetween(tx, blockerUserId, blockedUserId);
+      // Unanswered participation proposals are settled, in both directions and
+      // permanently. A block is a refusal and a stronger one than a rejection,
+      // so what it settles is settled for good — `unblock` restores this no more
+      // than it restores a severed reaction. Leaving them would be worse than
+      // surprising: an unanswerable request from somebody you have blocked is
+      // exactly the recurring task refusal exists to prevent.
+      await this.participations?.rejectBetween(tx, blockerUserId, blockedUserId, at);
     });
   }
 
