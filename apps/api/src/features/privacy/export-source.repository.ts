@@ -2,6 +2,7 @@ import type { DataSource } from "typeorm";
 import type {
   AccountSource,
   CommentSource,
+  ParticipationSource,
   MomentSource,
   ReactionSource,
 } from "./export-document.js";
@@ -337,6 +338,52 @@ export class ExportSourceRepository {
       kind: row.kind,
       createdAt: row.created_at,
       by: { handle: row.handle, displayName: row.display_name },
+    }));
+  }
+
+  /**
+   * Every participation this account is part of, in either direction.
+   *
+   * Both directions, because both are records about them: what other people
+   * said about where they were, and what they said about other people. Proposals
+   * nobody answered are included — a claim somebody made is a record whether or
+   * not it was ever confirmed.
+   *
+   * @param userId - Whose.
+   * @returns The rows, oldest first, everybody by handle.
+   * @throws {Error} If the database refuses.
+   */
+  async participations(userId: string): Promise<ParticipationSource[]> {
+    const rows: {
+      moment_id: string;
+      status: string;
+      proposed_at: Date;
+      resolved_at: Date | null;
+      direction: "named-me" | "i-named";
+      handle: string;
+      display_name: string;
+    }[] = await this.dataSource.query(
+      `SELECT p.moment_id, p.status, p.proposed_at, p.resolved_at,
+              CASE WHEN p.user_id = $1 THEN 'named-me' ELSE 'i-named' END AS direction,
+              person.handle, person.display_name
+         FROM moment_participations p
+         JOIN moments m ON m.moment_id = p.moment_id
+         -- The other person: the author when this account was named, and the
+         -- named person when this account is the author who proposed.
+         JOIN users person
+           ON person.user_id = CASE WHEN p.user_id = $1 THEN m.author_user_id ELSE p.user_id END
+        WHERE p.user_id = $1 OR m.author_user_id = $1
+        ORDER BY p.proposed_at ASC`,
+      [userId],
+    );
+
+    return rows.map((row) => ({
+      momentId: row.moment_id,
+      status: row.status,
+      proposedAt: row.proposed_at,
+      resolvedAt: row.resolved_at,
+      direction: row.direction,
+      person: { handle: row.handle, displayName: row.display_name },
     }));
   }
 

@@ -785,6 +785,51 @@ describe("account deletion", () => {
       assert.equal(still.statusCode, 200, still.body);
     });
 
+    it("erases participations naming it, including questions nobody answered", async () => {
+      // A claim about where somebody was is a fact about them, so it goes with
+      // them — and unanswered proposals go too, because a question asked about
+      // a person is a record of the asking whether or not they ever replied.
+      const author = await onboard();
+      const leaver = await onboard();
+      const answered = await record(author.userId, "one they confirmed");
+      const unanswered = await record(author.userId, "one they never answered");
+
+      await database.dataSource.query(
+        `INSERT INTO moment_participations
+           (participation_id, moment_id, user_id, status, proposed_at, resolved_at)
+         VALUES (gen_random_uuid(), $1, $2, 'accepted', now(), now()),
+                (gen_random_uuid(), $3, $2, 'proposed', now(), NULL)`,
+        [answered, leaver.userId, unanswered],
+      );
+
+      await deleteAccount(leaver);
+      await erase(leaver.userId);
+
+      assert.equal(
+        await countWhere("moment_participations", "user_id", leaver.userId),
+        0,
+        "a record of where they were outlived them",
+      );
+
+      // And nothing stands in their place. A row saying somebody unnamed was
+      // here is a record of the association, which is the thing erasure removes.
+      const remaining = await database.dataSource.query(
+        "SELECT count(*)::int AS count FROM moment_participations WHERE moment_id = ANY($1)",
+        [[answered, unanswered]],
+      );
+
+      assert.equal(remaining[0].count, 0, "a marker was left where a participation had been");
+
+      // The Moments are somebody else's history and were never theirs to delete.
+      const still = await app.inject({
+        method: "GET",
+        url: `/moments/${answered}`,
+        headers: authed(author.accessToken),
+      });
+
+      assert.equal(still.statusCode, 200, still.body);
+    });
+
     it("erases its reactions, follows, and blocks", async () => {
       const author = await onboard();
       const leaver = await onboard();

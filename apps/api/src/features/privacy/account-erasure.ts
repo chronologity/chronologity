@@ -53,6 +53,21 @@ export const ACCOUNT_SWEEPS: readonly AccountSweep[] = [
   // the Moment's author, so it goes with them.
   { table: "moment_audience", column: "user_id", action: "delete" },
 
+  // Being named as having been part of somebody's Moment is a fact about them,
+  // so it goes with them — including proposals nobody ever answered, which this
+  // takes because it names no status. Nothing is left in place of one: a marker
+  // saying somebody unnamed was here is a record of the association, which is
+  // the thing erasure removes.
+  //
+  // The Moment stays. It is other people's history and was never this person's
+  // to delete, the same rule comments and reactions get above.
+  { table: "moment_participations", column: "user_id", action: "delete" },
+
+  // Both directions, exactly as `user_blocks` above: there is no longer
+  // anybody to be protected from or protected against.
+  { table: "participation_refusals", column: "refusing_user_id", action: "delete" },
+  { table: "participation_refusals", column: "refused_user_id", action: "delete" },
+
   // The social graph, in both directions. A block is severed too: there is no
   // longer anybody to be protected from or protected against.
   { table: "user_follows", column: "follower_user_id", action: "delete" },

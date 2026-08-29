@@ -34,6 +34,8 @@ import { NotificationService } from "../notifications/notification.service.js";
 import { RealWorldEventRepository } from "../real-world-events/real-world-event.repository.js";
 import { RealWorldEventService } from "../real-world-events/real-world-event.service.js";
 import { FollowRepository } from "../social/follow.repository.js";
+import { ParticipationRepository } from "../participation/participation.repository.js";
+import { ParticipationService } from "../participation/participation.service.js";
 import { FollowService } from "../social/follow.service.js";
 import { UploadRepository } from "../uploads/upload.repository.js";
 import { UploadService } from "../uploads/upload.service.js";
@@ -147,6 +149,8 @@ const EXEMPT: readonly Exemption[] = [
     "DELETE /users/:userId/block",
     "POST /real-world-events/:realWorldEventId/follow",
     "DELETE /real-world-events/:realWorldEventId/follow",
+    "POST /users/:userId/participation-refusal",
+    "DELETE /users/:userId/participation-refusal",
     "POST /locations/:locationId/follow",
     "DELETE /locations/:locationId/follow",
   ].map((route) => ({
@@ -183,6 +187,7 @@ interface Owned {
   notificationId: string;
   deviceId: string;
   followRequestId: string;
+  participationId: string;
 }
 
 /** A route a stranger must not get through, and the request that tries. */
@@ -453,6 +458,46 @@ const ATTEMPTS: readonly Attempt[] = [
     refusal: 200,
   },
 
+  // A participation, which belongs to the two people in it and nobody else.
+  // Answering is the named person's alone, and removing is theirs or the
+  // creator's — a third party gets the answer an identifier nobody holds gets.
+  {
+    method: "POST",
+    path: "/participations/:participationId/accept",
+    url: (o) => `/participations/${o.participationId}/accept`,
+    refusal: 404,
+  },
+  {
+    method: "POST",
+    path: "/participations/:participationId/reject",
+    url: (o) => `/participations/${o.participationId}/reject`,
+    refusal: 404,
+  },
+  {
+    method: "DELETE",
+    path: "/participations/:participationId",
+    url: (o) => `/participations/${o.participationId}`,
+    refusal: 404,
+  },
+  // Reading who a Moment records as having been there. Gated on the Moment's
+  // own visibility, so a Moment a stranger may not read tells them nothing
+  // about who was in it either.
+  {
+    method: "GET",
+    path: "/moments/:momentId/participants",
+    url: (o) => `/moments/${o.momentId}/participants`,
+    refusal: 404,
+  },
+  // Proposing into somebody else's Moment. The identifier names their history,
+  // and only its author may say who was there.
+  {
+    method: "POST",
+    path: "/moments/:momentId/participants",
+    url: (o) => `/moments/${o.momentId}/participants`,
+    payload: (o) => ({ userId: o.userId }),
+    refusal: 404,
+  },
+
   // A request to follow, which belongs to the two people in it and nobody else.
   {
     method: "POST",
@@ -611,6 +656,13 @@ describe("reaching something with somebody else's identifier", () => {
         database.dataSource,
         new MomentSignificanceRepository(database.dataSource),
         moments,
+      ),
+      participations: new ParticipationService(
+        database.dataSource,
+        new ParticipationRepository(database.dataSource),
+        moments,
+        new UserRepository(database.dataSource),
+        new FollowRepository(database.dataSource),
       ),
       follows: new FollowService(
         database.dataSource,
@@ -853,6 +905,20 @@ describe("reaching something with somebody else's identifier", () => {
       [notificationId, account.userId, momentId, randomUUID()],
     );
 
+    // A real participation the owner proposed, on their own Moment, naming the
+    // third account rather than the stranger — the stranger has to be somebody
+    // with no part in it, or the refusals below would be acceptances. Without a
+    // row that genuinely exists, every one of them would pass for the wrong
+    // reason.
+    const proposed = await app.inject({
+      method: "POST",
+      url: `/moments/${momentId}/participants`,
+      headers: { authorization: `Bearer ${account.accessToken}` },
+      payload: { userId: approver.userId },
+    });
+
+    assert.equal(proposed.statusCode, 201, proposed.body);
+
     return {
       userId: account.userId,
       accessToken: account.accessToken,
@@ -868,6 +934,7 @@ describe("reaching something with somebody else's identifier", () => {
       notificationId,
       deviceId: device.json().deviceId as string,
       followRequestId: requests[0]!.request_id,
+      participationId: proposed.json().participationId as string,
     };
   }
 

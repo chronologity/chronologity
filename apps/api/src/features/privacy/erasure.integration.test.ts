@@ -410,6 +410,7 @@ describe("erasure", () => {
       assert.equal(await rowsFor("moment_reactions", momentId), 0, "reactions");
       assert.equal(await rowsFor("moment_audience", momentId), 0, "audience");
       assert.equal(await rowsFor("moment_edits", momentId), 0, "edit history");
+      assert.equal(await rowsFor("moment_participations", momentId), 0, "participations");
     });
 
     it("removes the objects, derived copies included", async () => {

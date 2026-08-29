@@ -251,6 +251,58 @@ export function describeComment(source: CommentSource): ExportedComment {
   };
 }
 
+/** Somebody having been part of a Moment, as an export presents it. */
+export interface ExportedParticipation {
+  readonly momentId: string;
+  readonly status: string;
+  readonly proposedAt: string;
+  readonly resolvedAt: string | null;
+  /**
+   * Whether this is somebody saying the account was there, or the account
+   * saying it of somebody else.
+   */
+  readonly direction: "named-me" | "i-named";
+  readonly person: ExportedPerson;
+}
+
+/** A participation row with the other person in it. */
+export interface ParticipationSource {
+  readonly momentId: string;
+  readonly status: string;
+  readonly proposedAt: Date;
+  readonly resolvedAt: Date | null;
+  readonly direction: "named-me" | "i-named";
+  readonly person: {
+    readonly handle: string;
+    readonly displayName: string;
+    /** Present so that the test can prove neither comes out. */
+    readonly userId?: string;
+    readonly email?: string;
+  };
+}
+
+/**
+ * Shape one participation.
+ *
+ * @param source - The row and the other person in it.
+ * @returns It, attributed by handle and display name.
+ *
+ *   Unanswered proposals are included. A question somebody asked about where
+ *   this account was is a record about them whether or not they ever answered
+ *   it, and an export that showed only the answered ones would hide exactly the
+ *   claims they had chosen not to confirm.
+ */
+export function describeParticipation(source: ParticipationSource): ExportedParticipation {
+  return {
+    momentId: source.momentId,
+    status: source.status,
+    proposedAt: source.proposedAt.toISOString(),
+    resolvedAt: source.resolvedAt === null ? null : source.resolvedAt.toISOString(),
+    direction: source.direction,
+    person: { handle: source.person.handle, displayName: source.person.displayName },
+  };
+}
+
 /** A reaction row with the person who made it. */
 export interface ReactionSource {
   readonly momentId: string;
