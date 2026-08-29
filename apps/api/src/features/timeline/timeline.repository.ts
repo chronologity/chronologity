@@ -52,7 +52,9 @@ export class TimelineRepository {
    *   pretending it succeeded is not.
    */
   async project(row: TimelineRow): Promise<void> {
-    await this.remove(row.momentId);
+    if (await this.holds("timeline_moments", row.momentId)) {
+      await this.remove(row.momentId);
+    }
     await this.client.insert({
       table: "timeline_moments",
       values: [toRecord(row, this.now(), this.version)],
@@ -150,7 +152,9 @@ export class TimelineRepository {
     row: TimelineRow,
     contexts: readonly { type: "location" | "real_world_event"; id: string }[],
   ): Promise<void> {
-    await this.removeContexts(row.momentId);
+    if (await this.holds("timeline_moment_contexts", row.momentId)) {
+      await this.removeContexts(row.momentId);
+    }
 
     if (contexts.length === 0) {
       return;
@@ -260,4 +264,45 @@ export class TimelineRepository {
       query_params: { userId },
     });
   }
+
+  /**
+   * Whether a table already holds rows for a Moment.
+   *
+   * Asked before deleting, because a delete in ClickHouse is a mutation and
+   * costs one to two seconds whether or not it removes anything — measured
+   * against an empty table, so the cost is its bookkeeping rather than any
+   * scanning. A read costs a fiftieth of that, and the answer is no almost
+   * every time: the first projection of a Moment has nothing to replace.
+   *
+   * The delete itself stays exactly as it was, and so does what it guarantees.
+   * A corrected occurrence or a changed Location writes a row ClickHouse reads
+   * as a different Moment rather than a replacement, because both are part of
+   * the sort key — so the old row must go, or the Moment appears twice, or at
+   * two places at once.
+   *
+   * Deliberately not used by erasure, which calls `remove` and `removeContexts`
+   * directly. There, a probe that missed a row written concurrently would leave
+   * personal history behind, and erasure must not depend on a read having been
+   * right.
+   *
+   * @param table - Which projection table to look in.
+   * @param momentId - Which Moment.
+   * @returns Whether anything is there for this projection version.
+   * @throws {Error} If ClickHouse refuses.
+   */
+  private async holds(
+    table: "timeline_moments" | "timeline_moment_contexts",
+    momentId: string,
+  ): Promise<boolean> {
+    const result = await this.client.query({
+      query: `SELECT count() AS count FROM ${table}
+               WHERE moment_id = {momentId: String} AND projection_version = {version: String}`,
+      query_params: { momentId, version: this.version },
+      format: "JSONEachRow",
+    });
+    const rows = await result.json<{ count: string }>();
+
+    return Number(rows[0]?.count ?? 0) > 0;
+  }
+
 }
