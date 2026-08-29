@@ -718,6 +718,58 @@ describe("notifications", () => {
       assert.equal(rows[0]?.count, 0);
     });
 
+    it("reaches somebody asked to confirm they were in a Moment they cannot read", async () => {
+      // The one notification the consent model depends on, and the one most
+      // easily lost. Driven through the real handler rather than a hand-built
+      // candidate, so what decides the outcome is how the event is mapped —
+      // which is the thing that would be wrong.
+      //
+      // Two gates would sink it. A notification sourced from a Moment has that
+      // Moment's visibility re-checked when it is read, and this person cannot
+      // read it; and `viaMomentId` would suppress it at generation. Sourcing it
+      // from the participation clears both.
+      const creator = await onboard();
+      const named = await onboard();
+      const momentId = await record(creator);
+
+      await moments.setVisibility(momentId, creator.userId, { visibility: "private" }, testContext());
+
+      const unreadable = await app.inject({
+        method: "GET",
+        url: `/moments/${momentId}`,
+        headers: authed(named.accessToken),
+      });
+
+      assert.equal(unreadable.statusCode, 404, "the Moment must be one they cannot read");
+
+      await notifyFromEvent(generator, {
+        topic: "chronologity.domain-participation.v1",
+        partition: 0,
+        offset: "0",
+        envelope: {
+          eventId: randomUUID(),
+          eventType: "ParticipationProposed",
+          eventVersion: 1,
+          occurredAt: new Date().toISOString(),
+          aggregate: { type: "participation", id: randomUUID(), version: 1 },
+          payload: {
+            participationId: randomUUID(),
+            momentId,
+            userId: named.userId,
+            proposedByUserId: creator.userId,
+            proposedAt: new Date().toISOString(),
+          },
+        },
+      });
+
+      // Written, and — the half that a row count alone would miss — still there
+      // when they actually read their notifications.
+      const theirs = (await list(named.accessToken)).json().notifications;
+
+      assert.equal(theirs.length, 1, "the person asked was never told");
+      assert.equal(theirs[0].type, "participation_proposed");
+    });
+
     it("writes one about a Moment the recipient may see", async () => {
       const author = await onboard();
       const reader = await onboard();

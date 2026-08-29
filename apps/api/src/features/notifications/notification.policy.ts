@@ -28,6 +28,10 @@ export type NotificationType =
   | "user_followed"
   | "follow_requested"
   | "follow_request_accepted"
+  | "participation_proposed"
+  | "participation_accepted"
+  | "participation_rejected"
+  | "participation_withdrawn"
   | "upload_ready"
   | "upload_rejected"
   | "content_moderated"
@@ -39,13 +43,18 @@ export type NotificationType =
   | "sessions_revoked";
 
 /** Which family a notification belongs to. */
-export type NotificationCategory = "social" | "media" | "moderation" | "security";
+export type NotificationCategory =
+  | "social"
+  | "media"
+  | "moderation"
+  | "security"
+  | "participation";
 
 /** Where a notification can be delivered. */
 export type NotificationChannel = "in_app" | "email" | "push";
 
 /** What a notification points at. */
-export type NotificationSourceType = "moment" | "comment" | "user" | "upload";
+export type NotificationSourceType = "moment" | "comment" | "user" | "upload" | "participation";
 
 /** Which family each type belongs to. */
 const CATEGORIES: Readonly<Record<NotificationType, NotificationCategory>> = {
@@ -57,6 +66,10 @@ const CATEGORIES: Readonly<Record<NotificationType, NotificationCategory>> = {
   user_followed: "social",
   follow_requested: "social",
   follow_request_accepted: "social",
+  participation_proposed: "participation",
+  participation_accepted: "participation",
+  participation_rejected: "participation",
+  participation_withdrawn: "participation",
   upload_ready: "media",
   upload_rejected: "media",
   content_moderated: "moderation",

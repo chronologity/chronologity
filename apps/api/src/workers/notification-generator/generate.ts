@@ -4,6 +4,7 @@ import {
   REACTIONS_BOUNDARY,
   SECURITY_BOUNDARY,
   SOCIAL_BOUNDARY,
+  PARTICIPATION_BOUNDARY,
 } from "@chronologity/contracts";
 import type { Logger } from "../../lib/logger/logger.js";
 import type { ConsumedEvent } from "../../lib/messaging/consumer.js";
@@ -44,6 +45,22 @@ const HANDLED: Readonly<
     build("follow_requested", text("actorUserId"), text("followedUserId"), "user", text("actorUserId"), undefined),
   FollowRequestAccepted: (text) =>
     build("follow_request_accepted", text("actorUserId"), text("requesterUserId"), "user", text("actorUserId"), undefined),
+  // The source is the participation, never the Moment, and there is no
+  // `viaMomentId`. Both matter: a notification sourced from a Moment has its
+  // visibility re-checked when it is read, and the person being asked to
+  // confirm they were somewhere frequently cannot read it — so this would be
+  // written and then never render for the one person who has to see it. The
+  // participation is also unique per notification, so a second proposal is not
+  // folded into an unread first.
+  ParticipationProposed: (text) =>
+    build("participation_proposed", text("proposedByUserId"), text("userId"), "participation", text("participationId"), undefined),
+  // The three answers go to the creator, who is the Moment's author.
+  ParticipationAccepted: (text) =>
+    build("participation_accepted", text("userId"), text("proposedByUserId"), "participation", text("participationId"), undefined),
+  ParticipationRejected: (text) =>
+    build("participation_rejected", text("userId"), text("proposedByUserId"), "participation", text("participationId"), undefined),
+  ParticipationWithdrawn: (text) =>
+    build("participation_withdrawn", text("userId"), text("proposedByUserId"), "participation", text("participationId"), undefined),
   AccountSecurityChanged: (text) => {
     // The recipient is the account itself. There is no actor: whoever
     // performed the change is exactly what this system cannot know during a
@@ -105,6 +122,7 @@ export const NOTIFICATION_GENERATOR_BOUNDARIES: readonly string[] = [
   REACTIONS_BOUNDARY,
   COMMENTS_BOUNDARY,
   SOCIAL_BOUNDARY,
+  PARTICIPATION_BOUNDARY,
   MODERATION_BOUNDARY,
   SECURITY_BOUNDARY,
 ];

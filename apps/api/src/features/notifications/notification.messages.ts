@@ -56,6 +56,28 @@ const ACTIVITIES: Readonly<Record<string, Activity>> = {
     predicate: "commented on your Moment",
   },
   comment_replied: { subject: "A reply to your comment", predicate: "replied to your comment" },
+  // Nothing here names the Moment or says anything it contains. The person
+  // being asked frequently cannot read it, and a subject line is the last place
+  // to disclose what every other surface is careful about.
+  participation_proposed: {
+    subject: "Someone says you were there",
+    predicate: "said you were part of a Moment",
+  },
+  participation_accepted: {
+    subject: "Someone confirmed they were there",
+    predicate: "confirmed they were part of your Moment",
+  },
+  // Said plainly rather than as an absence of an answer. A creator who cannot
+  // tell refusal from silence will ask again outside the product, which is the
+  // conversation this model deliberately does not carry.
+  participation_rejected: {
+    subject: "Someone answered about your Moment",
+    predicate: "said they were not part of your Moment",
+  },
+  participation_withdrawn: {
+    subject: "Someone withdrew from your Moment",
+    predicate: "withdrew from your Moment",
+  },
   comment_mentioned: {
     subject: "You were mentioned in a comment",
     predicate: "mentioned you in a comment",

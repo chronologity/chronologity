@@ -33,6 +33,12 @@ const EXPECTED: Readonly<Record<string, { type: string; recipient: string }>> = 
   CommentReplied: { type: "comment_replied", recipient: "inReplyToAuthorUserId" },
   CommentMentioned: { type: "comment_mentioned", recipient: "mentionedUserId" },
   UserFollowed: { type: "user_followed", recipient: "followedUserId" },
+  // The proposal goes to the person named; the three answers go back to the
+  // creator, who is the Moment's author and therefore who proposed.
+  ParticipationProposed: { type: "participation_proposed", recipient: "userId" },
+  ParticipationAccepted: { type: "participation_accepted", recipient: "proposedByUserId" },
+  ParticipationRejected: { type: "participation_rejected", recipient: "proposedByUserId" },
+  ParticipationWithdrawn: { type: "participation_withdrawn", recipient: "proposedByUserId" },
   FollowRequested: { type: "follow_requested", recipient: "followedUserId" },
   FollowRequestAccepted: { type: "follow_request_accepted", recipient: "requesterUserId" },
   AccountSecurityChanged: { type: "password_changed", recipient: "userId" },
