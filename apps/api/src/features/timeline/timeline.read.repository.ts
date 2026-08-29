@@ -1,6 +1,7 @@
 import type { ClickHouseClient } from "@clickhouse/client";
 import { asClickHouseDateTime, TIMELINE_VERSION, type TimelineRecord } from "./timeline-row.js";
 import type { TimelinePosition } from "./timeline.cursor.js";
+import type { TimelineEligibility, TimelineScopeRef } from "./timeline.eligibility.js";
 
 /**
  * Reading history in the order it happened.
@@ -31,6 +32,51 @@ export interface TimelineBucket {
   /** The first instant of the span. */
   readonly startsAt: Date;
   readonly count: number;
+}
+
+/**
+ * The condition deciding what a Viewer may be shown in a scope.
+ *
+ * One fragment, used by every scoped read. `visibleToViewer` is one fragment
+ * for Moments and `eligibleForViewer` is one for Search, both for the same
+ * reason: a rule written in several places eventually disagrees with itself,
+ * and this is the rule that leaks when it does.
+ *
+ * It reads four parameters the caller must supply — `viewer`, `blocked`,
+ * `audience`, `isAdult` — and there is no variant that omits them. A caller who
+ * forgot one would otherwise get somebody else's history.
+ *
+ * The order is the policy's: your own first, then the author, then the Block,
+ * then the audience, then age. A Block cannot be outlived by an invitation
+ * issued before it.
+ *
+ * @param alias - The table alias the Timeline rows are read under.
+ * @returns A SQL condition, true when this Viewer may be shown this row.
+ */
+function eligible(alias: string): string {
+  return `(
+    -- Your own history, whatever state it is in. Somebody must be able to
+    -- navigate their own past even where nobody else may.
+    ${alias}.author_user_id = {viewer: String}
+    OR (
+      -- Suspended authors, read from the dimension table rather than joined
+      -- from PostgreSQL. One row per suspended account, and the newest decision
+      -- wins — so reinstating somebody restores their history without touching
+      -- a single Moment of it.
+      ${alias}.author_user_id NOT IN (
+        SELECT user_id FROM timeline_suspended_authors WHERE suspended = 1
+      )
+      AND NOT has({blocked: Array(String)}, ${alias}.author_user_id)
+      AND (
+        (
+          ${alias}.visibility = 'public'
+          AND ${alias}.moderation_state != 'restricted_to_authorized_audience'
+        )
+        OR has({audience: Array(String)}, ${alias}.moment_id)
+      )
+      AND (${alias}.moderation_state != 'age_restricted' OR {isAdult: UInt8} = 1)
+    )
+  )`;
 }
 
 /**
@@ -208,6 +254,170 @@ export class TimelineReadRepository {
     return rows.map((row) => ({
       // ClickHouse returns a naive datetime; the projection stores UTC, so it
       // is read back as UTC rather than as whatever this process is set to.
+      startsAt: new Date(`${row.starts_at.replace(" ", "T")}Z`),
+      count: Number(row.count),
+    }));
+  }
+  /**
+   * A page of a scope's history, filtered to what this Viewer may see.
+   *
+   * The eligibility condition sits in the `WHERE` clause beside the cursor
+   * comparison, so withheld Moments are skipped before the limit is applied. A
+   * page of twenty comes back with twenty whenever twenty remain — which is the
+   * property that stops the page size itself disclosing what was withheld.
+   *
+   * @param scope - Which Location or real-world Event.
+   * @param viewer - What this Viewer may be shown, resolved beforehand.
+   * @param from - Where to resume, or undefined to start at the end the
+   *   direction implies.
+   * @param direction - `older` walks back through history, `newer` forwards.
+   * @param limit - How many rows at most.
+   * @returns The rows, ordered as they were walked.
+   */
+  async scopedSlice(
+    scope: TimelineScopeRef,
+    viewer: TimelineEligibility,
+    from: TimelinePosition | undefined,
+    direction: Direction,
+    limit: number,
+  ): Promise<TimelineRecord[]> {
+    const older = direction === "older";
+    const boundary =
+      from === undefined
+        ? ""
+        : older
+          ? `AND (occurred_at, moment_id) < ({at: DateTime64(3)}, {momentId: String})`
+          : `AND (occurred_at, moment_id) > ({at: DateTime64(3)}, {momentId: String})`;
+
+    const result = await this.client.query({
+      query: `SELECT * FROM timeline_moment_contexts
+               WHERE projection_version = {version: String}
+                 AND context_type = {contextType: String}
+                 AND context_id = {contextId: String}
+                 AND ${eligible("timeline_moment_contexts")}
+                 ${boundary}
+               ORDER BY occurred_at ${older ? "DESC" : "ASC"}, moment_id ${older ? "DESC" : "ASC"}
+               LIMIT {limit: UInt32}`,
+      query_params: {
+        version: this.version,
+        contextType: scope.type,
+        contextId: scope.id,
+        viewer: viewer.viewerUserId,
+        blocked: viewer.blocked,
+        audience: viewer.audience,
+        isAdult: viewer.isAdult ? 1 : 0,
+        limit,
+        ...(from === undefined
+          ? {}
+          : { at: asClickHouseDateTime(from.occurredAt), momentId: from.momentId }),
+      },
+      format: "JSONEachRow",
+    });
+
+    return result.json<TimelineRecord>();
+  }
+
+  /**
+   * Where a scope's Timeline opens, for this Viewer.
+   *
+   * Their newest eligible occurrence rather than the scope's, since a head
+   * naming a Moment they may not see would disclose that it exists.
+   *
+   * @param scope - Which Location or real-world Event.
+   * @param viewer - What this Viewer may be shown.
+   * @returns The newest eligible row, or undefined when they may see none.
+   */
+  async scopedHead(
+    scope: TimelineScopeRef,
+    viewer: TimelineEligibility,
+  ): Promise<TimelineRecord | undefined> {
+    return (await this.scopedSlice(scope, viewer, undefined, "older", 1))[0];
+  }
+
+  /**
+   * The eligible Moment nearest an instant, within a scope.
+   *
+   * @param scope - Which Location or real-world Event.
+   * @param viewer - What this Viewer may be shown.
+   * @param at - The instant asked for, which need not be one anything happened.
+   * @returns The nearest eligible Moment, or undefined when they may see none.
+   *   Ties break towards the earlier, so a jump lands in the same place twice.
+   */
+  async scopedNearest(
+    scope: TimelineScopeRef,
+    viewer: TimelineEligibility,
+    at: Date,
+  ): Promise<TimelineRecord | undefined> {
+    const result = await this.client.query({
+      query: `SELECT * FROM timeline_moment_contexts
+               WHERE projection_version = {version: String}
+                 AND context_type = {contextType: String}
+                 AND context_id = {contextId: String}
+                 AND ${eligible("timeline_moment_contexts")}
+               ORDER BY abs(dateDiff('millisecond', occurred_at, {at: DateTime64(3)})) ASC,
+                        occurred_at ASC,
+                        moment_id ASC
+               LIMIT 1`,
+      query_params: {
+        version: this.version,
+        contextType: scope.type,
+        contextId: scope.id,
+        viewer: viewer.viewerUserId,
+        blocked: viewer.blocked,
+        audience: viewer.audience,
+        isAdult: viewer.isAdult ? 1 : 0,
+        at: asClickHouseDateTime(at),
+      },
+      format: "JSONEachRow",
+    });
+
+    return (await result.json<TimelineRecord>())[0];
+  }
+
+  /**
+   * How a scope's history is distributed, counting only what this Viewer sees.
+   *
+   * Counts must agree with what paging returns. A bucket saying a decade holds
+   * five where paging finds two would disclose three withheld Moments as surely
+   * as returning them would.
+   *
+   * @param scope - Which Location or real-world Event.
+   * @param viewer - What this Viewer may be shown.
+   * @param scale - Year or decade.
+   * @returns One bucket per span holding anything eligible, oldest first.
+   */
+  async scopedBuckets(
+    scope: TimelineScopeRef,
+    viewer: TimelineEligibility,
+    scale: Scale,
+  ): Promise<TimelineBucket[]> {
+    const years = scale === "decade" ? 10 : 1;
+    const bucket = `toDateTime64(concat(toString(intDiv(toYear(occurred_at), ${years}) * ${years}), '-01-01 00:00:00'), 3)`;
+
+    const result = await this.client.query({
+      query: `SELECT ${bucket} AS starts_at, count() AS count
+                FROM timeline_moment_contexts
+               WHERE projection_version = {version: String}
+                 AND context_type = {contextType: String}
+                 AND context_id = {contextId: String}
+                 AND ${eligible("timeline_moment_contexts")}
+               GROUP BY starts_at
+               ORDER BY starts_at ASC`,
+      query_params: {
+        version: this.version,
+        contextType: scope.type,
+        contextId: scope.id,
+        viewer: viewer.viewerUserId,
+        blocked: viewer.blocked,
+        audience: viewer.audience,
+        isAdult: viewer.isAdult ? 1 : 0,
+      },
+      format: "JSONEachRow",
+    });
+
+    const rows = await result.json<{ starts_at: string; count: string }>();
+
+    return rows.map((row) => ({
       startsAt: new Date(`${row.starts_at.replace(" ", "T")}Z`),
       count: Number(row.count),
     }));

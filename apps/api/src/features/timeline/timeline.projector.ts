@@ -101,19 +101,51 @@ export class TimelineProjector {
     const source = await this.source.momentFor(momentId);
     const row = source === undefined ? undefined : timelineRowFor(source);
 
-    if (row === undefined) {
+    // Both, so the compiler narrows `source` for the projection below rather
+    // than needing an assertion that this branch already guarantees.
+    if (source === undefined || row === undefined) {
       // A Moment that has gone, been removed by moderation, or arrived in a
       // state this worker cannot read. Removing rather than leaving what is
       // there: exclusion over retention, and a `remove` for a row that was
       // never written costs one statement and asserts nothing false.
+      //
+      // Its scope memberships go too. A row saying a withheld Moment was at a
+      // place is a record that it exists, which is the disclosure removing the
+      // Moment was for.
       await this.timeline.remove(momentId);
+      await this.timeline.removeContexts(momentId);
 
       return "removed";
     }
 
     await this.timeline.project(row);
+    await this.timeline.projectContexts(row, [
+      ...(source.locationId === undefined
+        ? []
+        : [{ type: "location" as const, id: source.locationId }]),
+      ...source.realWorldEventIds.map((id) => ({ type: "real_world_event" as const, id })),
+    ]);
 
     return "projected";
+  }
+
+  /**
+   * Record a change to whether an account's history is withheld.
+   *
+   * Deliberately not a reprojection. Somebody with ten thousand Moments has
+   * their eligibility changed by one row here rather than ten thousand writes,
+   * and their Timeline is never half-right while those writes happen — which is
+   * the arrangement 7A settled and this depends on.
+   *
+   * @param userId - Whose account.
+   * @param status - What it became.
+   * @param decidedAt - When, so an out-of-order message cannot resurrect a
+   *   suspension that was lifted.
+   * @returns Nothing.
+   * @throws {Error} If ClickHouse refuses.
+   */
+  async recordStatus(userId: string, status: string, decidedAt: Date): Promise<void> {
+    await this.timeline.recordSuspension(userId, status === "suspended", decidedAt);
   }
 
   /**

@@ -1,4 +1,4 @@
-import { MODERATION_BOUNDARY, MOMENTS_BOUNDARY } from "@chronologity/contracts";
+import { MODERATION_BOUNDARY, MOMENTS_BOUNDARY, USERS_BOUNDARY } from "@chronologity/contracts";
 import type { Logger } from "../../lib/logger/logger.js";
 import type { ConsumedEvent } from "../../lib/messaging/consumer.js";
 import type { TimelineProjector } from "../../features/timeline/timeline.projector.js";
@@ -24,6 +24,10 @@ const HANDLED: Readonly<Record<string, (payload: Record<string, unknown>) => str
     // resolved when the Timeline is read rather than written.
     ModerationStateChanged: (payload) =>
       payload.subjectType === "moment" ? momentId(payload.subjectId) : undefined,
+    // Not a Moment, and handled separately below. A suspension changes who may
+    // see somebody's history without changing any of it, so it writes one row
+    // to the suspended-authors table rather than reprojecting a decade.
+    UserStatusChanged: () => undefined,
   };
 
 /** The event types this worker knows what to do with. */
@@ -52,6 +56,11 @@ export const TIMELINE_PROJECTOR_EVENTS: readonly string[] = Object.keys(HANDLED)
 export const TIMELINE_PROJECTOR_BOUNDARIES: readonly string[] = [
   MOMENTS_BOUNDARY,
   MODERATION_BOUNDARY,
+  // For suspension, which decides whether an author's history may be shown in
+  // any scope. 7A left this out because a Moment row carries nothing about its
+  // author's status; 7C adds it because a Location with a hundred contributors
+  // cannot ask PostgreSQL about each of them while paging.
+  USERS_BOUNDARY,
 ];
 
 /**
@@ -97,6 +106,21 @@ export async function projectFromEvent(
   event: ConsumedEvent,
   logger?: Logger,
 ): Promise<void> {
+  // Handled before the Moment path, because it names an account rather than a
+  // Moment and would otherwise be dropped as unrecognised.
+  if (event.envelope.eventType === "UserStatusChanged") {
+    const payload = event.envelope.payload as Record<string, unknown>;
+    const userId = typeof payload.userId === "string" ? payload.userId : undefined;
+    const status = typeof payload.status === "string" ? payload.status : undefined;
+
+    if (userId !== undefined && status !== undefined) {
+      await projector.recordStatus(userId, status, new Date(event.envelope.occurredAt));
+      logger?.info({ userId, status }, "Recorded an account status change");
+    }
+
+    return;
+  }
+
   const moment = momentOf(event);
 
   if (moment === undefined) {

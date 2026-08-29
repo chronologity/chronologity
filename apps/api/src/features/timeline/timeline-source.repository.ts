@@ -12,6 +12,10 @@ export interface TimelineSource {
   readonly discoverable: boolean;
   readonly deletedAt: Date | null;
   readonly moderationState: string | undefined;
+  /** The Location it names, if any. A Moment has at most one. */
+  readonly locationId: string | undefined;
+  /** The real-world Events it names. A Moment may name several. */
+  readonly realWorldEventIds: readonly string[];
 }
 
 /**
@@ -60,15 +64,25 @@ export class TimelineSourceRepository {
       discoverable: boolean;
       deleted_at: Date | null;
       moderation_state: string | null;
+      location_id: string | null;
+      real_world_event_ids: string[] | null;
     }[] = await this.dataSource.query(
       `SELECT m.moment_id, m.author_user_id,
               m.occurrence_start, m.occurrence_end, m.occurrence_precision,
               m.occurrence_offset_minutes,
               m.visibility, m.discoverable, m.deleted_at,
-              ms.state AS moderation_state
+              ms.state AS moderation_state,
+              mloc.location_id,
+              ARRAY(
+                SELECT mre.real_world_event_id
+                  FROM moment_real_world_events mre
+                 WHERE mre.moment_id = m.moment_id
+                 ORDER BY mre.real_world_event_id
+              ) AS real_world_event_ids
          FROM moments m
          LEFT JOIN moderation_states ms
            ON ms.subject_type = 'moment' AND ms.subject_id = m.moment_id
+         LEFT JOIN moment_locations mloc ON mloc.moment_id = m.moment_id
         WHERE m.moment_id = $1`,
       [momentId],
     );
@@ -90,6 +104,8 @@ export class TimelineSourceRepository {
       discoverable: row.discoverable,
       deletedAt: row.deleted_at,
       moderationState: row.moderation_state ?? undefined,
+      locationId: row.location_id ?? undefined,
+      realWorldEventIds: row.real_world_event_ids ?? [],
     };
   }
 

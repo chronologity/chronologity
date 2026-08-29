@@ -356,6 +356,11 @@ async function eraseAccount(
   // Keyed on the author rather than on Moments, so it needs no list of what to
   // look for.
   await options.timeline.removeEverythingBy(userId);
+  await options.timeline.removeContextsBy(userId);
+  // And any record that this account was ever suspended. A moderation decision
+  // about somebody who has asked to be forgotten is exactly the kind of record
+  // that must not outlive them.
+  await options.timeline.forgetSuspension(userId);
 
   // Before the sweep, because the sweep deletes the rows that say where these
   // are. A copy of somebody's whole history left in storage with nothing
@@ -408,6 +413,9 @@ async function eraseMoment(options: ErasureOptions, momentId: string): Promise<v
   // history nobody can erase, because the thing that said what to remove has
   // itself been removed.
   await options.timeline.remove(momentId);
+  // And every scope it belonged to. A row saying an erased Moment was at a
+  // place is a record that it existed, which is what erasure removes.
+  await options.timeline.removeContexts(momentId);
 
   await withTransaction(options.dataSource, async (tx) => {
     // Directly, rather than waiting for the indexer to notice. Deletion must

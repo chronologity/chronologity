@@ -1,5 +1,6 @@
 import type { ClickHouseClient } from "@clickhouse/client";
 import {
+  asClickHouseDateTime,
   TIMELINE_VERSION,
   toRecord,
   type TimelineRecord,
@@ -132,5 +133,131 @@ export class TimelineRepository {
     });
 
     return result.json<TimelineRecord>();
+  }
+  /**
+   * Record which scopes a Moment belongs to.
+   *
+   * Replaces whatever was there, for the same reason `project` does: a Moment
+   * whose Location changed would otherwise appear at both places, since
+   * `ReplacingMergeTree` keys on the sort tuple and the context is part of it.
+   *
+   * @param row - The Moment as the Timeline holds it.
+   * @param contexts - Every scope it belongs to.
+   * @returns Nothing.
+   * @throws {Error} If ClickHouse refuses.
+   */
+  async projectContexts(
+    row: TimelineRow,
+    contexts: readonly { type: "location" | "real_world_event"; id: string }[],
+  ): Promise<void> {
+    await this.removeContexts(row.momentId);
+
+    if (contexts.length === 0) {
+      return;
+    }
+
+    const at = this.now();
+
+    await this.client.insert({
+      table: "timeline_moment_contexts",
+      values: contexts.map((context) => ({
+        context_type: context.type,
+        context_id: context.id,
+        occurred_at: asClickHouseDateTime(row.occurredAt),
+        moment_id: row.momentId,
+        author_user_id: row.authorUserId,
+        visibility: row.visibility,
+        moderation_state: row.moderationState,
+        projected_at: asClickHouseDateTime(at),
+        projection_version: this.version,
+      })),
+      format: "JSONEachRow",
+    });
+  }
+
+  /**
+   * Take a Moment out of every scope it was in.
+   *
+   * Called by projection to make room for changed membership, and by erasure:
+   * a row saying "this Moment was at this place" is a record that the Moment
+   * existed, which is exactly what erasure removes.
+   *
+   * @param momentId - Which Moment.
+   * @returns Nothing.
+   * @throws {Error} If ClickHouse refuses.
+   */
+  async removeContexts(momentId: string): Promise<void> {
+    await this.client.command({
+      query: `DELETE FROM timeline_moment_contexts
+               WHERE moment_id = {momentId: String} AND projection_version = {version: String}`,
+      query_params: { momentId, version: this.version },
+    });
+  }
+
+  /**
+   * Take everything an account contributed out of every scope.
+   *
+   * @param authorUserId - Whose history.
+   * @returns Nothing.
+   * @throws {Error} If ClickHouse refuses.
+   */
+  async removeContextsBy(authorUserId: string): Promise<void> {
+    await this.client.command({
+      query: `DELETE FROM timeline_moment_contexts
+               WHERE author_user_id = {authorUserId: String}
+                 AND projection_version = {version: String}`,
+      query_params: { authorUserId, version: this.version },
+    });
+  }
+
+  /**
+   * Record whether an account's history is withheld.
+   *
+   * One row per account rather than a flag on every Moment they recorded, which
+   * is what makes suspending somebody with a decade of history cost one write
+   * instead of ten thousand — and what stops their Timeline being wrong while
+   * those writes happened.
+   *
+   * Rows are written rather than deleted on reinstatement. The newest
+   * `decidedAt` wins, so a stale message arriving late cannot resurrect a
+   * suspension that was lifted; a delete could not express that.
+   *
+   * @param userId - Whose account.
+   * @param suspended - Whether their history is withheld.
+   * @param decidedAt - When the decision was taken, which orders it against any
+   *   other decision about the same account.
+   * @returns Nothing.
+   * @throws {Error} If ClickHouse refuses.
+   */
+  async recordSuspension(userId: string, suspended: boolean, decidedAt: Date): Promise<void> {
+    await this.client.insert({
+      table: "timeline_suspended_authors",
+      values: [
+        {
+          user_id: userId,
+          decided_at: asClickHouseDateTime(decidedAt),
+          suspended: suspended ? 1 : 0,
+        },
+      ],
+      format: "JSONEachRow",
+    });
+  }
+
+  /**
+   * Forget an account entirely.
+   *
+   * Used by erasure. A row saying somebody was suspended outlives the account
+   * it describes, which is a record of a moderation decision about a person who
+   * has asked to be forgotten.
+   *
+   * @param userId - Whose account.
+   * @returns Nothing.
+   * @throws {Error} If ClickHouse refuses.
+   */
+  async forgetSuspension(userId: string): Promise<void> {
+    await this.client.command({
+      query: `DELETE FROM timeline_suspended_authors WHERE user_id = {userId: String}`,
+      query_params: { userId },
+    });
   }
 }
