@@ -94,6 +94,19 @@ export const preferencesSchema = z.object({
   /** IANA time zone. Null follows the device. */
   timeZone: z.string().max(64).nullable(),
   reducedMotion: z.boolean(),
+  /**
+   * Whether other people may open your Timeline.
+   *
+   * Governs the chronological aggregate, never an individual Moment: what
+   * somebody may read of your history is decided Moment by Moment either way,
+   * and turning this off hides none of them one at a time. What it withholds is
+   * the walk — the ability to move through your history in order, zoom out over
+   * decades, and jump to a date.
+   *
+   * Open by default, as a Moment is public by default. Somebody who wants their
+   * Moments findable without their life being navigable turns it off.
+   */
+  timelineIsPublic: z.boolean(),
 });
 
 export type Preferences = z.infer<typeof preferencesSchema>;

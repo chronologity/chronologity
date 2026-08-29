@@ -152,6 +152,15 @@ export class Preferences {
   @Column("boolean", { name: "requires_follow_approval", default: false })
   requiresFollowApproval!: boolean;
 
+  /**
+   * Whether other people may open this person's Timeline.
+   *
+   * Governs the chronological aggregate, never any individual Moment: what a
+   * Viewer may read is decided Moment by Moment either way.
+   */
+  @Column("boolean", { name: "timeline_is_public", default: true })
+  timelineIsPublic!: boolean;
+
   @Column("timestamptz", { name: "updated_at" })
   updatedAt!: Date;
 

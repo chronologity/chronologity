@@ -494,6 +494,10 @@ describe("users", () => {
         locale: null,
         timeZone: null,
         reducedMotion: false,
+        // Open, as a Moment is public unless its author says otherwise. What
+        // it governs is the walk through somebody's history, never whether any
+        // Moment of it is visible.
+        timelineIsPublic: true,
       });
     });
 

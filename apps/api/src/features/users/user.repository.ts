@@ -236,6 +236,7 @@ export class UserRepository {
         locale: row.preferences.locale,
         timeZone: row.preferences.timeZone,
         reducedMotion: row.preferences.reducedMotion,
+        timelineIsPublic: row.preferences.timelineIsPublic,
       },
     };
   }
@@ -379,6 +380,9 @@ export class UserRepository {
         ...(input.locale === undefined ? {} : { locale: input.locale }),
         ...(input.timeZone === undefined ? {} : { timeZone: input.timeZone }),
         ...(input.reducedMotion === undefined ? {} : { reducedMotion: input.reducedMotion }),
+        ...(input.timelineIsPublic === undefined
+          ? {}
+          : { timelineIsPublic: input.timelineIsPublic }),
         updatedAt: new Date(),
       },
     );
