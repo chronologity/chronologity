@@ -4286,3 +4286,43 @@ Leaving erasure version-scoped and requiring an operator to run it once per live
 **The split is not a rename.** An integration test writes a Moment into a second projection version — what a half-finished cutover leaves behind — and asserts erasure reaches it. Pointing erasure back at the version-scoped removal fails it. CI would never have caught this otherwise, because CI has only ever had one version.
 
 **Dual-writing was rejected** as the more complex answer to a question the rebuild already answers. A rebuild into a fresh version reads authoritative state, so a second pass after the cutover picks up anything recorded during the window, and the deployment sequence is: build the new version, validate it, set the variable, deploy, run the rebuild once more to catch the gap. Idempotent throughout, and it needs no writer that understands two versions at once.
+
+---
+
+# ADR-130 — A Person Is a Timeline Scope, and Their Own Timeline Reports Eligibility Rather Than Filtering It
+
+## Status
+
+Accepted.
+
+## Context
+
+`timelines.md:176` defines a person's Timeline as the history they authored **together with** the history they participated in. Only the first half existed: `GET /timeline` read `timeline_moments` filtered by `author_user_id`, so a Moment somebody had confirmed they were part of never reached the Timeline it belonged to. Participation A built the relationship — propose, accept, reject, withdraw, with consent and erasure — and left it with nowhere to appear.
+
+Two properties made this more than an extra query. A person's Timeline carries Moments authored by *other people*, which the per-row eligibility rule was never written to reason about. And `participation.md` requires that a Moment somebody accepted but cannot read still appear on their own Timeline as its date alone, so their history has no gap they cannot see the shape of — the first row this system returns *because* a Viewer may know something happened while being denied what it says.
+
+## Decision
+
+**A person is the third `context_type` in `timeline_moment_contexts`**, after a Location and a real-world Event. That table's own comment anticipated it — `context_type` is `LowCardinality(String)` "so a third kind of context is a projector change rather than a migration" — and it proved true: no ClickHouse migration was needed. A person row is written for the Moment's author as well as for each accepted participant, so a Timeline is one contiguous range of the existing sort key rather than a union of two queries.
+
+**Somebody's own Timeline does not filter on eligibility; it reports it.** The rule becomes a selected column rather than a `WHERE` clause, and the service redacts the rows it marks unreadable. That is safe precisely because nothing is filtered: the page is the same size either way, so its size cannot disclose what it does not show — which is the property the rule protects everywhere else by filtering.
+
+**Counts follow paging, in both directions.** A bucket on your own Timeline includes Moments you cannot read, because paging returns them redacted. A bucket on somebody else's excludes them, because paging excludes them. The rule is that a count and its page must agree, and the two surfaces disagree about what a page contains.
+
+**The contract gained two tagged shapes** rather than one shape with optional fields. A client cannot read a field that is absent, and a missing field is indistinguishable from one that was never sent. The withheld shape omits `occurrenceOffsetMinutes`: a UTC offset is the one field in the occurrence set that says something about *where* somebody was.
+
+**Whether a person's Timeline may be opened at all is theirs to decide**, defaulting to open. It is resolved once per request alongside suspension and Blocks, and a closed Timeline answers empty rather than refusing.
+
+## Alternatives Considered
+
+A separate `timeline_person_moments` table; computing redaction over each page in PostgreSQL rather than through the eligibility resolver; and leaving a person's Timeline unreadable by others, as it had been.
+
+## Rationale
+
+**The scope person's own state cannot be a per-row rule.** `eligible()` tests suspension and Blocks against a Moment's `author_user_id`, and on a person's Timeline the rows include Moments authored by third parties. A suspended person's participations would have gone on being shown under their name, and blocking somebody would not have hidden theirs. It is a fact about the scope rather than about any row, so it is resolved once per request — and never applied to somebody's own reading, because a suspended person still navigates their own past, which is what makes an appeal possible.
+
+**Redaction stayed in the resolver rather than moving to a per-page PostgreSQL read**, which the design review argued for on boundedness grounds. Splitting it would mean expressing the eligibility rule a second time, and this codebase's standing objection is that a rule written twice eventually disagrees with itself. The bound *is* weaker for a person than for a place — "restricted Moments at this Location naming me" is bounded by somewhere, while "restricted Moments I participated in naming me" is bounded by a relationship — so that is written down where the join is, along with the fact that it fails safe: a Moment missing from the list is withheld rather than shown.
+
+**Every Moment now writes a context row**, where before a Moment naming no Location and no Event wrote none. The cost is a delete-before-insert on reprojection that such Moments previously skipped. Measured on a rebuild into a fresh version — the flow ADR-129 made possible — 641 Moments produced 647 person rows at 3.5 a second, against 2.3 for an in-place rebuild.
+
+**Which is why this shipped as three branches rather than one.** Moving `/timeline` to the person context blanks every Timeline until a rebuild completes, so it needed a configurable reader first (ADR-129), and building on an eligibility rule that had a hole in it would have put that hole under somebody's own name (the `temporarily_unavailable` fix).
