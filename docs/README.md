@@ -56,6 +56,7 @@ docs/
 │   ├── moments.md
 │   ├── timelines.md
 │   ├── timeline.md
+│   ├── timeline-first-curation-and-discovery.md
 │   ├── causality.md
 │   ├── historical-significance.md
 │   ├── users.md
@@ -67,6 +68,7 @@ docs/
 │   ├── locations.md
 │   ├── feed.md
 │   ├── discovery.md
+│   ├── saved-views.md
 │   ├── search.md
 │   ├── notifications.md
 │   ├── media.md
