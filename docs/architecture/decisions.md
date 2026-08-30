@@ -4326,3 +4326,49 @@ A separate `timeline_person_moments` table; computing redaction over each page i
 **Every Moment now writes a context row**, where before a Moment naming no Location and no Event wrote none. The cost is a delete-before-insert on reprojection that such Moments previously skipped. Measured on a rebuild into a fresh version — the flow ADR-129 made possible — 641 Moments produced 647 person rows at 3.5 a second, against 2.3 for an in-place rebuild.
 
 **Which is why this shipped as three branches rather than one.** Moving `/timeline` to the person context blanks every Timeline until a rebuild completes, so it needed a configurable reader first (ADR-129), and building on an eligibility rule that had a hole in it would have put that hole under somebody's own name (the `temporarily_unavailable` fix).
+
+---
+
+# ADR-131 — Timeline Derivation Takes a View Specification
+
+## Status
+
+Accepted.
+
+## Context
+
+The Timeline engine took loose parameters: a viewer, sometimes a scope, sometimes a cursor, a direction, a limit, an instant, a scale — spread across eight service methods and sixteen routes, with the context expressible only as a path segment and never as data. Nothing bundled them, so nothing could persist or re-send them.
+
+`roadmap.md:802` requires the engine to accept a serialisable, versioned, product-level View Specification instead, and says plainly that this is a constraint on the interface rather than a feature. The reason is `saved-views.md`: Saved Views must reuse Timeline derivation semantics rather than implementing a separate query system, which is only possible if the thing a Saved View persists is the thing navigation sends.
+
+`saved-views.md` listed the specification's fields and left two of them — perspective and supported filters — named and never defined.
+
+## Decision
+
+**A View Specification is a contract type**, carrying context, perspective, temporal range, zoom, filters, position, limit, direction and a derivation version. It lives in `packages/contracts` because a Saved View will persist it, a shared link will carry it, and the feed aggregator will send it.
+
+**Perspective is which lens is applied to a context's Moments** — `all`, `authored`, `participated`. A person's Timeline is what they recorded together with what they took part in, and those are different questions about the same person. A place has one perspective, and anything else is refused rather than ignored.
+
+**Filters are a closed, enumerated set** — an author, a Location, a real-world Event — that narrow within a context. A filter naming the same kind of thing as the context is refused: filtering a Location's Timeline by that Location says nothing, and by a different one can never hold anything.
+
+**Unknown fields are refused, not dropped.** Zod strips unrecognised keys by default, which would mean a saved view asking to be narrowed opening unnarrowed — showing its owner more history than they asked for. The schema is strict at both levels.
+
+**The derivation version migrates rather than refuses.** This is the one place the cursor precedent must not be copied: `timeline.cursor.ts` refuses an unrecognised version because losing a cursor costs a restart, while a refused specification is somebody's saved view failing to open.
+
+**Recorded-at is projected.** "New since I last looked" must key on when a Moment was recorded, never when it happened; `projected_at` cannot serve, since it is the deduplication column and moves on every reprojection, so a rebuilt decade would read as new.
+
+**Eight methods became four**, each taking a specification. The own-history and scoped paths stopped being two surfaces: whose history it is comes from the specification's context rather than from which method was called.
+
+## Alternatives Considered
+
+One `derive` method returning a union; leaving perspective and filters unreachable until Saved Views needed them; and inventing meanings for the two undefined fields while plumbing.
+
+## Rationale
+
+**Four methods rather than one.** A page, a head, a jump and counts return genuinely different shapes, and collapsing them would push a discriminated union onto every caller. What matters is that context became data, which is what removed the own-versus-scoped split.
+
+**Perspective and filters are reachable today.** They were defined here and would otherwise have waited for an unscheduled consumer — code nobody could use and no test could observe, sitting unexercised through every later change. Exposing them on the routes made them real capability and put them under the same equivalence tests as everything else.
+
+**The two undefined fields were settled before anything was built on them.** A field's meaning is cheap to add and expensive to change once things have been saved with it, and deciding what "perspective" meant while wiring a query would have made a plumbing choice into a product decision.
+
+**Sixteen routes still exist.** They are entry points that assemble a specification, which is exactly the diagram `saved-views.md` draws: navigation, a Saved View, a shared link and discovery all converge on one object. Their seventy-seven existing tests pass unchanged, which is what proves the interface changed without the behaviour changing.
