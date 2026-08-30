@@ -73,6 +73,9 @@ export function timelineRowFor(source: TimelineSource): TimelineRow | undefined 
     authorUserId: source.authorUserId,
     // Occurrence, never insertion. The whole point of the table.
     occurredAt: source.occurrenceStart,
+    // Carried through untouched. Occurrence orders the Timeline; this only ever
+    // answers what is new.
+    recordedAt: source.recordedAt,
     occurrenceEnd: source.occurrenceEnd,
     occurrencePrecision: readPrecision(source.occurrencePrecision),
     occurrenceOffsetMinutes: source.occurrenceOffsetMinutes,

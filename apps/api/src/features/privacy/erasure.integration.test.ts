@@ -653,6 +653,7 @@ describe("erasure", () => {
         momentId,
         authorUserId: author.userId,
         occurredAt: new Date("1998-06-01T00:00:00.000Z"),
+        recordedAt: new Date(),
         occurrenceEnd: new Date("1998-06-01T00:00:00.000Z"),
         occurrencePrecision: "day",
         occurrenceOffsetMinutes: 0,

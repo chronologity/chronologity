@@ -1,0 +1,21 @@
+-- When a Moment was recorded, as distinct from when it happened.
+--
+-- The Timeline is ordered by occurrence and always will be: a photograph
+-- uploaded today of 1969 belongs in 1969, and that is the product. But
+-- "what is new since I last looked" cannot be answered from occurrence time.
+-- Backfilling history into its correct place is the point of Chronologity, so a
+-- high-water mark on occurrence would miss precisely the additions worth
+-- surfacing — somebody scanning a decade of family photographs would add
+-- nothing "new" at all.
+--
+-- `projected_at` cannot serve either. It is the column `ReplacingMergeTree`
+-- deduplicates on, so it moves whenever a Moment is reprojected: a visibility
+-- change, a moderation decision, an accepted participation, or a rebuild. A
+-- high-water mark on it would report a rebuilt decade as new, and would do so
+-- for every reader at once.
+--
+-- Added with a default rather than backfilled in place. Existing rows carry the
+-- epoch until a rebuild replaces them, which reads as "recorded before anybody
+-- was watching" — the safe direction, since it makes nothing spuriously new.
+ALTER TABLE timeline_moments
+    ADD COLUMN IF NOT EXISTS recorded_at DateTime64(3) DEFAULT toDateTime64(0, 3);

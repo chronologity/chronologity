@@ -5,6 +5,8 @@ export interface TimelineSource {
   readonly momentId: string;
   readonly authorUserId: string;
   readonly occurrenceStart: Date;
+  /** When the Moment was recorded, which chronology never uses. */
+  readonly recordedAt: Date;
   readonly occurrenceEnd: Date;
   readonly occurrencePrecision: string;
   readonly occurrenceOffsetMinutes: number;
@@ -70,6 +72,7 @@ export class TimelineSourceRepository {
       moment_id: string;
       author_user_id: string;
       occurrence_start: Date;
+      created_at: Date;
       occurrence_end: Date;
       occurrence_precision: string;
       occurrence_offset_minutes: number;
@@ -81,7 +84,7 @@ export class TimelineSourceRepository {
       real_world_event_ids: string[] | null;
       participant_user_ids: string[] | null;
     }[] = await this.dataSource.query(
-      `SELECT m.moment_id, m.author_user_id,
+      `SELECT m.moment_id, m.author_user_id, m.created_at,
               m.occurrence_start, m.occurrence_end, m.occurrence_precision,
               m.occurrence_offset_minutes,
               m.visibility, m.discoverable, m.deleted_at,
@@ -126,6 +129,7 @@ export class TimelineSourceRepository {
       momentId: row.moment_id,
       authorUserId: row.author_user_id,
       occurrenceStart: row.occurrence_start,
+      recordedAt: row.created_at,
       occurrenceEnd: row.occurrence_end,
       occurrencePrecision: row.occurrence_precision,
       occurrenceOffsetMinutes: row.occurrence_offset_minutes,

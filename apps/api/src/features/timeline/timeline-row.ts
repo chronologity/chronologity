@@ -20,6 +20,16 @@ export interface TimelineRow {
    * the product rather than an edge case.
    */
   readonly occurredAt: Date;
+  /**
+   * When it was recorded, which is a different fact and orders nothing.
+   *
+   * Carried so "new since I last looked" can be answered. It must key on this
+   * rather than on occurrence: a photograph added today of 1969 is new, and
+   * asking occurrence time would call it fifty years old — which would miss
+   * precisely the additions worth surfacing, since backfilling history into its
+   * correct place is the product.
+   */
+  readonly recordedAt: Date;
   readonly occurrenceEnd: Date;
   /** What the occurrence actually claims, so a month is not shown as a day. */
   readonly occurrencePrecision: TemporalPrecision;
@@ -36,6 +46,7 @@ export const TIMELINE_VERSION = "timeline-v1";
 /** What ClickHouse stores, which is not quite what TypeScript holds. */
 export interface TimelineRecord {
   occurred_at: string;
+  recorded_at: string;
   moment_id: string;
   author_user_id: string;
   projected_at: string;
@@ -96,6 +107,7 @@ export function toRecord(
 ): TimelineRecord {
   return {
     occurred_at: asClickHouseDateTime(row.occurredAt),
+    recorded_at: asClickHouseDateTime(row.recordedAt),
     moment_id: row.momentId,
     author_user_id: row.authorUserId,
     projected_at: asClickHouseDateTime(projectedAt),

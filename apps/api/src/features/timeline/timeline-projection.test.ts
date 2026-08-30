@@ -8,6 +8,7 @@ const source = (over: Partial<TimelineSource> = {}): TimelineSource => ({
   momentId: randomUUID(),
   authorUserId: randomUUID(),
   occurrenceStart: new Date("1998-06-01T00:00:00.000Z"),
+  recordedAt: new Date("2026-01-01T00:00:00.000Z"),
   occurrenceEnd: new Date("1998-08-31T23:59:59.000Z"),
   occurrencePrecision: "month",
   occurrenceOffsetMinutes: 0,
