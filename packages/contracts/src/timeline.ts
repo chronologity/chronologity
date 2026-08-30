@@ -2,6 +2,7 @@ import { z } from "zod";
 import { identifierSchema } from "./identifiers.js";
 import { temporalPrecisionSchema, timestampSchema } from "./time.js";
 import { momentVisibilitySchema } from "./moments.js";
+import { viewPerspectiveSchema } from "./view-specification.js";
 
 /**
  * Navigating history.
@@ -104,7 +105,38 @@ export const timelinePageSchema = z.object({
 export type TimelinePage = z.infer<typeof timelinePageSchema>;
 
 /** Asking for a page. */
-export const timelinePageRequestSchema = z.object({
+/**
+ * What every Timeline request may narrow by.
+ *
+ * The specification's fields, as a client sends them. A route assembles these
+ * into a View Specification along with the context its path names — so a
+ * request and a Saved View describe the same thing in the same vocabulary,
+ * which is what stops the two drifting apart.
+ */
+export const timelineNarrowingSchema = z.object({
+  /**
+   * Which lens on the context's Moments.
+   *
+   * Only a person's Timeline has more than one: their history is what they
+   * recorded together with what they took part in, and the two are different
+   * questions about the same person.
+   */
+  perspective: viewPerspectiveSchema.default("all"),
+  /** Only Moments this person recorded. */
+  authorUserId: identifierSchema.optional(),
+  /** Only Moments at this place. */
+  locationId: identifierSchema.optional(),
+  /** Only Moments that were part of this occurrence. */
+  realWorldEventId: identifierSchema.optional(),
+  /** The start of a stretch of history, by when things happened. */
+  from: timestampSchema.optional(),
+  /** Its end. */
+  to: timestampSchema.optional(),
+});
+
+export type TimelineNarrowing = z.infer<typeof timelineNarrowingSchema>;
+
+export const timelinePageRequestSchema = timelineNarrowingSchema.extend({
   cursor: z.string().max(500).optional(),
   direction: timelineDirectionSchema.default("older"),
   limit: z.coerce.number().int().min(1).max(200).default(50),
@@ -113,7 +145,7 @@ export const timelinePageRequestSchema = z.object({
 export type TimelinePageRequest = z.infer<typeof timelinePageRequestSchema>;
 
 /** Asking what surrounds a moment in time. */
-export const timelineAroundRequestSchema = z.object({
+export const timelineAroundRequestSchema = timelineNarrowingSchema.extend({
   /** The instant asked about, which need not be one anything happened. */
   at: timestampSchema,
   limit: z.coerce.number().int().min(1).max(200).default(50),
@@ -138,7 +170,9 @@ export const timelineBucketSchema = z.object({
 });
 
 /** Asking how history is distributed. */
-export const timelineBucketsRequestSchema = z.object({ scale: timelineScaleSchema });
+export const timelineBucketsRequestSchema = timelineNarrowingSchema.extend({
+  scale: timelineScaleSchema,
+});
 
 export type TimelineBucketsRequest = z.infer<typeof timelineBucketsRequestSchema>;
 
