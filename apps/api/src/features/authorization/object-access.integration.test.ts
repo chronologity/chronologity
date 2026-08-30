@@ -561,6 +561,17 @@ const ATTEMPTS: readonly Attempt[] = [
     url: (o) => `/saved-views/${o.savedViewId}`,
     refusal: 404,
   },
+  // Saying you have looked at somebody else's view. Not a read at all but a
+  // write, and one that would blank whatever their own count had been telling
+  // them — so the answer is the one an identifier nobody holds gets.
+  {
+    method: "POST",
+    path: "/saved-views/:savedViewId/visits",
+    url: (o) => `/saved-views/${o.savedViewId}/visits`,
+    refusal: 404,
+    indistinguishable: true,
+  },
+
   // Making a link to somebody else's view would be handing out access to a
   // thing that is not yours to hand out.
   {

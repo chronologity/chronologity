@@ -94,3 +94,45 @@ export class SavedViewShareRow {
   @JoinColumn({ name: "saved_view_id" })
   savedView?: SavedViewRow;
 }
+
+/**
+ * What was last counted as new in a saved view.
+ *
+ * Derived and rebuildable: everything here can be recomputed from the Timeline
+ * projection, which is why it is a table beside the view rather than columns on
+ * it. When somebody last looked is not derived and lives on the view itself.
+ *
+ * Mapped as an entity even though the repository reads it with raw SQL, so that
+ * the schema tests compare it against the migration like every other table. An
+ * unmapped table drifts unnoticed.
+ */
+@Entity("saved_view_awareness")
+@Index("saved_view_awareness_staleness_idx", ["computedAt"])
+export class SavedViewAwarenessRow {
+  @PrimaryColumn("uuid", { name: "saved_view_id" })
+  savedViewId!: string;
+
+  /** Never above the counter's ceiling; see `capped`. */
+  @Column("integer", { name: "new_moment_count", default: 0 })
+  newMomentCount!: number;
+
+  /** Whether counting stopped at the ceiling rather than running out of history. */
+  @Column("boolean", { default: false })
+  capped!: boolean;
+
+  /**
+   * Which visit the count was taken against.
+   *
+   * The sweep's write is conditional on this, so a visit landing mid-count wins.
+   */
+  @Column("timestamptz", { name: "visited_through", nullable: true })
+  visitedThrough!: Date | null;
+
+  /** When it was counted. Null means never, and sorts first in the sweep's queue. */
+  @Column("timestamptz", { name: "computed_at", nullable: true })
+  computedAt!: Date | null;
+
+  @ManyToOne(() => SavedViewRow)
+  @JoinColumn({ name: "saved_view_id" })
+  view?: SavedViewRow;
+}

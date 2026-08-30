@@ -18,6 +18,7 @@ import {
   ParticipationRefusal,
 } from "../../features/participation/participation.model.js";
 import {
+  SavedViewAwarenessRow,
   SavedViewRow,
   SavedViewShareRow,
 } from "../../features/saved-views/saved-view.model.js";
@@ -141,6 +142,7 @@ const entities = [
   UserBlock,
   MomentParticipation,
   ParticipationRefusal,
+  SavedViewAwarenessRow,
   SavedViewRow,
   SavedViewShareRow,
   ModerationStateRow,
