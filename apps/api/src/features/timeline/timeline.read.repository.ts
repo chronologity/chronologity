@@ -92,25 +92,6 @@ function withMoments(chosen: string, order: string): string {
 }
 
 /**
- * The condition deciding what a Viewer may be shown in a scope.
- *
- * One fragment, used by every scoped read. `visibleToViewer` is one fragment
- * for Moments and `eligibleForViewer` is one for Search, both for the same
- * reason: a rule written in several places eventually disagrees with itself,
- * and this is the rule that leaks when it does.
- *
- * It reads four parameters the caller must supply — `viewer`, `blocked`,
- * `audience`, `isAdult` — and there is no variant that omits them. A caller who
- * forgot one would otherwise get somebody else's history.
- *
- * The order is the policy's: your own first, then the author, then the Block,
- * then the audience, then age. A Block cannot be outlived by an invitation
- * issued before it.
- *
- * @param alias - The table alias the Timeline rows are read under.
- * @returns A SQL condition, true when this Viewer may be shown this row.
- */
-/**
  * A view that narrows nothing.
  *
  * So a caller with no specification — a rebuild, a test, anything internal —
