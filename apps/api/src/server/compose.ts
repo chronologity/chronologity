@@ -155,6 +155,7 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
   // comment on one when it is deleted.
   const momentCommentRepository = new MomentCommentRepository(database.dataSource);
 
+  const savedViewRepository = new SavedViewRepository(database.dataSource);
   const moments = new MomentService(
     database.dataSource,
     new MomentRepository(database.dataSource),
@@ -169,6 +170,10 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
     // The HTTP process never performs one: erasing media is unbounded
     // object-storage work and belongs to the worker.
     new ErasureRepository(database.dataSource),
+    undefined,
+    // Narrowing an audience takes a Moment out of sight of whoever was dropped,
+    // so what their saved views said was new is forgotten with the change.
+    savedViewRepository,
   );
 
   const momentReactionRepository = new MomentReactionRepository(database.dataSource);
@@ -298,12 +303,11 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
       momentReactionRepository,
       momentCommentRepository,
       participationRepository,
+      // A Block narrows what each of two people sees of the other, in both
+      // directions, so both sides' counts go with it.
+      savedViewRepository,
     ),
-    savedViews: new SavedViewService(
-      database.dataSource,
-      new SavedViewRepository(database.dataSource),
-      accounts,
-    ),
+    savedViews: new SavedViewService(database.dataSource, savedViewRepository, accounts),
     participations: new ParticipationService(
       database.dataSource,
       participationRepository,

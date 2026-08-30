@@ -378,6 +378,29 @@ export class MomentRepository {
   }
 
   /**
+   * Who is on a Moment's audience, by identifier alone.
+   *
+   * Separate from `findAudience`, which resolves whole people for somebody
+   * looking at their own audience. This answers a question about eligibility
+   * rather than about people, and is read inside the transaction that is about
+   * to replace the list — so it must not join anything that could have changed
+   * underneath it.
+   *
+   * @param tx - The caller's transaction.
+   * @param momentId - Which Moment.
+   * @returns The identifiers named, in no particular order.
+   * @throws {Error} If the database refuses.
+   */
+  async audienceIds(tx: Transaction, momentId: string): Promise<string[]> {
+    const rows: { user_id: string }[] = await tx.query(
+      `SELECT user_id FROM moment_audience WHERE moment_id = $1`,
+      [momentId],
+    );
+
+    return rows.map((row) => row.user_id);
+  }
+
+  /**
    * Read who may see a restricted Moment.
    *
    * @param momentId - Which Moment.

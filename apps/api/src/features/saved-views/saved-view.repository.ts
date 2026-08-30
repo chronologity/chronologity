@@ -26,6 +26,16 @@ import { SavedViewRow, SavedViewShareRow } from "./saved-view.model.js";
  */
 const TOKEN_BYTES = 32;
 
+/** A view due to be recounted, with everything needed to recount it. */
+export interface StaleView {
+  readonly savedViewId: string;
+  readonly userId: string;
+  /** Read back through the contract by the caller, never trusted as it stands. */
+  readonly specification: unknown;
+  readonly createdAt: Date;
+  readonly lastVisitedAt: Date | null;
+}
+
 /**
  * Reading and writing Saved Views and the links made to them.
  *
@@ -172,6 +182,132 @@ export class SavedViewRepository {
           computedAt: row.computed_at,
         },
       ]),
+    );
+  }
+
+  /**
+   * The views whose counts are oldest, and the everything needed to recount them.
+   *
+   * Staleness is the queue: nothing is claimed, no lease is taken, and a view
+   * just visited sorts first because its `computed_at` was set back to null.
+   *
+   * **No `FOR UPDATE SKIP LOCKED`.** The significance sweep's doc claims it and
+   * its SQL does not have it, which is a discrepancy worth not copying. One
+   * worker is assumed here, and it is safe for two to overlap anyway: the write
+   * is a conditional update that a concurrent visit already has to survive, so
+   * the worst a second worker costs is duplicated reading.
+   *
+   * @param limit - How many at most.
+   * @returns The views, stalest first, each with what it points at and the mark
+   *   to count from.
+   * @throws {Error} If the database refuses.
+   */
+  async stalest(limit: number): Promise<StaleView[]> {
+    const rows: {
+      saved_view_id: string;
+      user_id: string;
+      specification: unknown;
+      created_at: Date;
+      last_visited_at: Date | null;
+    }[] = await this.dataSource.query(
+      `SELECT v.saved_view_id, v.user_id, v.specification, v.created_at, v.last_visited_at
+         FROM saved_view_awareness AS a
+         JOIN saved_views AS v ON v.saved_view_id = a.saved_view_id
+        ORDER BY a.computed_at ASC NULLS FIRST, a.saved_view_id ASC
+        LIMIT $1`,
+      [limit],
+    );
+
+    return rows.map((row) => ({
+      savedViewId: row.saved_view_id,
+      userId: row.user_id,
+      specification: row.specification,
+      createdAt: row.created_at,
+      lastVisitedAt: row.last_visited_at,
+    }));
+  }
+
+  /**
+   * Record what a sweep counted, unless somebody looked while it was counting.
+   *
+   * The write is conditional on the visit the count was taken against, because
+   * a visit landing mid-count has already written a zero and moved the mark.
+   * Overwriting it would tell somebody about history they had just been
+   * through — a read-then-write where a conditional update belongs.
+   *
+   * @param tx - The caller's transaction.
+   * @param savedViewId - Which view.
+   * @param countedFrom - The visit mark the count was taken against, or null
+   *   when the view had never been visited.
+   * @param count - How many, already bounded by the caller's ceiling.
+   * @param capped - Whether counting stopped at that ceiling.
+   * @param at - When it was counted.
+   * @returns Whether it was recorded. False means somebody visited first, and
+   *   their zero stands.
+   * @throws {Error} If the database refuses.
+   */
+  async recordCount(
+    tx: Transaction,
+    savedViewId: string,
+    countedFrom: Date | null,
+    count: number,
+    capped: boolean,
+    at: Date,
+  ): Promise<boolean> {
+    const rows: { count: number }[] = await tx.query(
+      `WITH written AS (
+          UPDATE saved_view_awareness
+             SET new_moment_count = $3, capped = $4, visited_through = $2, computed_at = $5
+           WHERE saved_view_id = $1
+             AND visited_through IS NOT DISTINCT FROM $2
+       RETURNING 1
+       ) SELECT COUNT(*)::int AS count FROM written`,
+      [savedViewId, countedFrom, count, capped, at],
+    );
+
+    return (rows[0]?.count ?? 0) > 0;
+  }
+
+  /**
+   * Forget what was counted for everything these people saved.
+   *
+   * Called when somebody's eligibility **narrows** — a Block in either
+   * direction, or being dropped from a Moment's audience — from inside the
+   * transaction that narrows it.
+   *
+   * Those two narrowings are decisions taken *about a reader*, which is what
+   * makes them worth the synchronous write. A count that fell from fourteen to
+   * eleven while somebody watched would rebuild the very inference the
+   * symmetric-Block rule exists to prevent: `timeline.eligibility.ts` keeps a
+   * Block invisible from both sides precisely so it cannot be read off results
+   * that stopped appearing. A pollable badge would say it out loud.
+   *
+   * Narrowings aimed at nobody in particular — a Moment going private, a
+   * moderation decision — are left to the sweep, because they remove history
+   * from everybody at once and disclose nothing about the reader.
+   *
+   * Zeroing rather than recomputing: under-reporting is the safe direction, and
+   * `computed_at = NULL` puts the view at the head of the sweep's queue so the
+   * truth follows shortly.
+   *
+   * @param tx - The caller's transaction, so the count cannot outlive the change.
+   * @param userIds - Whose views to forget. Duplicates and unknown ids are
+   *   harmless; an empty list writes nothing.
+   * @returns Nothing.
+   * @throws {Error} If the database refuses.
+   */
+  async forgetFor(tx: Transaction, userIds: readonly string[]): Promise<void> {
+    if (userIds.length === 0) {
+      return;
+    }
+
+    await tx.query(
+      `UPDATE saved_view_awareness AS a
+          SET new_moment_count = 0, capped = false, computed_at = NULL
+         FROM saved_views AS v
+        WHERE v.saved_view_id = a.saved_view_id
+          AND v.user_id = ANY($1)`,
+      [userIds],
     );
   }
 

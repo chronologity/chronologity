@@ -18,6 +18,7 @@ import { NotFoundError } from "../../lib/errors/not-found-error.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
 import type { LocationRepository } from "../locations/location.repository.js";
 import type { FollowRepository } from "../social/follow.repository.js";
+import type { SavedViewRepository } from "../saved-views/saved-view.repository.js";
 import type { UserRepository } from "../users/user.repository.js";
 import type { RealWorldEventRepository } from "../real-world-events/real-world-event.repository.js";
 import type { UploadRepository } from "../uploads/upload.repository.js";
@@ -88,6 +89,9 @@ export class MomentService {
    *   further — which is what this service did before erasure existed, and is
    *   the right behaviour for a process with no worker behind it.
    * @param clock - Injected so tests can move time without waiting.
+   * @param savedViews - Optional. Narrowing a Moment's audience takes it out of
+   *   sight of whoever was dropped, so any count of what is new in their saved
+   *   views is forgotten in the same transaction.
    */
   constructor(
     private readonly dataSource: DataSource,
@@ -101,6 +105,7 @@ export class MomentService {
     private readonly comments: MomentCommentRepository,
     private readonly erasures?: ErasureRepository,
     private readonly clock: () => Date = () => new Date(),
+    private readonly savedViews?: SavedViewRepository,
   ) {}
 
   /**
@@ -1076,7 +1081,18 @@ export class MomentService {
     await this.checkEveryoneExists(audience);
 
     await withTransaction(this.dataSource, async (tx) => {
+      // Read before it is replaced. Whoever was named and no longer is has just
+      // lost sight of this Moment, and any count of what is new in their saved
+      // views now includes something they may not open.
+      const dropped = (await this.moments.audienceIds(tx, momentId)).filter(
+        (userId) => !audience.includes(userId),
+      );
+
       await this.moments.setVisibility(tx, momentId, request.visibility, audience, this.clock());
+      // Only those who lost sight. Somebody newly named gains history, which
+      // makes their count too low — under-reporting, which is the safe
+      // direction and something the sweep corrects in its own time.
+      await this.savedViews?.forgetFor(tx, dropped);
       await this.announce(
         tx,
         "MomentVisibilityChanged",

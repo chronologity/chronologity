@@ -20,6 +20,7 @@ import type { LocationRepository } from "../locations/location.repository.js";
 import type { RealWorldEventRepository } from "../real-world-events/real-world-event.repository.js";
 import type { MomentCommentRepository } from "../moments/moment-comment.repository.js";
 import type { MomentReactionRepository } from "../moments/moment-reaction.repository.js";
+import type { SavedViewRepository } from "../saved-views/saved-view.repository.js";
 import type { UserRepository } from "../users/user.repository.js";
 import type { FollowRepository } from "./follow.repository.js";
 import {
@@ -61,6 +62,9 @@ export class FollowService {
    *   rather than removed.
    * @param participations - Optional. Blocking settles unanswered proposals
    *   between the two people, permanently and in both directions.
+   * @param savedViews - Optional. Blocking narrows what each of the two may see
+   *   of the other, so any count of what is new in their saved views is now too
+   *   high and is forgotten in the same transaction.
    */
   constructor(
     private readonly dataSource: DataSource,
@@ -72,6 +76,7 @@ export class FollowService {
     private readonly reactions?: MomentReactionRepository,
     private readonly comments?: MomentCommentRepository,
     private readonly participations?: ParticipationRepository,
+    private readonly savedViews?: SavedViewRepository,
   ) {}
 
   /**
@@ -415,6 +420,11 @@ export class FollowService {
       // surprising: an unanswerable request from somebody you have blocked is
       // exactly the recurring task refusal exists to prevent.
       await this.participations?.rejectBetween(tx, blockerUserId, blockedUserId, at);
+      // Both sides, because the Block is symmetric: each stops appearing in the
+      // other's history, so each holds saved views whose counts are now too
+      // high. Done here rather than left to the sweep because a badge falling
+      // while somebody watched would say what a Block is meant not to say.
+      await this.savedViews?.forgetFor(tx, [blockerUserId, blockedUserId]);
     });
   }
 
