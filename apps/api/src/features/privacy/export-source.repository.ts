@@ -400,18 +400,23 @@ export class ExportSourceRepository {
    * @throws {Error} If the database refuses.
    */
   async savedViews(userId: string): Promise<SavedViewSource[]> {
-    const rows: { title: string; created_at: Date; specification: unknown }[] =
-      await this.dataSource.query(
-        `SELECT title, created_at, specification
-           FROM saved_views
-          WHERE user_id = $1
-          ORDER BY created_at ASC`,
-        [userId],
-      );
+    const rows: {
+      title: string;
+      created_at: Date;
+      last_visited_at: Date | null;
+      specification: unknown;
+    }[] = await this.dataSource.query(
+      `SELECT title, created_at, last_visited_at, specification
+         FROM saved_views
+        WHERE user_id = $1
+        ORDER BY created_at ASC`,
+      [userId],
+    );
 
     return rows.map((row) => ({
       title: row.title,
       createdAt: row.created_at,
+      lastVisitedAt: row.last_visited_at,
       specification: row.specification,
     }));
   }

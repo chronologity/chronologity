@@ -6,6 +6,7 @@ import {
   describeMoment,
   describePerson,
   describeReaction,
+  describeSavedView,
 } from "./export-document.js";
 
 /** Values that must never reach a file somebody downloads. */
@@ -157,6 +158,41 @@ describe("describeComment and describeReaction", () => {
 
     assert.equal(exported.body, "Something somebody said");
     assert.equal(exported.writtenAt, "2020-03-03T00:00:00.000Z");
+  });
+});
+
+describe("describeSavedView", () => {
+  const saved = {
+    title: "The nineties",
+    createdAt: new Date("2020-01-01T00:00:00.000Z"),
+    lastVisitedAt: new Date("2026-08-30T09:00:00.000Z"),
+    specification: { context: { type: "person", id: SECRET.userId }, limit: 50 },
+  };
+
+  it("carries the specification verbatim", () => {
+    // A Saved View *is* its specification. Summarising it would hand somebody a
+    // description of their view rather than the view.
+    assert.deepEqual(describeSavedView(saved).view, saved.specification);
+  });
+
+  it("says when it was saved and when they last opened it", () => {
+    const described = describeSavedView(saved);
+
+    assert.equal(described.savedAt, "2020-01-01T00:00:00.000Z");
+    assert.equal(described.lastVisitedAt, "2026-08-30T09:00:00.000Z");
+  });
+
+  it("leaves out a visit that never happened", () => {
+    assert.equal(describeSavedView({ ...saved, lastVisitedAt: null }).lastVisitedAt, undefined);
+  });
+
+  it("carries no count of what was new", () => {
+    // Derived, stale by construction, and the one field that can over-report
+    // Moments somebody may no longer see. Everywhere else a sweep corrects that
+    // within the hour; a downloaded file outlives any correction.
+    const described: Record<string, unknown> = { ...describeSavedView(saved) };
+
+    assert.deepEqual(Object.keys(described).sort(), ["lastVisitedAt", "savedAt", "title", "view"]);
   });
 });
 

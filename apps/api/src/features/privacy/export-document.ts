@@ -308,6 +308,14 @@ export interface ExportedSavedView {
   readonly title: string;
   readonly savedAt: string;
   /**
+   * When they last opened it, absent if they never did.
+   *
+   * A fact about their own behaviour, on their own row, disclosing nothing about
+   * anybody else — so leaving it out would be incomplete in the way leaving out
+   * `savedAt` would be.
+   */
+  readonly lastVisitedAt?: string;
+  /**
    * The specification, verbatim.
    *
    * A Saved View *is* its specification, so an export that summarised it would
@@ -322,6 +330,7 @@ export interface ExportedSavedView {
 export interface SavedViewSource {
   readonly title: string;
   readonly createdAt: Date;
+  readonly lastVisitedAt: Date | null;
   readonly specification: unknown;
 }
 
@@ -332,9 +341,16 @@ export interface SavedViewSource {
  * @returns It, with the specification unchanged.
  */
 export function describeSavedView(source: SavedViewSource): ExportedSavedView {
+  // How much was new is deliberately absent. It is derived, it is a hint, and
+  // it is stale by construction — "14 new Moments" as of an unknown instant is a
+  // number that was never quite true. More sharply, it is the one field that can
+  // over-report Moments somebody may no longer see, and `saved-views.md` asks
+  // that counts not leak inaccessible history. Everywhere else a sweep corrects
+  // that within the hour; an export is a file that outlives any correction.
   return {
     title: source.title,
     savedAt: source.createdAt.toISOString(),
+    ...(source.lastVisitedAt === null ? {} : { lastVisitedAt: source.lastVisitedAt.toISOString() }),
     view: source.specification,
   };
 }
