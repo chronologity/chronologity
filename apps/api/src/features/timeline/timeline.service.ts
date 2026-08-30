@@ -1,5 +1,6 @@
 import type {
   ReadableTimelineEntry,
+  ViewSpecification,
   TimelineEntry as ContractTimelineEntry,
 } from "@chronologity/contracts";
 import type {
@@ -8,6 +9,7 @@ import type {
   TimelineScopeRef,
 } from "./timeline.eligibility.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
+import { narrowingFor } from "./view.js";
 import { decodeCursor, encodeCursor, type TimelinePosition } from "./timeline.cursor.js";
 import type {
   Direction,
@@ -204,15 +206,25 @@ export class TimelineService {
    * @param direction - Which way.
    * @param limit - How many the caller asked for.
    * @returns The page.
+   * @param view - The specification, when the page comes from one. Its
+   *   narrowing is applied to the query; absent, the page is the whole
+   *   context.
    */
   private async pageFrom(
     viewerUserId: string,
     from: TimelinePosition | undefined,
     direction: Direction,
     limit: number,
+    view?: ViewSpecification,
   ): Promise<TimelinePage> {
     const viewer = await this.eligibility.resolve(viewerUserId, own(viewerUserId));
-    const records = await this.timeline.ownSlice(viewer, from, direction, limit + 1);
+    const records = await this.timeline.ownSlice(
+      viewer,
+      from,
+      direction,
+      limit + 1,
+      view === undefined ? undefined : narrowingFor(view, CONTEXTS),
+    );
     const page = records.slice(0, limit);
     const first = page[0];
     const last = page[page.length - 1];
@@ -384,6 +396,9 @@ export class TimelineService {
    * @param direction - Which way.
    * @param limit - How many the caller asked for.
    * @returns The page, with a cursor at each end.
+   * @param view - The specification, when the page comes from one. Its
+   *   narrowing is applied to the query; absent, the page is the whole
+   *   context.
    */
   private async scopedPageFrom(
     scope: TimelineScopeRef,
@@ -391,6 +406,7 @@ export class TimelineService {
     from: TimelinePosition | undefined,
     direction: Direction,
     limit: number,
+    view?: ViewSpecification,
   ): Promise<TimelinePage> {
     if (!viewer.scopeIsOpen) {
       // Indistinguishable from a person with no history, which is the point:
@@ -398,7 +414,14 @@ export class TimelineService {
       return { moments: [], cursor: undefined, reverseCursor: undefined };
     }
 
-    const records = await this.timeline.scopedSlice(scope, viewer, from, direction, limit + 1);
+    const records = await this.timeline.scopedSlice(
+      scope,
+      viewer,
+      from,
+      direction,
+      limit + 1,
+      view === undefined ? undefined : narrowingFor(view, CONTEXTS),
+    );
     const page = records.slice(0, limit);
     const first = page[0];
     const last = page[page.length - 1];
@@ -410,6 +433,151 @@ export class TimelineService {
       reverseCursor: first === undefined ? undefined : encodeCursor(positionOf(first)),
     };
   }
+
+  /**
+   * A page of whatever a specification asks for.
+   *
+   * The entry point that does not care where the request came from: live
+   * navigation, a Saved View, a shared link and discovery all describe what they
+   * want the same way, which is the whole reason the specification exists.
+   *
+   * Whose history it is comes from the specification's context rather than from
+   * which method was called, so own-history and scoped stop being two surfaces
+   * and become one engine with a branch in it.
+   *
+   * @param viewerUserId - Who is asking. Never taken from the specification: a
+   *   saved view is a request and never a grant, so who may see what is decided
+   *   from the session rather than from the stored object.
+   * @param view - What they are looking at.
+   * @returns The page, with a cursor at each end.
+   * @throws {ValidationError} If the cursor is not one this system issued.
+   */
+  async derivePage(viewerUserId: string, view: ViewSpecification): Promise<TimelinePage> {
+    const from =
+      view.position.cursor === undefined ? undefined : decodeCursor(view.position.cursor);
+
+    if (isOwn(viewerUserId, view)) {
+      return this.pageFrom(viewerUserId, from, view.direction, view.limit, view);
+    }
+
+    const viewer = await this.eligibility.resolve(viewerUserId, view.context);
+
+    return this.scopedPageFrom(view.context, viewer, from, view.direction, view.limit, view);
+  }
+
+  /**
+   * Where the view opens.
+   *
+   * A page of one rather than a query of its own: the newest thing a view holds
+   * is the first thing it would page to, and two ways of asking could disagree.
+   *
+   * @param viewerUserId - Who is asking.
+   * @param view - What they are looking at.
+   * @returns The newest Moment the view holds, or undefined when it holds none.
+   */
+  async deriveHead(
+    viewerUserId: string,
+    view: ViewSpecification,
+  ): Promise<TimelineEntry | undefined> {
+    const page = await this.derivePage(viewerUserId, { ...view, limit: 1, direction: "older" });
+
+    return page.moments[0];
+  }
+
+  /**
+   * A jump, and the history either side of it.
+   *
+   * @param viewerUserId - Who is asking.
+   * @param view - What they are looking at; its anchor is where to jump to.
+   * @returns Where it landed and what surrounds it.
+   * @throws {ValidationError} If the view names no instant to jump to.
+   */
+  async deriveAround(viewerUserId: string, view: ViewSpecification): Promise<TimelineAround> {
+    if (view.position.anchoredAt === undefined) {
+      throw new ValidationError("A jump needs an instant to jump to", {
+        field: "position.anchoredAt",
+      });
+    }
+
+    const at = new Date(view.position.anchoredAt);
+    // Resolved once and reused for both halves. Two resolutions could disagree,
+    // and a jump whose halves disagreed about eligibility would be worse than
+    // one that was merely slow.
+    const viewer = await this.eligibility.resolve(viewerUserId, view.context);
+    const narrowing = narrowingFor(view, CONTEXTS);
+
+    if (isOwn(viewerUserId, view)) {
+      const nearest = await this.timeline.ownNearest(viewer, at, narrowing);
+
+      return this.aroundFrom(nearest, (position, direction) =>
+        this.pageFrom(viewerUserId, position, direction, view.limit, view),
+      );
+    }
+
+    if (!viewer.scopeIsOpen) {
+      return EMPTY_AROUND;
+    }
+
+    const nearest = await this.timeline.scopedNearest(view.context, viewer, at, narrowing);
+
+    return this.aroundFrom(nearest, (position, direction) =>
+      this.scopedPageFrom(view.context, viewer, position, direction, view.limit, view),
+    );
+  }
+
+  /**
+   * How the view's history is distributed.
+   *
+   * @param viewerUserId - Who is asking.
+   * @param view - What they are looking at; its zoom is the scale.
+   * @returns One bucket per span holding anything, oldest first.
+   */
+  async deriveBuckets(
+    viewerUserId: string,
+    view: ViewSpecification,
+  ): Promise<readonly TimelineBucket[]> {
+    // A view may ask for a day, which somebody can save and this projection
+    // cannot yet count. Answered at the nearest scale it has rather than
+    // refusing a view that is otherwise perfectly readable — a saved view
+    // failing to open is the outcome worth avoiding.
+    const scale: Scale = view.zoom === "decade" ? "decade" : "year";
+    const narrowing = narrowingFor(view, CONTEXTS);
+
+    if (isOwn(viewerUserId, view)) {
+      return this.timeline.ownBuckets(viewerUserId, scale, narrowing);
+    }
+
+    const viewer = await this.eligibility.resolve(viewerUserId, view.context);
+
+    return viewer.scopeIsOpen
+      ? this.timeline.scopedBuckets(view.context, viewer, scale, narrowing)
+      : [];
+  }
+
+  /**
+   * Assemble a jump from whichever nearest read found it.
+   *
+   * @param nearest - Where it landed, or undefined when nothing is there.
+   * @param pageFrom - How to read a page either side.
+   * @returns The jump.
+   */
+  private async aroundFrom(
+    nearest: TimelineReading | undefined,
+    pageFrom: (position: TimelinePosition, direction: Direction) => Promise<TimelinePage>,
+  ): Promise<TimelineAround> {
+    if (nearest === undefined) {
+      return EMPTY_AROUND;
+    }
+
+    const position = positionOf(nearest);
+
+    return {
+      at: present(nearest),
+      older: await pageFrom(position, "older"),
+      newer: await pageFrom(position, "newer"),
+    };
+  }
+
 }
 
 /**
@@ -478,4 +646,30 @@ function present(record: TimelineReading): TimelineEntry {
  */
 function own(userId: string): TimelineScopeRef {
   return { type: "person", id: userId };
+}
+
+/** The table every narrowing is written against. */
+const CONTEXTS = "timeline_moment_contexts";
+
+/** A jump that found nothing. */
+const EMPTY_AROUND: TimelineAround = {
+  at: undefined,
+  older: { moments: [], cursor: undefined, reverseCursor: undefined },
+  newer: { moments: [], cursor: undefined, reverseCursor: undefined },
+};
+
+/**
+ * Whether a view is somebody reading their own history.
+ *
+ * The one case that reports eligibility rather than filtering on it, because
+ * everything on their Timeline is theirs. Decided from the specification's
+ * context rather than from which route was called, which is what lets two
+ * surfaces be one engine.
+ *
+ * @param viewerUserId - Who is asking.
+ * @param view - What they are looking at.
+ * @returns Whether the view is their own history.
+ */
+function isOwn(viewerUserId: string, view: ViewSpecification): boolean {
+  return view.context.type === "person" && view.context.id === viewerUserId;
 }

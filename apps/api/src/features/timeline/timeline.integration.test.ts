@@ -58,6 +58,7 @@ describe("the Timeline projection", () => {
     momentId: randomUUID(),
     authorUserId: randomUUID(),
     occurredAt: new Date("1998-06-01T00:00:00.000Z"),
+    recordedAt: new Date(),
     occurrenceEnd: new Date("1998-08-31T23:59:59.000Z"),
     occurrencePrecision: "month",
     occurrenceOffsetMinutes: 0,
@@ -291,6 +292,7 @@ describe("navigating your own history", () => {
         momentId: entry.id,
         authorUserId: author,
         occurredAt: new Date(entry.at),
+        recordedAt: new Date(),
         occurrenceEnd: new Date(entry.at),
         occurrencePrecision: "day",
         occurrenceOffsetMinutes: 0,
@@ -307,6 +309,7 @@ describe("navigating your own history", () => {
         momentId: randomUUID(),
         authorUserId: somebodyElse,
         occurredAt: new Date(entry.at),
+        recordedAt: new Date(),
         occurrenceEnd: new Date(entry.at),
         occurrencePrecision: "day",
         occurrenceOffsetMinutes: 0,
@@ -576,6 +579,7 @@ describe("the Timeline over HTTP", () => {
         momentId: randomUUID(),
         authorUserId: person.userId,
         occurredAt: new Date(`${at}T00:00:00.000Z`),
+        recordedAt: new Date(),
         occurrenceEnd: new Date(`${at}T00:00:00.000Z`),
         occurrencePrecision: "day" as const,
         occurrenceOffsetMinutes: 0,
@@ -715,6 +719,7 @@ describe("the Timeline over HTTP", () => {
       momentId,
       authorUserId: author,
       occurredAt: new Date(`${year}-06-01T00:00:00.000Z`),
+      recordedAt: new Date(),
       occurrenceEnd: new Date(`${year}-06-01T00:00:00.000Z`),
       occurrencePrecision: "day",
       occurrenceOffsetMinutes: 0,
@@ -754,6 +759,10 @@ describe("the Timeline over HTTP", () => {
       ...(scopes.realWorldEventId === undefined
         ? []
         : [{ type: "real_world_event" as const, id: scopes.realWorldEventId }]),
+      // The author's own row, as the projector writes it. Without this the
+      // Moment reaches no Timeline at all, and every assertion below would
+      // pass or fail for a reason unrelated to what it is testing.
+      { type: "person" as const, id: author },
     ]);
 
     return momentId;
@@ -909,6 +918,139 @@ describe("the Timeline over HTTP", () => {
     assert.deepEqual(page.json().moments, []);
   });
 
+  describe("a view, rather than a query", () => {
+    it("shows only what somebody recorded, or only what they took part in", async () => {
+      // Perspective. The same context, three answers: their history is what
+      // they recorded together with what they agreed to, and "what my father
+      // photographed" and "where my father was" are different questions.
+      const author = await onboard();
+      const participant = await onboard();
+      const theirs = await participatedIn(participant.userId, participant.userId, 2001);
+      const shared = await participatedIn(author.userId, participant.userId, 2002);
+
+      const idsFor = async (perspective: string) => {
+        const page = await app.inject({
+          method: "GET",
+          url: `/timeline?perspective=${perspective}`,
+          headers: authed(participant.accessToken),
+        });
+
+        assert.equal(page.statusCode, 200, page.body);
+
+        return page.json().moments.map((moment: { momentId: string }) => moment.momentId).sort();
+      };
+
+      assert.deepEqual(await idsFor("all"), [theirs, shared].sort());
+      assert.deepEqual(await idsFor("authored"), [theirs]);
+      assert.deepEqual(await idsFor("participated"), [shared]);
+    });
+
+    it("refuses a lens a place cannot have", async () => {
+      const person = await onboard();
+      const locationId = await createLocation(database.dataSource, person.userId);
+
+      const refused = await app.inject({
+        method: "GET",
+        url: `/locations/${locationId}/timeline?perspective=authored`,
+        headers: authed(person.accessToken),
+      });
+
+      // Refused rather than ignored: a view that quietly meant something other
+      // than it said would be worse than one that failed.
+      assert.equal(refused.statusCode, 400, refused.body);
+    });
+
+    it("narrows a person's history to one place", async () => {
+      // "My father's photographs in Tokyo" — a person as the context and a
+      // place as the filter, which is the kind of view this exists for.
+      const person = await onboard();
+      const locationId = await createLocation(database.dataSource, person.userId);
+      const there = await placeAt({ locationId }, person.userId, 1995);
+      await placeAt({}, person.userId, 1996);
+
+      const page = await app.inject({
+        method: "GET",
+        url: `/timeline?locationId=${locationId}`,
+        headers: authed(person.accessToken),
+      });
+
+      assert.deepEqual(
+        page.json().moments.map((moment: { momentId: string }) => moment.momentId),
+        [there],
+      );
+    });
+
+    it("refuses a filter naming what the view is already about", async () => {
+      const person = await onboard();
+      const locationId = await createLocation(database.dataSource, person.userId);
+
+      const refused = await app.inject({
+        method: "GET",
+        url: `/locations/${locationId}/timeline?locationId=${locationId}`,
+        headers: authed(person.accessToken),
+      });
+
+      assert.equal(refused.statusCode, 400, refused.body);
+    });
+
+    it("bounds a view by when history happened", async () => {
+      const person = await onboard();
+      const sixties = await placeAt({}, person.userId, 1969);
+      await placeAt({}, person.userId, 1999);
+
+      const page = await app.inject({
+        method: "GET",
+        url: "/timeline?from=1960-01-01T00:00:00.000Z&to=1969-12-31T00:00:00.000Z",
+        headers: authed(person.accessToken),
+      });
+
+      assert.deepEqual(
+        page.json().moments.map((moment: { momentId: string }) => moment.momentId),
+        [sixties],
+      );
+    });
+
+    it("counts what the view holds, not what the context does", async () => {
+      // A count and its page must agree. A bucket that ignored the narrowing
+      // would promise Moments the pages beneath it never produce.
+      const person = await onboard();
+      const locationId = await createLocation(database.dataSource, person.userId);
+
+      await placeAt({ locationId }, person.userId, 1980);
+      await placeAt({}, person.userId, 1981);
+
+      const buckets = await app.inject({
+        method: "GET",
+        url: `/timeline/buckets?scale=decade&locationId=${locationId}`,
+        headers: authed(person.accessToken),
+      });
+
+      assert.deepEqual(
+        buckets.json().buckets.map((bucket: { count: number }) => bucket.count),
+        [1],
+      );
+    });
+
+    it("opens where the view opens, not where the context does", async () => {
+      const person = await onboard();
+      const locationId = await createLocation(database.dataSource, person.userId);
+      const there = await placeAt({ locationId }, person.userId, 1970);
+
+      await placeAt({}, person.userId, 2010);
+
+      const head = await app.inject({
+        method: "GET",
+        url: `/timeline/head?locationId=${locationId}`,
+        headers: authed(person.accessToken),
+      });
+
+      // The newest thing *in the view*. A head that ignored the narrowing would
+      // name a Moment the view does not contain.
+      assert.equal(head.json().momentId, there);
+    });
+  });
+
+
   it("navigates a real-world Event's history the same way", async () => {
     const author = await onboard();
     const stranger = await onboard();
@@ -962,6 +1104,7 @@ describe("the Timeline over HTTP", () => {
       momentId: randomUUID(),
       authorUserId,
       occurredAt: new Date(`${year}-06-01T00:00:00.000Z`),
+      recordedAt: new Date(),
       occurrenceEnd: new Date(`${year}-06-01T00:00:00.000Z`),
       occurrencePrecision: "day",
       occurrenceOffsetMinutes: 0,

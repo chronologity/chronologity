@@ -1,4 +1,5 @@
 import type { ClickHouseClient } from "@clickhouse/client";
+import { narrowingSql, type ViewNarrowing } from "./view.js";
 import {
   asClickHouseDateTime,
   TIMELINE_VERSION,
@@ -104,6 +105,28 @@ function withMoments(chosen: string, order: string): string {
  * @param alias - The table alias the Timeline rows are read under.
  * @returns A SQL condition, true when this Viewer may be shown this row.
  */
+/**
+ * A view that narrows nothing.
+ *
+ * So a caller with no specification — a rebuild, a test, anything internal —
+ * need not invent one.
+ */
+const NOTHING: ViewNarrowing = { conditions: [], params: {} };
+
+/**
+ * The condition deciding what a Viewer may be shown.
+ *
+ * One fragment, used by every read that filters and by the one that reports.
+ * A rule written in several places eventually disagrees with itself, and this
+ * is the rule that leaks when it does.
+ *
+ * It reads four parameters the caller must supply — `viewer`, `blocked`,
+ * `audience`, `isAdult` — and there is no variant that omits them. A caller who
+ * forgot one would otherwise get somebody else's history.
+ *
+ * @param alias - The table alias the rows are read under.
+ * @returns A SQL condition, true when this Viewer may be shown this row.
+ */
 function eligible(alias: string): string {
   return `(
     -- Your own history, whatever state it is in. Somebody must be able to
@@ -194,12 +217,16 @@ export class TimelineReadRepository {
    * @param direction - `older` walks back through history, `newer` forwards.
    * @param limit - How many rows at most.
    * @returns The rows, each carrying whether it may be read.
+   * @param narrowing - What the view narrows by, or nothing when the caller
+   *   has no specification. Narrowing never widens: it cannot admit a Moment
+   *   eligibility withheld.
    */
   async ownSlice(
     viewer: TimelineEligibility,
     from: TimelinePosition | undefined,
     direction: Direction,
     limit: number,
+    narrowing: ViewNarrowing = NOTHING,
   ): Promise<TimelineReading[]> {
     const older = direction === "older";
     const boundary =
@@ -218,6 +245,7 @@ export class TimelineReadRepository {
           WHERE projection_version = {version: String}
             AND context_type = 'person'
             AND context_id = {viewer: String}
+            ${narrowingSql(narrowing)}
             ${boundary}
           ORDER BY ${order}
           LIMIT {limit: UInt32}`,
@@ -229,6 +257,7 @@ export class TimelineReadRepository {
         blocked: viewer.blocked,
         audience: viewer.audience,
         isAdult: viewer.isAdult ? 1 : 0,
+        ...narrowing.params,
         limit,
         ...(from === undefined
           ? {}
@@ -247,10 +276,14 @@ export class TimelineReadRepository {
    * @param at - The instant asked for, which need not be one anything happened.
    * @returns The nearest, or undefined when they have no history. Ties break
    *   towards the earlier, so a jump lands in the same place twice.
+   * @param narrowing - What the view narrows by, or nothing when the caller
+   *   has no specification. Narrowing never widens: it cannot admit a Moment
+   *   eligibility withheld.
    */
   async ownNearest(
     viewer: TimelineEligibility,
     at: Date,
+    narrowing: ViewNarrowing = NOTHING,
   ): Promise<TimelineReading | undefined> {
     const result = await this.client.query({
       query: withMoments(
@@ -260,6 +293,7 @@ export class TimelineReadRepository {
           WHERE projection_version = {version: String}
             AND context_type = 'person'
             AND context_id = {viewer: String}
+            ${narrowingSql(narrowing)}
           ORDER BY abs(dateDiff('millisecond', occurred_at, {at: DateTime64(3)})) ASC,
                    occurred_at ASC,
                    moment_id ASC
@@ -272,6 +306,7 @@ export class TimelineReadRepository {
         blocked: viewer.blocked,
         audience: viewer.audience,
         isAdult: viewer.isAdult ? 1 : 0,
+        ...narrowing.params,
         at: asClickHouseDateTime(at),
       },
       format: "JSONEachRow",
@@ -295,8 +330,15 @@ export class TimelineReadRepository {
    * @param viewerUserId - Whose history.
    * @param scale - Year or decade.
    * @returns One bucket per span holding anything, oldest first.
+   * @param narrowing - What the view narrows by, or nothing when the caller
+   *   has no specification. Narrowing never widens: it cannot admit a Moment
+   *   eligibility withheld.
    */
-  async ownBuckets(viewerUserId: string, scale: Scale): Promise<TimelineBucket[]> {
+  async ownBuckets(
+    viewerUserId: string,
+    scale: Scale,
+    narrowing: ViewNarrowing = NOTHING,
+  ): Promise<TimelineBucket[]> {
     const years = scale === "decade" ? 10 : 1;
     const bucket = `toDateTime64(concat(toString(intDiv(toYear(occurred_at), ${years}) * ${years}), '-01-01 00:00:00'), 3)`;
 
@@ -306,9 +348,10 @@ export class TimelineReadRepository {
                WHERE projection_version = {version: String}
                  AND context_type = 'person'
                  AND context_id = {viewerUserId: String}
+                 ${narrowingSql(narrowing)}
                GROUP BY starts_at
                ORDER BY starts_at ASC`,
-      query_params: { version: this.version, viewerUserId },
+      query_params: { version: this.version, viewerUserId, ...narrowing.params },
       format: "JSONEachRow",
     });
 
@@ -335,6 +378,9 @@ export class TimelineReadRepository {
    * @param direction - `older` walks back through history, `newer` forwards.
    * @param limit - How many rows at most.
    * @returns The rows, ordered as they were walked.
+   * @param narrowing - What the view narrows by, or nothing when the caller
+   *   has no specification. Narrowing never widens: it cannot admit a Moment
+   *   eligibility withheld.
    */
   async scopedSlice(
     scope: TimelineScopeRef,
@@ -342,6 +388,7 @@ export class TimelineReadRepository {
     from: TimelinePosition | undefined,
     direction: Direction,
     limit: number,
+    narrowing: ViewNarrowing = NOTHING,
   ): Promise<TimelineReading[]> {
     const older = direction === "older";
     const boundary =
@@ -361,6 +408,7 @@ export class TimelineReadRepository {
             AND context_type = {contextType: String}
             AND context_id = {contextId: String}
             AND ${eligible("timeline_moment_contexts")}
+            ${narrowingSql(narrowing)}
             ${boundary}
           ORDER BY ${order}
           LIMIT {limit: UInt32}`,
@@ -374,6 +422,7 @@ export class TimelineReadRepository {
         blocked: viewer.blocked,
         audience: viewer.audience,
         isAdult: viewer.isAdult ? 1 : 0,
+        ...narrowing.params,
         limit,
         ...(from === undefined
           ? {}
@@ -410,11 +459,15 @@ export class TimelineReadRepository {
    * @param at - The instant asked for, which need not be one anything happened.
    * @returns The nearest eligible Moment, or undefined when they may see none.
    *   Ties break towards the earlier, so a jump lands in the same place twice.
+   * @param narrowing - What the view narrows by, or nothing when the caller
+   *   has no specification. Narrowing never widens: it cannot admit a Moment
+   *   eligibility withheld.
    */
   async scopedNearest(
     scope: TimelineScopeRef,
     viewer: TimelineEligibility,
     at: Date,
+    narrowing: ViewNarrowing = NOTHING,
   ): Promise<TimelineReading | undefined> {
     const result = await this.client.query({
       query: withMoments(
@@ -424,6 +477,7 @@ export class TimelineReadRepository {
             AND context_type = {contextType: String}
             AND context_id = {contextId: String}
             AND ${eligible("timeline_moment_contexts")}
+            ${narrowingSql(narrowing)}
           ORDER BY abs(dateDiff('millisecond', occurred_at, {at: DateTime64(3)})) ASC,
                    occurred_at ASC,
                    moment_id ASC
@@ -438,6 +492,7 @@ export class TimelineReadRepository {
         blocked: viewer.blocked,
         audience: viewer.audience,
         isAdult: viewer.isAdult ? 1 : 0,
+        ...narrowing.params,
         at: asClickHouseDateTime(at),
       },
       format: "JSONEachRow",
@@ -457,11 +512,15 @@ export class TimelineReadRepository {
    * @param viewer - What this Viewer may be shown.
    * @param scale - Year or decade.
    * @returns One bucket per span holding anything eligible, oldest first.
+   * @param narrowing - What the view narrows by, or nothing when the caller
+   *   has no specification. Narrowing never widens: it cannot admit a Moment
+   *   eligibility withheld.
    */
   async scopedBuckets(
     scope: TimelineScopeRef,
     viewer: TimelineEligibility,
     scale: Scale,
+    narrowing: ViewNarrowing = NOTHING,
   ): Promise<TimelineBucket[]> {
     const years = scale === "decade" ? 10 : 1;
     const bucket = `toDateTime64(concat(toString(intDiv(toYear(occurred_at), ${years}) * ${years}), '-01-01 00:00:00'), 3)`;
@@ -473,6 +532,7 @@ export class TimelineReadRepository {
                  AND context_type = {contextType: String}
                  AND context_id = {contextId: String}
                  AND ${eligible("timeline_moment_contexts")}
+                 ${narrowingSql(narrowing)}
                GROUP BY starts_at
                ORDER BY starts_at ASC`,
       query_params: {
@@ -483,6 +543,7 @@ export class TimelineReadRepository {
         blocked: viewer.blocked,
         audience: viewer.audience,
         isAdult: viewer.isAdult ? 1 : 0,
+        ...narrowing.params,
       },
       format: "JSONEachRow",
     });

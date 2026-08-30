@@ -74,6 +74,7 @@ describe("who may see a scope's history", () => {
       const row: TimelineRow = {
         momentId,
         occurredAt: new Date(`${year}-06-01T00:00:00.000Z`),
+        recordedAt: new Date(),
         occurrenceEnd: new Date(`${year}-06-01T00:00:00.000Z`),
         occurrencePrecision: "day",
         occurrenceOffsetMinutes: 0,

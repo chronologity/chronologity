@@ -5,12 +5,18 @@ import {
   timelineBucketsRequestSchema,
   timelineBucketsSchema,
   timelineEntrySchema,
+  timelineNarrowingSchema,
   timelinePageRequestSchema,
   timelinePageSchema,
+  viewSpecificationSchema,
+  type TimelineNarrowing,
+  type ViewContext,
+  type ViewSpecification,
 } from "@chronologity/contracts";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
+import { ValidationError } from "../../lib/errors/validation-error.js";
 import { requireUser } from "../../plugins/auth.plugin.js";
 import { errors } from "../../server/error-responses.js";
 import type { TimelineScopeRef } from "./timeline.eligibility.js";
@@ -41,6 +47,66 @@ export function timelineRoutes(timeline: TimelineService) {
       route.schema = { ...route.schema, tags: ["Timeline"] };
     });
 
+    /**
+     * Assemble a View Specification from a request.
+     *
+     * The routes are entry points, not the interface. Each names a context in
+     * its path and carries narrowing in its query string, and this turns the
+     * two into the object the engine actually takes — the same object a Saved
+     * View will store and a shared link will carry.
+     *
+     * @param context - What the path names.
+     * @param query - What the query string asked for.
+     * @returns The specification, refused if the combination is not a view.
+     * @throws {ValidationError} If the query narrows by something the context
+     *   already names, or asks a place for a lens only a person has.
+     */
+    const specificationFor = (
+      context: ViewContext,
+      query: Partial<TimelineNarrowing> & {
+        cursor?: string | undefined;
+        direction?: "older" | "newer" | undefined;
+        limit?: number | undefined;
+        at?: string | undefined;
+        scale?: "year" | "decade" | undefined;
+      },
+    ): ViewSpecification => {
+      const parsed = viewSpecificationSchema.safeParse({
+        context,
+        perspective: query.perspective ?? "all",
+        filters: {
+          ...(query.authorUserId === undefined ? {} : { authorUserId: query.authorUserId }),
+          ...(query.locationId === undefined ? {} : { locationId: query.locationId }),
+          ...(query.realWorldEventId === undefined
+            ? {}
+            : { realWorldEventId: query.realWorldEventId }),
+        },
+        // Both ends or neither. A half-open range is likelier to be a client
+        // dropping a parameter than somebody asking for everything since 1970.
+        ...(query.from !== undefined && query.to !== undefined
+          ? { range: { kind: "fixed" as const, from: query.from, to: query.to } }
+          : {}),
+        ...(query.scale === undefined ? {} : { zoom: query.scale }),
+        position: {
+          ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
+          ...(query.at === undefined ? {} : { anchoredAt: query.at }),
+        },
+        ...(query.limit === undefined ? {} : { limit: query.limit }),
+        ...(query.direction === undefined ? {} : { direction: query.direction }),
+      });
+
+      if (!parsed.success) {
+        const issue = parsed.error.issues[0];
+
+        throw new ValidationError(issue?.message ?? "That is not a usable view", {
+          field: (issue?.path ?? ["view"]).join("."),
+        });
+      }
+
+      return parsed.data;
+    };
+
+
     const paging = [
       "**Positions, not page numbers.** A cursor names a place in history rather than a count of rows, because history grows in the middle: a photograph uploaded today may belong to 1969 and lands between two pages you have already seen. Paging by offset would repeat one Moment and skip another every time that happened.",
       "",
@@ -66,7 +132,11 @@ export function timelineRoutes(timeline: TimelineService) {
         },
         preHandler: requireUser,
       },
-      async (request) => timeline.page(request.user.userId, request.query),
+      async (request) =>
+        timeline.derivePage(
+          request.user.userId,
+          specificationFor(ofPerson(request.user.userId), request.query),
+        ),
     );
 
     app.get(
@@ -76,6 +146,7 @@ export function timelineRoutes(timeline: TimelineService) {
           summary: "Where your Timeline opens",
           description:
             "The newest occurrence in your history, which is the default entry point. Not the most recently recorded Moment, and not the most anything else: a Timeline head is a position in time rather than a ranking.",
+          querystring: timelineNarrowingSchema,
           response: {
             200: timelineEntrySchema.nullable(),
             ...errors(401),
@@ -83,7 +154,11 @@ export function timelineRoutes(timeline: TimelineService) {
         },
         preHandler: requireUser,
       },
-      async (request) => (await timeline.head(request.user.userId)) ?? null,
+      async (request) =>
+        (await timeline.deriveHead(
+          request.user.userId,
+          specificationFor(ofPerson(request.user.userId), request.query),
+        )) ?? null,
     );
 
     app.get(
@@ -104,7 +179,10 @@ export function timelineRoutes(timeline: TimelineService) {
         preHandler: requireUser,
       },
       async (request) =>
-        timeline.around(request.user.userId, new Date(request.query.at), request.query.limit),
+        timeline.deriveAround(
+          request.user.userId,
+          specificationFor(ofPerson(request.user.userId), request.query),
+        ),
     );
 
     app.get(
@@ -123,7 +201,12 @@ export function timelineRoutes(timeline: TimelineService) {
         preHandler: requireUser,
       },
       async (request) => ({
-        buckets: (await timeline.buckets(request.user.userId, request.query.scale)).map(
+        buckets: (
+          await timeline.deriveBuckets(
+            request.user.userId,
+            specificationFor(ofPerson(request.user.userId), request.query),
+          )
+        ).map(
           (bucket) => ({ startsAt: bucket.startsAt.toISOString(), count: bucket.count }),
         ),
       }),
@@ -209,10 +292,9 @@ export function timelineRoutes(timeline: TimelineService) {
         preHandler: requireUser,
       },
       async (request) =>
-        timeline.scopedPage(
+        timeline.derivePage(
           request.user.userId,
-          atLocation(request.params.locationId),
-          request.query,
+          specificationFor(atLocation(request.params.locationId), request.query),
         ),
     );
 
@@ -223,13 +305,16 @@ export function timelineRoutes(timeline: TimelineService) {
           summary: "Where a Location's Timeline opens",
           description: location.head,
           params: locationParams,
+          querystring: timelineNarrowingSchema,
           response: { 200: timelineEntrySchema.nullable(), ...errors(400, 401) },
         },
         preHandler: requireUser,
       },
       async (request) =>
-        (await timeline.scopedHead(request.user.userId, atLocation(request.params.locationId))) ??
-        null,
+        (await timeline.deriveHead(
+          request.user.userId,
+          specificationFor(atLocation(request.params.locationId), request.query),
+        )) ?? null,
     );
 
     app.get(
@@ -245,11 +330,9 @@ export function timelineRoutes(timeline: TimelineService) {
         preHandler: requireUser,
       },
       async (request) =>
-        timeline.scopedAround(
+        timeline.deriveAround(
           request.user.userId,
-          atLocation(request.params.locationId),
-          new Date(request.query.at),
-          request.query.limit,
+          specificationFor(atLocation(request.params.locationId), request.query),
         ),
     );
 
@@ -267,10 +350,9 @@ export function timelineRoutes(timeline: TimelineService) {
       },
       async (request) => ({
         buckets: (
-          await timeline.scopedBuckets(
+          await timeline.deriveBuckets(
             request.user.userId,
-            atLocation(request.params.locationId),
-            request.query.scale,
+            specificationFor(atLocation(request.params.locationId), request.query),
           )
         ).map((bucket) => ({ startsAt: bucket.startsAt.toISOString(), count: bucket.count })),
       }),
@@ -303,10 +385,9 @@ export function timelineRoutes(timeline: TimelineService) {
         preHandler: requireUser,
       },
       async (request) =>
-        timeline.scopedPage(
+        timeline.derivePage(
           request.user.userId,
-          atEvent(request.params.realWorldEventId),
-          request.query,
+          specificationFor(atEvent(request.params.realWorldEventId), request.query),
         ),
     );
 
@@ -317,14 +398,15 @@ export function timelineRoutes(timeline: TimelineService) {
           summary: "Where a real-world Event's Timeline opens",
           description: event.head,
           params: eventParams,
+          querystring: timelineNarrowingSchema,
           response: { 200: timelineEntrySchema.nullable(), ...errors(400, 401) },
         },
         preHandler: requireUser,
       },
       async (request) =>
-        (await timeline.scopedHead(
+        (await timeline.deriveHead(
           request.user.userId,
-          atEvent(request.params.realWorldEventId),
+          specificationFor(atEvent(request.params.realWorldEventId), request.query),
         )) ?? null,
     );
 
@@ -341,11 +423,9 @@ export function timelineRoutes(timeline: TimelineService) {
         preHandler: requireUser,
       },
       async (request) =>
-        timeline.scopedAround(
+        timeline.deriveAround(
           request.user.userId,
-          atEvent(request.params.realWorldEventId),
-          new Date(request.query.at),
-          request.query.limit,
+          specificationFor(atEvent(request.params.realWorldEventId), request.query),
         ),
     );
 
@@ -363,10 +443,9 @@ export function timelineRoutes(timeline: TimelineService) {
       },
       async (request) => ({
         buckets: (
-          await timeline.scopedBuckets(
+          await timeline.deriveBuckets(
             request.user.userId,
-            atEvent(request.params.realWorldEventId),
-            request.query.scale,
+            specificationFor(atEvent(request.params.realWorldEventId), request.query),
           )
         ).map((bucket) => ({ startsAt: bucket.startsAt.toISOString(), count: bucket.count })),
       }),
@@ -408,10 +487,12 @@ export function timelineRoutes(timeline: TimelineService) {
         // Their own Timeline is read by the own path rather than this one.
         // Otherwise a Moment they participated in but cannot read would be
         // filtered out here while `/timeline` returns it redacted, and the two
-        // surfaces would disagree about the same person's history.
-        request.params.userId === request.user.userId
-          ? timeline.page(request.user.userId, request.query)
-          : timeline.scopedPage(request.user.userId, ofPerson(request.params.userId), request.query),
+        // surfaces would disagree about the same person's history. The engine
+        // decides that from the context now, so there is nothing to branch on.
+        timeline.derivePage(
+          request.user.userId,
+          specificationFor(ofPerson(request.params.userId), request.query),
+        ),
     );
 
     app.get(
@@ -421,14 +502,16 @@ export function timelineRoutes(timeline: TimelineService) {
           summary: "Where a person's Timeline opens",
           description: [person.head, "", personNote].join("\n"),
           params: personParams,
+          querystring: timelineNarrowingSchema,
           response: { 200: timelineEntrySchema.nullable(), ...errors(400, 401) },
         },
         preHandler: requireUser,
       },
       async (request) =>
-        (request.params.userId === request.user.userId
-          ? await timeline.head(request.user.userId)
-          : await timeline.scopedHead(request.user.userId, ofPerson(request.params.userId))) ?? null,
+        (await timeline.deriveHead(
+          request.user.userId,
+          specificationFor(ofPerson(request.params.userId), request.query),
+        )) ?? null,
     );
 
     app.get(
@@ -444,14 +527,10 @@ export function timelineRoutes(timeline: TimelineService) {
         preHandler: requireUser,
       },
       async (request) =>
-        request.params.userId === request.user.userId
-          ? timeline.around(request.user.userId, new Date(request.query.at), request.query.limit)
-          : timeline.scopedAround(
-              request.user.userId,
-              ofPerson(request.params.userId),
-              new Date(request.query.at),
-              request.query.limit,
-            ),
+        timeline.deriveAround(
+          request.user.userId,
+          specificationFor(ofPerson(request.params.userId), request.query),
+        ),
     );
 
     app.get(
@@ -468,13 +547,10 @@ export function timelineRoutes(timeline: TimelineService) {
       },
       async (request) => ({
         buckets: (
-          request.params.userId === request.user.userId
-            ? await timeline.buckets(request.user.userId, request.query.scale)
-            : await timeline.scopedBuckets(
-                request.user.userId,
-                ofPerson(request.params.userId),
-                request.query.scale,
-              )
+          await timeline.deriveBuckets(
+            request.user.userId,
+            specificationFor(ofPerson(request.params.userId), request.query),
+          )
         ).map((bucket) => ({ startsAt: bucket.startsAt.toISOString(), count: bucket.count })),
       }),
     );
