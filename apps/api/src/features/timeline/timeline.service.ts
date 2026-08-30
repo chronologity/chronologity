@@ -555,6 +555,56 @@ export class TimelineService {
   }
 
   /**
+   * How much a view has grown since somebody last looked at it.
+   *
+   * The whole of new-Moment awareness, and deliberately the same derivation
+   * everything else here uses — `saved-views.md` requires Saved Views to reuse
+   * Timeline semantics rather than grow a second query system beside them, and a
+   * count that disagreed with the page it summarises would be worse than no
+   * count at all.
+   *
+   * **New means newly recorded, never newly occurred.** A Moment added today
+   * belonging to 1969 is new; putting history back where it happened is the
+   * point of the product, so a mark on occurrence time would miss precisely the
+   * additions worth surfacing.
+   *
+   * Never called on the read path. It costs a ClickHouse query, which is why a
+   * sweep computes it and a list reads what the sweep left.
+   *
+   * @param viewerUserId - Who is being told. Always the view's owner: a shared
+   *   link carries a specification and never a count.
+   * @param view - What they saved.
+   * @param since - Count what was recorded after this instant.
+   * @param cap - Stop counting here.
+   * @param now - Injected so a rolling range resolves against the sweep's clock
+   *   rather than the process's, which is what makes that testable.
+   * @returns How many, never more than the cap. Zero for a scope they may no
+   *   longer open, which is what deriving it would return.
+   * @throws {Error} If ClickHouse or PostgreSQL refuses.
+   */
+  async deriveNewCount(
+    viewerUserId: string,
+    view: ViewSpecification,
+    since: Date,
+    cap: number,
+    now: Date = new Date(),
+  ): Promise<number> {
+    const narrowing = narrowingFor(view, CONTEXTS, now);
+
+    if (isOwn(viewerUserId, view)) {
+      return this.timeline.ownNewCount(viewerUserId, since, cap, narrowing);
+    }
+
+    const viewer = await this.eligibility.resolve(viewerUserId, view.context);
+
+    // Suspended, blocked, or a Timeline turned off. Deriving would answer empty,
+    // so a badge over it would promise history that opening cannot produce.
+    return viewer.scopeIsOpen
+      ? this.timeline.scopedNewCount(view.context, viewer, since, cap, narrowing)
+      : 0;
+  }
+
+  /**
    * Assemble a jump from whichever nearest read found it.
    *
    * @param nearest - Where it landed, or undefined when nothing is there.

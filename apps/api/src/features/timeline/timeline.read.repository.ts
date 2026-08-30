@@ -541,4 +541,128 @@ export class TimelineReadRepository {
       count: Number(row.count),
     }));
   }
+
+  /**
+   * How much of somebody's own history has been recorded since they last looked.
+   *
+   * **Nothing is filtered, deliberately.** `ownSlice` returns Moments this person
+   * may not read, redacted, and `ownBuckets` counts them — because they are theirs
+   * and a count that left them out would disagree with the pages beneath it. This
+   * has to agree with both. Filtering here looks safer and is the defect.
+   *
+   * @param viewerUserId - Whose history, and who is being told about it.
+   * @param since - Count what was recorded after this instant.
+   * @param cap - Stop counting here. The caller reports the ceiling as reached
+   *   rather than the exact figure, which past a certain size nobody can act on.
+   * @param narrowing - What the view narrows by.
+   * @returns How many, never more than the cap.
+   * @throws {Error} If ClickHouse refuses.
+   */
+  async ownNewCount(
+    viewerUserId: string,
+    since: Date,
+    cap: number,
+    narrowing: ViewNarrowing = NOTHING,
+  ): Promise<number> {
+    return this.countRecordedSince(
+      `SELECT moment_id
+         FROM timeline_moment_contexts
+        WHERE projection_version = {version: String}
+          AND context_type = 'person'
+          AND context_id = {viewer: String}
+          ${narrowingSql(narrowing)}`,
+      { version: this.version, viewer: viewerUserId, ...narrowing.params },
+      since,
+      cap,
+    );
+  }
+
+  /**
+   * How much of a scope's history has been recorded since somebody last looked.
+   *
+   * Filtered, unlike the own count above, and for the reason `scopedSlice` is:
+   * this is somebody else's history seen from outside, so a Moment they may not
+   * read is not theirs to be told the shape of.
+   *
+   * @param scope - Which person, Location or real-world Event.
+   * @param viewer - What this Viewer may be shown.
+   * @param since - Count what was recorded after this instant.
+   * @param cap - Stop counting here.
+   * @param narrowing - What the view narrows by.
+   * @returns How many, never more than the cap.
+   * @throws {Error} If ClickHouse refuses.
+   */
+  async scopedNewCount(
+    scope: TimelineScopeRef,
+    viewer: TimelineEligibility,
+    since: Date,
+    cap: number,
+    narrowing: ViewNarrowing = NOTHING,
+  ): Promise<number> {
+    return this.countRecordedSince(
+      `SELECT moment_id
+         FROM timeline_moment_contexts
+        WHERE projection_version = {version: String}
+          AND context_type = {contextType: String}
+          AND context_id = {contextId: String}
+          AND ${eligible("timeline_moment_contexts")}
+          ${narrowingSql(narrowing)}`,
+      {
+        version: this.version,
+        contextType: scope.type,
+        contextId: scope.id,
+        viewer: viewer.viewerUserId,
+        blocked: viewer.blocked,
+        audience: viewer.audience,
+        isAdult: viewer.isAdult ? 1 : 0,
+        ...narrowing.params,
+      },
+      since,
+      cap,
+    );
+  }
+
+  /**
+   * Count what a chosen set of Moments holds that was recorded after an instant.
+   *
+   * `recorded_at` lives on `timeline_moments` and not on the contexts table, so
+   * this joins and then filters — which every paged read must never do, because
+   * a page whose size shrank after filtering would disclose what it withheld.
+   * A count has no page, so there is no size to read anything from, and the
+   * alternative would be a column on the contexts table written for one caller.
+   *
+   * @param chosen - A query selecting `moment_id` under the eligibility and
+   *   narrowing its caller decided on.
+   * @param params - Everything `chosen` binds.
+   * @param since - Recorded strictly after this. Moments projected before
+   *   `recorded_at` existed carry the epoch and so are new to nobody.
+   * @param cap - The ceiling, applied before counting.
+   * @returns How many, never more than the cap.
+   * @throws {Error} If ClickHouse refuses.
+   */
+  private async countRecordedSince(
+    chosen: string,
+    params: Record<string, unknown>,
+    since: Date,
+    cap: number,
+  ): Promise<number> {
+    const result = await this.client.query({
+      query: `SELECT count() AS count
+                FROM (
+                      SELECT scoped.moment_id
+                        FROM (${chosen}) AS scoped
+                       INNER JOIN timeline_moments AS moment
+                          ON moment.moment_id = scoped.moment_id
+                         AND moment.projection_version = {version: String}
+                       WHERE moment.recorded_at > {since: DateTime64(3)}
+                       LIMIT {cap: UInt32}
+                     )`,
+      query_params: { ...params, since: asClickHouseDateTime(since), cap },
+      format: "JSONEachRow",
+    });
+
+    const rows = await result.json<{ count: string }>();
+
+    return Number(rows[0]?.count ?? "0");
+  }
 }
