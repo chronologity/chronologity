@@ -3,6 +3,7 @@ import type {
   AccountSource,
   CommentSource,
   ParticipationSource,
+  SavedViewSource,
   MomentSource,
   ReactionSource,
 } from "./export-document.js";
@@ -384,6 +385,34 @@ export class ExportSourceRepository {
       resolvedAt: row.resolved_at,
       direction: row.direction,
       person: { handle: row.handle, displayName: row.display_name },
+    }));
+  }
+
+  /**
+   * Every perspective on history the account kept.
+   *
+   * Their own notes about their own history, so they leave with them. Shares are
+   * deliberately absent: a link is a thing they gave to somebody else, and its
+   * token is a secret whose only purpose is to be held by the recipient.
+   *
+   * @param userId - Whose.
+   * @returns The views, oldest first.
+   * @throws {Error} If the database refuses.
+   */
+  async savedViews(userId: string): Promise<SavedViewSource[]> {
+    const rows: { title: string; created_at: Date; specification: unknown }[] =
+      await this.dataSource.query(
+        `SELECT title, created_at, specification
+           FROM saved_views
+          WHERE user_id = $1
+          ORDER BY created_at ASC`,
+        [userId],
+      );
+
+    return rows.map((row) => ({
+      title: row.title,
+      createdAt: row.created_at,
+      specification: row.specification,
     }));
   }
 

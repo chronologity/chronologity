@@ -303,6 +303,42 @@ export function describeParticipation(source: ParticipationSource): ExportedPart
   };
 }
 
+/** A perspective on history somebody kept, as an export presents it. */
+export interface ExportedSavedView {
+  readonly title: string;
+  readonly savedAt: string;
+  /**
+   * The specification, verbatim.
+   *
+   * A Saved View *is* its specification, so an export that summarised it would
+   * hand somebody a description of their view rather than the view. This is the
+   * one place an export carries a structured object rather than prose, and it
+   * is because the object is the thing.
+   */
+  readonly view: unknown;
+}
+
+/** A saved view row. */
+export interface SavedViewSource {
+  readonly title: string;
+  readonly createdAt: Date;
+  readonly specification: unknown;
+}
+
+/**
+ * Shape one saved view.
+ *
+ * @param source - The stored row.
+ * @returns It, with the specification unchanged.
+ */
+export function describeSavedView(source: SavedViewSource): ExportedSavedView {
+  return {
+    title: source.title,
+    savedAt: source.createdAt.toISOString(),
+    view: source.specification,
+  };
+}
+
 /** A reaction row with the person who made it. */
 export interface ReactionSource {
   readonly momentId: string;

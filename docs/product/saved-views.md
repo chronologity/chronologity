@@ -331,6 +331,8 @@ Because Saved Views are derivations, Chronologity can determine when newly avail
 
 The initial Saved Views feature may simply indicate that the derived result has changed since the user's last visit.
 
+It does not. Both shapes of that indication — a boolean and a count — were measured against 50,000 Moments before being built, and both cost about a second for a list of ten views before any authorization is resolved. New-Moment awareness therefore has to be precomputed rather than queried on the list path, which is a different design from either shape measured, and it is its own piece of work. ADR-132 records the numbers.
+
 Potential later behavior includes:
 
 - count of new matching Moments;
@@ -368,7 +370,11 @@ Following Saved Views is not required for the initial Saved Views implementation
 
 ## Sharing
 
-Saved Views may eventually be shareable.
+Saved Views are shareable.
+
+What a link discloses about its sender is the sender's choice, and by default it discloses neither the view's title nor who saved it. A title is somebody's words about their own history, and a link outlives the conversation it was sent in, so revealing is an act rather than a consequence of sharing at all. One view may be shared more than once on different terms.
+
+A link can be withdrawn, and a withdrawn one answers exactly as a link nobody was ever given does.
 
 Sharing a Saved View should share a View Specification or stable reference to one, not a materialized list of visible Moments.
 

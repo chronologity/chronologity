@@ -18,6 +18,10 @@ import {
   ParticipationRefusal,
 } from "../../features/participation/participation.model.js";
 import {
+  SavedViewRow,
+  SavedViewShareRow,
+} from "../../features/saved-views/saved-view.model.js";
+import {
   FollowRequest,
   LocationFollow,
   RealWorldEventFollow,
@@ -137,6 +141,8 @@ const entities = [
   UserBlock,
   MomentParticipation,
   ParticipationRefusal,
+  SavedViewRow,
+  SavedViewShareRow,
   ModerationStateRow,
   ModerationAction,
   ModerationReportRow,

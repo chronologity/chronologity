@@ -188,6 +188,25 @@ export {
   type ProposeParticipation,
 } from "./participation.js";
 export {
+  createSavedViewRequestSchema,
+  createShareRequestSchema,
+  renameSavedViewRequestSchema,
+  savedViewListSchema,
+  savedViewSchema,
+  savedViewShareListSchema,
+  savedViewShareSchema,
+  savedViewTitleSchema,
+  sharedViewSchema,
+  type CreateSavedViewRequest,
+  type CreateShareRequest,
+  type RenameSavedViewRequest,
+  type SavedView,
+  type SavedViewList,
+  type SavedViewShare,
+  type SavedViewShareList,
+  type SharedView,
+} from "./saved-views.js";
+export {
   DERIVATION_VERSION,
   fixedRangeSchema,
   rollingRangeSchema,

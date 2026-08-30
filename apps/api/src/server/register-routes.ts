@@ -22,8 +22,10 @@ import { locationRoutes } from "../features/locations/location.routes.js";
 import type { LocationService } from "../features/locations/location.service.js";
 import { followRoutes } from "../features/social/follow.routes.js";
 import { participationRoutes } from "../features/participation/participation.routes.js";
+import { savedViewRoutes } from "../features/saved-views/saved-view.routes.js";
 import type { FollowService } from "../features/social/follow.service.js";
 import type { ParticipationService } from "../features/participation/participation.service.js";
+import type { SavedViewService } from "../features/saved-views/saved-view.service.js";
 import { momentRoutes } from "../features/moments/moment.routes.js";
 import type { MomentCommentService } from "../features/moments/moment-comment.service.js";
 import type { MomentReactionService } from "../features/moments/moment-reaction.service.js";
@@ -88,6 +90,7 @@ import type { UserService } from "../features/users/user.service.js";
  * @returns Nothing.
  * @param participations - Participation; mounted only alongside authentication
  *   and users, since every route here needs an authenticated caller.
+ * @param savedViews - Saved Views; likewise, since a view belongs to somebody.
  */
 export async function registerRoutes(
   app: FastifyInstance,
@@ -113,6 +116,7 @@ export async function registerRoutes(
   accountDeletion?: AccountDeletionService | undefined,
   dataExport?: ExportService | undefined,
   participations?: ParticipationService | undefined,
+  savedViews?: SavedViewService | undefined,
 ): Promise<void> {
   await app.register(healthRoutes);
 
@@ -153,6 +157,10 @@ export async function registerRoutes(
 
       if (participations !== undefined) {
         await app.register(participationRoutes(participations));
+      }
+
+      if (savedViews !== undefined) {
+        await app.register(savedViewRoutes(savedViews));
       }
 
       if (follows !== undefined) {

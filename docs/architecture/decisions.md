@@ -4372,3 +4372,58 @@ One `derive` method returning a union; leaving perspective and filters unreachab
 **The two undefined fields were settled before anything was built on them.** A field's meaning is cheap to add and expensive to change once things have been saved with it, and deciding what "perspective" meant while wiring a query would have made a plumbing choice into a product decision.
 
 **Sixteen routes still exist.** They are entry points that assemble a specification, which is exactly the diagram `saved-views.md` draws: navigation, a Saved View, a shared link and discovery all converge on one object. Their seventy-seven existing tests pass unchanged, which is what proves the interface changed without the behaviour changing.
+
+---
+
+# ADR-132 — A Saved View Stores a Request, and Sharing One Confers Nothing
+
+## Status
+
+Accepted.
+
+## Context
+
+ADR-131 made a Timeline request into an object: serialisable, versioned, and the same object every navigation surface already assembles. `saved-views.md` has specified Saved Views since before the Timeline existed, and the only thing it was waiting for was something worth persisting.
+
+The product statement is one sentence: "my father's photographs in Tokyo in the nineties", named, kept, and reopened next year still meaning that. Everything else follows from taking that literally — a view is *about* something, so it must grow as its subject does, and it must not become a snapshot.
+
+`saved-views.md:340` also states, without qualification, that sharing a view must never confer access to a Moment the recipient could not otherwise view.
+
+## Decision
+
+**A Saved View stores a View Specification and a name for it, and never a list of Moments.** Reopening derives current history. A view of a place shows what has been added to it since; "the last thirty days" means whichever thirty days it is opened in.
+
+**The specification is not editable.** A view that pointed somewhere new would be a different view wearing an old name, and anybody holding a link to it would be handed something they were never shown. Renaming changes the name; pointing somewhere else means saving another one.
+
+**A link carries the request and never the history.** `GET /shared-views/:token` answers with a specification and nothing derived from it. Whoever followed the link then reads the Timeline as themselves, which is the mechanism — rather than a rule applied afterwards — that makes `saved-views.md:340` true. Two people following one link see different Moments, and neither learns what the other saw.
+
+**What a link discloses is the sender's choice, and the default is neither the title nor the owner.** A title is somebody's words about their own history, and a link outlives the conversation it was sent in. The choice lives on the share rather than on the view, so one view can be shared twice on different terms.
+
+**A withdrawn link and a token nobody holds answer identically.** "This was withdrawn" tells a guesser that a token they invented once worked.
+
+**A stored specification is re-validated on the way out, and migrated rather than refused.** It may have been written by an older version of this system than the one reading it — ADR-131's version rule, now with something saved under it.
+
+**The token is thirty-two bytes and is generated in the repository.** It is the authorisation, not an identifier, so nothing upstream can weaken it. A session is still required to spend one: a capability is not a public address, and requiring one means an anonymous crawler cannot walk the token space.
+
+**Saved Views are swept on erasure and carried in the export.** They are somebody's notes about their own past rather than a record about the world, so they leave with them, and the links go by the foreign key.
+
+## Alternatives Considered
+
+Storing derived results; making the specification editable; disclosing the title by default and letting senders opt out; answering a withdrawn link distinctly from an unknown one; and building new-Moment awareness into the list.
+
+## Rationale
+
+**New-Moment awareness was measured and then not built.** Against 50,000 Moments across 100 people, with 500 on the view and 143 of them new:
+
+| | median | p95 | ten views |
+|---|---|---|---|
+| boolean, `LIMIT 1` | 88.6ms | 133.8ms | 1.04s |
+| count | 121.2ms | 425.7ms | 1.71s |
+
+The count is 37% slower at the median and 3.2x worse at p95 — the figure that matters, because it grows with how much is new. But what decided it is that **both cost about a second for a list of ten**, before any eligibility resolution, and against ClickHouse in Docker on a laptop, so both are optimistic. Neither shape belongs on the list path as a live query. It becomes its own piece, designed knowing it must be precomputed, and starts from these numbers rather than from an estimate.
+
+**`available` is always true today, deliberately.** Whether a context still resolves is a question for whoever opens the view; answering it on the list would be a query per view, which is the cost just ruled out. The field exists because `saved-views.md:363` asks that a view whose subject has gone be marked and removable rather than treated as corrupt, and it is the reader that will fill it in.
+
+**The privacy property is proven end to end rather than argued.** The suite records a public Moment and a private one on a sender's Timeline, has them save and share a view covering both, and has the recipient follow the link and read the Timeline — asserting the recipient sees one, and that the sender sees two, so the comparison means something. Deriving that route for the person named rather than the Viewer asking makes it fail.
+
+**Every guard was broken deliberately.** Resolving a rolling range at save time, requiring the derivation version, dropping the ownership predicate, disclosing the title unconditionally, and deriving for the sender — each was applied, each made its test fail, and each was restored.

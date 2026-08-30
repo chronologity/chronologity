@@ -13,6 +13,7 @@ import type { MomentRelationshipService } from "../features/moments/moment-relat
 import type { MomentService } from "../features/moments/moment.service.js";
 import type { FollowService } from "../features/social/follow.service.js";
 import type { ParticipationService } from "../features/participation/participation.service.js";
+import type { SavedViewService } from "../features/saved-views/saved-view.service.js";
 import type { RealWorldEventService } from "../features/real-world-events/real-world-event.service.js";
 import type { UploadService } from "../features/uploads/upload.service.js";
 import type { UserService } from "../features/users/user.service.js";
@@ -97,6 +98,7 @@ export interface BuildAppOptions {
   accountDeletion?: AccountDeletionService | undefined;
   dataExport?: ExportService | undefined;
   participations?: ParticipationService | undefined;
+  savedViews?: SavedViewService | undefined;
 }
 
 /**
@@ -135,6 +137,7 @@ export async function buildApp({
   accountDeletion,
   dataExport,
   participations,
+  savedViews,
 }: BuildAppOptions): Promise<FastifyInstance> {
   // Typed explicitly: Fastify's overloads otherwise resolve a broadly-typed
   // `logger` to the HTTP/2 signature, and every later use of the instance
@@ -204,6 +207,7 @@ export async function buildApp({
     accountDeletion,
     dataExport,
     participations,
+    savedViews,
   );
 
   return app;

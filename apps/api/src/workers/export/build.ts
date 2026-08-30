@@ -5,6 +5,7 @@ import {
   describeMoment,
   describePerson,
   describeParticipation,
+  describeSavedView,
   describeReaction,
 } from "../../features/privacy/export-document.js";
 import type { ExportSourceRepository } from "../../features/privacy/export-source.repository.js";
@@ -219,6 +220,7 @@ async function writeExport(
             participations: (await options.sources.participations(userId)).map(
               describeParticipation,
             ),
+            savedViews: (await options.sources.savedViews(userId)).map(describeSavedView),
             moderation: (await options.sources.moderation(userId)).map((decision) => ({
               subjectType: decision.subjectType,
               subjectId: decision.subjectId,

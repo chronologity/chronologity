@@ -63,6 +63,13 @@ export const ACCOUNT_SWEEPS: readonly AccountSweep[] = [
   // to delete, the same rule comments and reactions get above.
   { table: "moment_participations", column: "user_id", action: "delete" },
 
+  // Notes somebody wrote to themselves about their own history. A Saved View is
+  // not a record about the world that outlives its author — it is a perspective
+  // they kept, and it goes with them. The links they made to it go too, by the
+  // foreign key: a link to a view that no longer exists resolves to nothing, and
+  // keeping one would keep a record of what they used to have saved.
+  { table: "saved_views", column: "user_id", action: "delete" },
+
   // Both directions, exactly as `user_blocks` above: there is no longer
   // anybody to be protected from or protected against.
   { table: "participation_refusals", column: "refusing_user_id", action: "delete" },

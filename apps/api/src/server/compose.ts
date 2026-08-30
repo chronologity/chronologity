@@ -46,6 +46,8 @@ import { ModerationService } from "../features/moderation/moderation.service.js"
 import { LocationService } from "../features/locations/location.service.js";
 import { FollowRepository } from "../features/social/follow.repository.js";
 import { ParticipationRepository } from "../features/participation/participation.repository.js";
+import { SavedViewRepository } from "../features/saved-views/saved-view.repository.js";
+import { SavedViewService } from "../features/saved-views/saved-view.service.js";
 import { ParticipationService } from "../features/participation/participation.service.js";
 import { FollowService } from "../features/social/follow.service.js";
 import { MomentRepository } from "../features/moments/moment.repository.js";
@@ -296,6 +298,11 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
       momentReactionRepository,
       momentCommentRepository,
       participationRepository,
+    ),
+    savedViews: new SavedViewService(
+      database.dataSource,
+      new SavedViewRepository(database.dataSource),
+      accounts,
     ),
     participations: new ParticipationService(
       database.dataSource,

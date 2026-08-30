@@ -39,6 +39,8 @@ import { ParticipationService } from "../participation/participation.service.js"
 import { FollowService } from "../social/follow.service.js";
 import { UploadRepository } from "../uploads/upload.repository.js";
 import { UploadService } from "../uploads/upload.service.js";
+import { SavedViewRepository } from "../saved-views/saved-view.repository.js";
+import { SavedViewService } from "../saved-views/saved-view.service.js";
 import { UserRepository } from "../users/user.repository.js";
 import { UserService } from "../users/user.service.js";
 
@@ -102,6 +104,20 @@ const EXEMPT: readonly Exemption[] = [
     route,
     because: "Guarded by a permission; permission-matrix.integration.test.ts drives it.",
   })),
+
+  // A shared view opened by its token. The identifier is not a name for
+  // something owned but the authorisation itself: whoever holds it was given it,
+  // and holding it is the whole of the permission. Substituting somebody else's
+  // token is not reaching past a check, it is being sent a different link.
+  //
+  // What it discloses is bounded at the far end instead — it answers with a
+  // specification and never with history, so the sender's eligibility cannot
+  // travel with it. saved-view.integration.test.ts drives that.
+  {
+    route: "GET /shared-views/:token",
+    because:
+      "The token is the capability, not a name for something owned; disclosure is bounded by what it answers with, which saved-view.integration.test.ts drives.",
+  },
 
   // Shared reference data. A Location and a real-world Event belong to nobody:
   // recording the first entry for a public occurrence confers no authority over
@@ -210,6 +226,8 @@ interface Owned {
   deviceId: string;
   followRequestId: string;
   participationId: string;
+  savedViewId: string;
+  shareId: string;
 }
 
 /** A route a stranger must not get through, and the request that tries. */
@@ -520,6 +538,54 @@ const ATTEMPTS: readonly Attempt[] = [
     refusal: 404,
   },
 
+  // A perspective on history somebody kept. Not a Moment and not a thing about
+  // the world — their words about their own past — so a stranger naming it gets
+  // the answer an identifier nobody holds gets.
+  {
+    method: "GET",
+    path: "/saved-views/:savedViewId",
+    url: (o) => `/saved-views/${o.savedViewId}`,
+    refusal: 404,
+  },
+  {
+    method: "PATCH",
+    path: "/saved-views/:savedViewId",
+    url: (o) => `/saved-views/${o.savedViewId}`,
+    payload: () => ({ title: "Renamed by somebody else" }),
+    refusal: 404,
+    indistinguishable: true,
+  },
+  {
+    method: "DELETE",
+    path: "/saved-views/:savedViewId",
+    url: (o) => `/saved-views/${o.savedViewId}`,
+    refusal: 404,
+  },
+  // Making a link to somebody else's view would be handing out access to a
+  // thing that is not yours to hand out.
+  {
+    method: "POST",
+    path: "/saved-views/:savedViewId/shares",
+    url: (o) => `/saved-views/${o.savedViewId}/shares`,
+    payload: () => ({ revealsTitle: true, revealsOwner: true }),
+    refusal: 404,
+  },
+  // Reading the links somebody made. The tokens are here, so this is the one
+  // that would hand over the capability itself.
+  {
+    method: "GET",
+    path: "/saved-views/:savedViewId/shares",
+    url: (o) => `/saved-views/${o.savedViewId}/shares`,
+    refusal: 404,
+  },
+  {
+    method: "DELETE",
+    path: "/shares/:shareId",
+    url: (o) => `/shares/${o.shareId}`,
+    refusal: 404,
+    indistinguishable: true,
+  },
+
   // A request to follow, which belongs to the two people in it and nobody else.
   {
     method: "POST",
@@ -641,6 +707,11 @@ describe("reaching something with somebody else's identifier", () => {
       users: new UserService(database.dataSource, new UserRepository(database.dataSource), {
         minimumAgeYears: config.minimumAgeYears,
       }),
+      savedViews: new SavedViewService(
+        database.dataSource,
+        new SavedViewRepository(database.dataSource),
+        new UserRepository(database.dataSource),
+      ),
       uploads: new UploadService(
         database.dataSource,
         new UploadRepository(database.dataSource),
@@ -941,6 +1012,29 @@ describe("reaching something with somebody else's identifier", () => {
 
     assert.equal(proposed.statusCode, 201, proposed.body);
 
+    // A view of their own history, and a link to it. Both must genuinely exist
+    // or every refusal below would pass for the wrong reason.
+    const view = await app.inject({
+      method: "POST",
+      url: "/saved-views",
+      headers,
+      payload: {
+        title: "That summer",
+        view: { context: { type: "person", id: account.userId } },
+      },
+    });
+
+    assert.equal(view.statusCode, 201, view.body);
+
+    const share = await app.inject({
+      method: "POST",
+      url: `/saved-views/${view.json().savedViewId as string}/shares`,
+      headers,
+      payload: {},
+    });
+
+    assert.equal(share.statusCode, 201, share.body);
+
     return {
       userId: account.userId,
       accessToken: account.accessToken,
@@ -957,6 +1051,8 @@ describe("reaching something with somebody else's identifier", () => {
       deviceId: device.json().deviceId as string,
       followRequestId: requests[0]!.request_id,
       participationId: proposed.json().participationId as string,
+      savedViewId: view.json().savedViewId as string,
+      shareId: share.json().shareId as string,
     };
   }
 
@@ -1005,6 +1101,8 @@ describe("reaching something with somebody else's identifier", () => {
       { what: "the upload", url: (o) => `/uploads/${o.pendingUploadId}` },
       { what: "the notification", url: (o) => `/notifications/${o.notificationId}` },
       { what: "the replies to the comment", url: (o) => `/comments/${o.commentId}/replies` },
+      { what: "the saved view", url: (o) => `/saved-views/${o.savedViewId}` },
+      { what: "its shares", url: (o) => `/saved-views/${o.savedViewId}/shares` },
     ];
 
     for (const { what, url } of reachable) {
@@ -1038,7 +1136,13 @@ describe("reaching something with somebody else's identifier", () => {
           // yours" and "not there", which is the disclosure itself.
           const nothing = await app.inject({
             method: attempt.method,
-            url: attempt.url({ ...owned, momentId: randomUUID(), sessionId: randomUUID() }),
+            url: attempt.url({
+              ...owned,
+              momentId: randomUUID(),
+              sessionId: randomUUID(),
+              savedViewId: randomUUID(),
+              shareId: randomUUID(),
+            }),
             headers: authed(stranger.accessToken),
             ...(attempt.payload === undefined ? {} : { payload: attempt.payload(owned) }),
           });
