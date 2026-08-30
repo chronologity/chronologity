@@ -15,6 +15,7 @@
     "lint:fix": "eslint . --fix",
     "clickhouse:migrate": "node dist/cli/migrate-analytics.js",
     "migrate": "node dist/cli/migrate.js",
+    "seed:history": "node dist/cli/seed-history.js",
     "search:rebuild": "node dist/cli/rebuild-search-index.js",
     "timeline:rebuild": "node dist/cli/rebuild-timeline.js",
     "spec:check": "node dist/cli/generate-spec.js && git diff --exit-code -- openapi.json",

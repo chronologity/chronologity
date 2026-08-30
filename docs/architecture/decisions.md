@@ -4427,3 +4427,59 @@ The count is 37% slower at the median and 3.2x worse at p95 — the figure that 
 **The privacy property is proven end to end rather than argued.** The suite records a public Moment and a private one on a sender's Timeline, has them save and share a view covering both, and has the recipient follow the link and read the Timeline — asserting the recipient sees one, and that the sender sees two, so the comparison means something. Deriving that route for the person named rather than the Viewer asking makes it fail.
 
 **Every guard was broken deliberately.** Resolving a rolling range at save time, requiring the derivation version, dropping the ownership predicate, disclosing the title unconditionally, and deriving for the sender — each was applied, each made its test fail, and each was restored.
+
+---
+
+# ADR-133 — What a Saved View Has Gained Is Counted by a Sweep, and Shown Only While It Is Fresh
+
+## Status
+
+Accepted.
+
+## Context
+
+ADR-132 shipped Saved Views without the one thing `saved-views.md` suggested the initial feature might have: an indication that the derived result has changed. That was measured rather than assumed — a boolean and a count both cost about a second for a list of ten views before any authorisation was resolved — and the conclusion recorded there was that the real design has to be precomputed. This is that design.
+
+`saved-views.md` also constrains it twice over. Its example presentation is a count, not a flag. And its privacy section requires that Chronologity "avoid leaking inaccessible Moment metadata through counts, previews, titles, or notifications" — so a precomputed number that is not eligibility-aware would violate the rule directly.
+
+## Decision
+
+**New means newly recorded, never newly occurred.** The mark is `recorded_at`, which comes from `moments.created_at` and is updated by no code path, so it survives reprojection and a full rebuild alike. A Moment added today belonging to 1969 is new; putting history back where it happened is the point of the product, and a mark on occurrence time would miss precisely the additions worth surfacing. `projected_at` would report a rebuilt decade as new to every reader at once.
+
+**Counting is never incremental.** A counter that added one per arriving Moment could not observe eligibility *narrowing* — a Moment going private, a moderation decision, a Block — so it could only drift upward, which is the direction that discloses. Each pass counts afresh from the projection.
+
+**A view of your own history is counted without an eligibility filter.** `ownSlice` returns Moments you may not read, redacted, and `ownBuckets` counts them, because they are yours and a count omitting them would disagree with the pages beneath it. Filtering the own branch looks safer and is a defect.
+
+**A view onto a scope that has closed counts zero.** Suspension, a Block, or a Timeline turned off makes derivation empty; a badge over it would promise history that opening cannot produce.
+
+**The sweep's write is conditional on the visit it counted from.** It reads a mark, spends time in ClickHouse, then writes; a visit landing in that gap has already asserted zero, and that zero wins.
+
+**Narrowings aimed at a reader are invalidated synchronously.** A Block in either direction, and removal from a Moment's audience, zero the affected owner's counts in the same transaction that writes the change.
+
+**A count past its freshness budget is shown as nothing at all**, and a rolling range gets a budget proportional to its window.
+
+**A visit is an explicit act**, not a side effect of reading. Listing views is not looking at one.
+
+## Alternatives Considered
+
+Counting on the read path (ADR-132 measured it); an incremental counter; filtering the own branch; a boolean instead of a count; recomputing on every narrowing rather than only the targeted ones; and distinguishing "never counted" from "gone stale" in the contract.
+
+## Rationale
+
+**The privacy argument does not depend on the worker running.** This is what the freshness budget buys, and it is the part worth keeping if anything else here is revisited. Eligibility narrows after a count is taken and the sweep is what notices; without a budget, a worker down for a week would go on showing week-old numbers. With one, an outage makes badges disappear rather than go wrong. Six hours, against a sweep that brings a hundred thousand views round in about seventy-five minutes at twenty-five a pass.
+
+**Blocks are invalidated in their own transaction because a pollable count is an oracle.** `timeline.eligibility.ts` keeps a Block symmetric precisely so it cannot be inferred from results that stopped appearing one way only. A badge falling from fourteen to eleven across a narrow view, refreshable at will, would say it out loud. Narrowings aimed at nobody — a Moment going private, a moderation decision — remove history from everybody at once, disclose nothing about the reader, and are left to the sweep. That asymmetry is the whole of the privacy design.
+
+**Absent and zero are different answers.** "You are up to date" is a real answer; "we do not know" is not an answer at all. Never computed, computed against a superseded visit, and past the budget all present as absent, and they are deliberately indistinguishable from one another — a client that could tell them apart would be reading the health of a worker.
+
+**A rolling range expels history as well as admitting it.** "The last thirty days" drops Moments as it slides, so its count goes wrong on its own with nothing changing in the projection. The budget is derived from the window in the presenter rather than by sweeping those views more often, which would only shorten a window that can never close while starving fixed views. Under backlog the views whose numbers have gone wrong lose their badge first.
+
+**A limitation, accepted and named.** A Moment withheld during review for a month and then released carries its original `recorded_at`, so it is not counted as new though it newly became available. That under-reports, which is the safe direction, and `projected_at` — the only alternative — is worse for the reason above.
+
+**Every guard was broken deliberately.** Filtering the own branch; keying the mark on occurrence, then on projection; treating an uncounted view as up to date; ignoring which visit a count was taken against; recording a visit as an edit; dropping the visit's ownership predicate; writing the count unconditionally; counting a closed scope; forgetting nothing when eligibility narrows; and dropping the cascade under a Saved View. Each was applied, each made its own test fail, and each was restored.
+
+**Scale validation found a defect in the rebuild, not in the counting.** Phase 7 asked for measurement against a non-trivial synthetic history, and `pnpm seed:history` now writes 50,000 Moments in 22 seconds, deterministically, so `docs/architecture/timeline-scale.json` can be regenerated by anybody. Filling the projection from it cannot: the rebuild runs at 3.9 Moments a second and a run of 5,000 failed outright on a socket timeout after 1,530 seconds.
+
+The cause is not what ADR-128 anticipated. Zero `DELETE`s were issued, so its claim that `--version` into an empty version is insert-only holds. The cost is that the projector inserts **one row at a time**, which in ClickHouse means one part per Moment — 60 parts for 5,164 rows — and every read carries `final: 1`, so the merge cost grows with the part count until reads outlive the socket timeout. Batching the projector's inserts is the fix. It belongs to the projection rather than to Saved Views, and is recorded here because this is where it was found.
+
+**One test could not fail and was rewritten.** The own-branch count was first tested with a Moment its owner had authored — which the eligibility rule admits anyway, its first clause being your own history whatever state it is in. Only a Moment somebody was *named in*, authored by another and shut, can tell a filtered own count from an unfiltered one. The break discipline found it; reading would not have.

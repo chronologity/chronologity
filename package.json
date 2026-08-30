@@ -31,7 +31,8 @@
     "infra:logs": "bash scripts/compose.sh logs --follow",
     "infra:validate": "bash scripts/validate-infra.sh",
     "db:reset": "bash scripts/reset-database.sh",
-    "load": "node scripts/load.mjs"
+    "load": "node scripts/load.mjs",
+    "timeline:scale": "node scripts/timeline-scale.mjs"
   },
   "devDependencies": {
     "@chronologity/eslint-config": "workspace:*",

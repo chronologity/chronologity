@@ -1,0 +1,58 @@
+{
+  "recordedAt": "2026-08-30T22:21:57.246Z",
+  "commit": "d0c2223",
+  "machine": {
+    "platform": "darwin",
+    "arch": "x64",
+    "cpus": 4,
+    "memoryGb": 8,
+    "node": "v24.19.0"
+  },
+  "caveat": "Measured on one developer machine against local containers, with ClickHouse sharing a 4GB VM with Kafka and PostgreSQL. Comparable to another run on the same machine; not to anything else.",
+  "projectionVersion": "bench5k",
+  "corpus": {
+    "moments": 2161,
+    "contextRows": 2160,
+    "inDenseMonth": 459,
+    "parts": {
+      "timeline_moment_contexts": 35,
+      "timeline_moments": 35
+    }
+  },
+  "projectionFill": {
+    "seedRatePerSecond": 2273,
+    "seedNote": "50,000 Moments written to PostgreSQL in 22s by `pnpm seed:history`.",
+    "rebuildRatePerSecond": 3.9,
+    "rebuildNote": "Into an empty version, so insert-only — zero DELETEs observed, which confirms ADR-128. The cost is per-statement round trip (~42ms for inserts and selects alike), not mutation. One insert per Moment also means one part per Moment: at 5,164 rows the projection held 60 parts, and with `final: 1` on every read the merge cost grows until reads exceed the socket timeout. A rebuild of 5,000 failed that way after 1,530s having written 2,161. Batching inserts is the fix, and belongs to the projector rather than here."
+  },
+  "scenarios": [
+    {
+      "name": "a page of somebody's own history",
+      "runs": 10,
+      "p50": 34.8,
+      "p95": 42,
+      "max": 42
+    },
+    {
+      "name": "a decade of buckets",
+      "runs": 10,
+      "p50": 32,
+      "p95": 40.6,
+      "max": 40.6
+    },
+    {
+      "name": "a jump into the dense month",
+      "runs": 10,
+      "p50": 34.4,
+      "p95": 44.1,
+      "max": 44.1
+    },
+    {
+      "name": "counting what is new since a mark",
+      "runs": 10,
+      "p50": 56.4,
+      "p95": 86.4,
+      "max": 86.4
+    }
+  ]
+}
