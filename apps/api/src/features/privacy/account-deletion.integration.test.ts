@@ -396,17 +396,30 @@ describe("account deletion", () => {
     return Number(rows[0]?.count ?? "0");
   };
 
-  describe("the plan itself", () => {
-    it("accounts for every reference into an account", async () => {
-      const rows: { reference: string }[] = await database.dataSource.query(
-        `SELECT cl.relname || '.' || a.attname AS reference
+  /**
+   * Every foreign key pointing at a table, with what happens on delete.
+   */
+  const referencesTo = async (
+    table: string,
+  ): Promise<{ reference: string; onDelete: string }[]> => {
+    const rows: { reference: string; confdeltype: string }[] =
+      await database.dataSource.query(
+        `SELECT cl.relname || '.' || a.attname AS reference, c.confdeltype
            FROM pg_constraint c
            JOIN pg_class cl ON cl.oid = c.conrelid
            JOIN pg_class ref ON ref.oid = c.confrelid
            JOIN unnest(c.conkey) AS k(attnum) ON true
            JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
-          WHERE c.contype = 'f' AND ref.relname = 'users'`,
+          WHERE c.contype = 'f' AND ref.relname = $1`,
+        [table],
       );
+
+    return rows.map((row) => ({ reference: row.reference, onDelete: row.confdeltype }));
+  };
+
+  describe("the plan itself", () => {
+    it("accounts for every reference into an account", async () => {
+      const rows = await referencesTo("users");
 
       const decided = new Set([
         ...ACCOUNT_SWEEPS.map((sweep) => `${sweep.table}.${sweep.column}`),
@@ -424,16 +437,34 @@ describe("account deletion", () => {
       assert.deepEqual(undecided, []);
     });
 
-    it("names nothing the database does not have", async () => {
-      const rows: { reference: string }[] = await database.dataSource.query(
-        `SELECT cl.relname || '.' || a.attname AS reference
-           FROM pg_constraint c
-           JOIN pg_class cl ON cl.oid = c.conrelid
-           JOIN pg_class ref ON ref.oid = c.confrelid
-           JOIN unnest(c.conkey) AS k(attnum) ON true
-           JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
-          WHERE c.contype = 'f' AND ref.relname = 'users'`,
+    it("erases everything hanging off a Saved View, one level down", async () => {
+      // The blind spot the sweep above cannot see. `ACCOUNT_SWEEPS` is checked
+      // against foreign keys into `users`, so a table keyed only on
+      // `saved_view_id` is invisible to it — and `saved_views` is one of the few
+      // tables erasure genuinely deletes rather than tombstones, so anything
+      // hanging off it must go by the key or not at all.
+      //
+      // Nothing is added to `ACCOUNT_SWEEPS` for these: the executor
+      // interpolates `WHERE "<column>" = $1` and there is no `user_id` to name.
+      // Denormalising one in to satisfy the list would create a second source of
+      // ownership that could disagree with the first.
+      const hanging = await referencesTo("saved_views");
+
+      assert.ok(hanging.length > 0, "no table references a Saved View, which cannot be right");
+
+      const notCascading = hanging
+        .filter((reference) => reference.onDelete !== "c")
+        .map((reference) => reference.reference);
+
+      assert.deepEqual(
+        notCascading,
+        [],
+        "a table hangs off a Saved View without going when the view does",
       );
+    });
+
+    it("names nothing the database does not have", async () => {
+      const rows = await referencesTo("users");
       const actual = new Set(rows.map((row) => row.reference));
 
       // A sweep of a column that no longer exists would fail at run time, in a
