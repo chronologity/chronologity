@@ -69,6 +69,11 @@ function withMoments(chosen: string, order: string): string {
   // qualified — `moment.moment_id` — and every reader here expects bare names.
   return `SELECT scoped.readable AS readable,
                  moment.occurred_at AS occurred_at,
+                 -- When it was recorded, which orders nothing and answers what
+                 -- is new. Declared on the record since the specification
+                 -- branch and selected by nothing until now, so the field was
+                 -- undefined at runtime while its type promised a string.
+                 moment.recorded_at AS recorded_at,
                  moment.moment_id AS moment_id,
                  moment.author_user_id AS author_user_id,
                  moment.projected_at AS projected_at,
