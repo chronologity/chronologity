@@ -137,6 +137,55 @@ A View Specification may include:
 - navigation position;
 - derivation version.
 
+### Perspective
+
+Perspective is **which lens is applied to a context's Moments**. Context type
+says whose or what history is being explored; perspective says which of it.
+
+For a person:
+
+```text
+all           everything on their Timeline
+authored      only what they recorded
+participated  only what they took part in
+```
+
+`timelines.md` defines a person's Timeline as what they authored together with
+what they participated in, and the two halves are worth separating: "what my
+father photographed" and "where my father was" are different questions about the
+same person, and a view that could not tell them apart would answer neither.
+
+A Location and a real-world Event have one perspective, `all`. Nothing about a
+place distinguishes recording from taking part — everything at a place was
+recorded by somebody. A perspective other than `all` on such a context is
+refused rather than quietly ignored, because a saved view that silently meant
+something else than it said would be worse than one that failed to open.
+
+### Filters
+
+A filter **narrows within a context without changing what the context is**. The
+set is closed and enumerated:
+
+```text
+author              only Moments this person recorded
+location            only Moments at this place
+real-world Event    only Moments that were part of this occurrence
+```
+
+That makes "my father's photographs in Tokyo in the nineties" a view: a person as
+the context, a place as a filter, a decade as the range.
+
+**Closed on purpose.** A Timeline is chronology over a context; Search is what
+answers questions. An engine that accepted arbitrary predicates would become a
+second query language beside Search, which is the failure the specification
+exists to prevent — and an open filter set cannot be persisted safely, because
+nothing bounds what a stored view might ask of a later engine.
+
+A filter naming the same thing as the context is refused. Filtering a Location's
+Timeline by that Location is a statement with no content, and filtering it by a
+different one is a view that can never hold anything; both are more likely to be
+a mistake than an intention.
+
 Supported context types may include product concepts such as:
 
 - person;
