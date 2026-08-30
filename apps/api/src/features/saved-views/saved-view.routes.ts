@@ -139,6 +139,28 @@ export function savedViewRoutes(savedViews: SavedViewService) {
     );
 
     app.post(
+      "/saved-views/:savedViewId/visits",
+      {
+        schema: {
+          summary: "Say you have looked at a view",
+          description: [
+            "Records that you opened this view and explored it, which is what the count of new Moments is measured from. Everything recorded after this point is what you have not seen.",
+            "",
+            "**Call it when somebody actually looks, not when you list.** Listing views is not looking at one, and clearing the count because a list was prefetched would lose somebody the only signal they had that their history had grown.",
+          ].join("\n"),
+          params: viewParams,
+          response: { 204: z.null(), ...errors(400, 401, 404) },
+        },
+        preHandler: requireUser,
+      },
+      async (request, reply) => {
+        await savedViews.visit(request.params.savedViewId, request.user.userId);
+
+        return reply.status(204).send(null);
+      },
+    );
+
+    app.post(
       "/saved-views/:savedViewId/shares",
       {
         schema: {

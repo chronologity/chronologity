@@ -384,6 +384,243 @@ describe("saved views", () => {
     });
   });
 
+  describe("looking at one", () => {
+    const visit = async (accessToken: string, savedViewId: string) =>
+      app.inject({
+        method: "POST",
+        url: `/saved-views/${savedViewId}/visits`,
+        headers: authed(accessToken),
+      });
+
+    const storedFor = async (savedViewId: string) => {
+      const rows: {
+        new_moment_count: number;
+        capped: boolean;
+        visited_through: Date | null;
+        computed_at: Date | null;
+      }[] = await database.dataSource.query(
+        `SELECT new_moment_count, capped, visited_through, computed_at
+           FROM saved_view_awareness WHERE saved_view_id = $1`,
+        [savedViewId],
+      );
+
+      return rows[0];
+    };
+
+    it("enqueues a view for counting the moment it is saved", async () => {
+      // The row exists from the start, so finding the stalest view is one index
+      // scan rather than a join against every view that has none.
+      const person = await onboard();
+      const kept = await keep(person.accessToken, "Fresh", {
+        context: { type: "person", id: person.userId },
+      });
+
+      const stored = await storedFor(kept.savedViewId);
+
+      assert.ok(stored, "a saved view was not enqueued for counting");
+      assert.equal(stored.computed_at, null, "a view was enqueued as though already counted");
+    });
+
+    it("says nothing about a view nothing has counted yet", async () => {
+      const person = await onboard();
+      const kept = await keep(person.accessToken, "Unknown", {
+        context: { type: "person", id: person.userId },
+      });
+
+      const read = await app.inject({
+        method: "GET",
+        url: `/saved-views/${kept.savedViewId}`,
+        headers: authed(person.accessToken),
+      });
+
+      assert.equal(read.json().newMoments, undefined, "an uncounted view reported a count");
+      assert.equal(read.json().lastVisitedAt, undefined);
+    });
+
+    it("records when somebody looked, and clears what was counted before", async () => {
+      const person = await onboard();
+      const kept = await keep(person.accessToken, "Looked at", {
+        context: { type: "person", id: person.userId },
+      });
+
+      await database.dataSource.query(
+        `UPDATE saved_view_awareness
+            SET new_moment_count = 14, capped = false, computed_at = now()
+          WHERE saved_view_id = $1`,
+        [kept.savedViewId],
+      );
+
+      const visited = await visit(person.accessToken, kept.savedViewId);
+
+      assert.equal(visited.statusCode, 204, visited.body);
+
+      const stored = await storedFor(kept.savedViewId);
+
+      assert.equal(stored?.new_moment_count, 0, "a count survived somebody reading the view");
+      assert.ok(stored?.visited_through, "the visit was not recorded against the count");
+      assert.equal(
+        stored?.computed_at,
+        null,
+        "an asserted zero was recorded as though it had been counted",
+      );
+
+      const read = await app.inject({
+        method: "GET",
+        url: `/saved-views/${kept.savedViewId}`,
+        headers: authed(person.accessToken),
+      });
+
+      assert.ok(read.json().lastVisitedAt, "the visit was not presented");
+    });
+
+    it("is an act rather than a consequence of reading", async () => {
+      // Listing views is not looking at one. A client that prefetched the list
+      // would otherwise clear every badge somebody had.
+      const person = await onboard();
+      const kept = await keep(person.accessToken, "Merely listed", {
+        context: { type: "person", id: person.userId },
+      });
+
+      await app.inject({
+        method: "GET",
+        url: `/saved-views/${kept.savedViewId}`,
+        headers: authed(person.accessToken),
+      });
+      await app.inject({ method: "GET", url: "/saved-views", headers: authed(person.accessToken) });
+
+      const stored = await storedFor(kept.savedViewId);
+
+      assert.equal(stored?.visited_through, null, "reading a view counted as looking at it");
+    });
+
+    it("does not count as an edit", async () => {
+      const person = await onboard();
+      const kept = await keep(person.accessToken, "Unedited", {
+        context: { type: "person", id: person.userId },
+      });
+
+      await visit(person.accessToken, kept.savedViewId);
+
+      const read = await app.inject({
+        method: "GET",
+        url: `/saved-views/${kept.savedViewId}`,
+        headers: authed(person.accessToken),
+      });
+
+      assert.equal(
+        read.json().updatedAt,
+        kept.body.updatedAt,
+        "looking at a view was recorded as changing it",
+      );
+    });
+
+    it("moves the mark forward each time", async () => {
+      const person = await onboard();
+      const kept = await keep(person.accessToken, "Twice", {
+        context: { type: "person", id: person.userId },
+      });
+
+      await visit(person.accessToken, kept.savedViewId);
+      const first = (await storedFor(kept.savedViewId))?.visited_through;
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await visit(person.accessToken, kept.savedViewId);
+      const second = (await storedFor(kept.savedViewId))?.visited_through;
+
+      assert.ok(first && second && second > first, "a second visit did not move the mark");
+    });
+
+    it("refuses to record a visit to somebody else's view", async () => {
+      const owner = await onboard();
+      const stranger = await onboard();
+      const kept = await keep(owner.accessToken, "Not yours", {
+        context: { type: "person", id: owner.userId },
+      });
+
+      const theirs = await visit(stranger.accessToken, kept.savedViewId);
+
+      assert.equal(theirs.statusCode, 404, theirs.body);
+      assert.equal(
+        (await storedFor(kept.savedViewId))?.visited_through,
+        null,
+        "a stranger moved somebody else's mark",
+      );
+    });
+
+    it("carries what was counted, and keeps nothing new distinct from not knowing", async () => {
+      const person = await onboard();
+      const context = { type: "person", id: person.userId };
+      const counted = await keep(person.accessToken, "Counted", { context });
+      const uncounted = await keep(person.accessToken, "Uncounted", { context });
+
+      await database.dataSource.query(
+        `UPDATE saved_view_awareness
+            SET new_moment_count = 0, capped = false, computed_at = now()
+          WHERE saved_view_id = $1`,
+        [counted.savedViewId],
+      );
+
+      const listed = await app.inject({
+        method: "GET",
+        url: "/saved-views",
+        headers: authed(person.accessToken),
+      });
+
+      const items: { savedViewId: string; newMoments?: { count: number } }[] = listed.json().items;
+      const withCount = items.find((item) => item.savedViewId === counted.savedViewId);
+      const without = items.find((item) => item.savedViewId === uncounted.savedViewId);
+
+      assert.equal(withCount?.newMoments?.count, 0, "a counted zero was not presented");
+      assert.equal(without?.newMoments, undefined, "an uncounted view was presented as up to date");
+    });
+
+    it("says nothing about a count taken before the last visit", async () => {
+      const person = await onboard();
+      const kept = await keep(person.accessToken, "Superseded", {
+        context: { type: "person", id: person.userId },
+      });
+
+      // Counted against a visit, then looked at again.
+      await database.dataSource.query(
+        `UPDATE saved_view_awareness
+            SET new_moment_count = 9, computed_at = now(), visited_through = now() - interval '1 day'
+          WHERE saved_view_id = $1`,
+        [kept.savedViewId],
+      );
+      await database.dataSource.query(
+        `UPDATE saved_views SET last_visited_at = now() WHERE saved_view_id = $1`,
+        [kept.savedViewId],
+      );
+
+      const read = await app.inject({
+        method: "GET",
+        url: `/saved-views/${kept.savedViewId}`,
+        headers: authed(person.accessToken),
+      });
+
+      assert.equal(
+        read.json().newMoments,
+        undefined,
+        "a count from before the last visit was still shown",
+      );
+    });
+
+    it("takes its awareness with it when the view goes", async () => {
+      const person = await onboard();
+      const kept = await keep(person.accessToken, "Doomed", {
+        context: { type: "person", id: person.userId },
+      });
+
+      await app.inject({
+        method: "DELETE",
+        url: `/saved-views/${kept.savedViewId}`,
+        headers: authed(person.accessToken),
+      });
+
+      assert.equal(await storedFor(kept.savedViewId), undefined, "awareness outlived its view");
+    });
+  });
+
   describe("sharing one", () => {
     const shareOf = async (
       accessToken: string,

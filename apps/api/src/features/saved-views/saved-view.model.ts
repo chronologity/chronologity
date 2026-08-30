@@ -42,6 +42,16 @@ export class SavedViewRow {
   @Column("timestamptz", { name: "updated_at" })
   updatedAt!: Date;
 
+  /**
+   * When its owner last opened it.
+   *
+   * Null until they do. Authoritative rather than derived — nothing could
+   * recompute when somebody looked at something — which is why it lives here
+   * and the count of what has arrived since lives in its own table.
+   */
+  @Column("timestamptz", { name: "last_visited_at", nullable: true })
+  lastVisitedAt!: Date | null;
+
   @ManyToOne(() => User)
   @JoinColumn({ name: "user_id" })
   user?: User;

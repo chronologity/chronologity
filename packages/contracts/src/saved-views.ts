@@ -39,6 +39,41 @@ export const renameSavedViewRequestSchema = z.object({ title: savedViewTitleSche
 export type RenameSavedViewRequest = z.infer<typeof renameSavedViewRequestSchema>;
 
 /**
+ * How much a view has gained since its owner last looked.
+ *
+ * **Absent means unknown, which is not the same as nothing.** A view nobody has
+ * counted yet, one counted against a visit that has since been superseded, and
+ * one whose count is too old to trust all present as absent; "you are up to
+ * date" presents as a real zero. Collapsing those two would turn "we do not
+ * know" into a promise.
+ *
+ * It says the *representation* of history expanded, never that the past
+ * changed — `saved-views.md` is explicit that new-Moment awareness must not
+ * imply the historical subject itself moved.
+ */
+export const newMomentsSchema = z.object({
+  /** Never more than the ceiling; see `capped`. */
+  count: z.number().int().min(0),
+  /**
+   * Whether counting stopped at the ceiling.
+   *
+   * True means "at least this many". Past a certain size an exact figure is
+   * nothing anybody can act on, and counting further costs more the busier the
+   * view is.
+   */
+  capped: z.boolean(),
+  /**
+   * When it was counted.
+   *
+   * A hint carries its own age so a client can say "as of" rather than implying
+   * the number is live. It never is: counting happens away from the read path.
+   */
+  asOf: timestampSchema,
+});
+
+export type NewMoments = z.infer<typeof newMomentsSchema>;
+
+/**
  * A Saved View as its owner sees it.
  *
  * Carries the specification rather than any history, so a client can show what
@@ -59,6 +94,10 @@ export const savedViewSchema = z.object({
    * somebody's list quietly acquiring an item that errors.
    */
   available: z.boolean(),
+  /** When its owner last opened it, absent if they never have. */
+  lastVisitedAt: timestampSchema.optional(),
+  /** What has arrived since, absent when that is not known. */
+  newMoments: newMomentsSchema.optional(),
 });
 
 export type SavedView = z.infer<typeof savedViewSchema>;

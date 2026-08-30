@@ -3,6 +3,7 @@ import type { ViewSpecification } from "@chronologity/contracts";
 import type { DataSource } from "typeorm";
 import type { Cursor } from "../../lib/pagination/cursor.js";
 import type { Transaction } from "../../lib/database/transaction.js";
+import type { StoredAwareness } from "./saved-view-awareness.js";
 import { SavedViewRow, SavedViewShareRow } from "./saved-view.model.js";
 
 /**
@@ -72,6 +73,13 @@ export class SavedViewRepository {
       [savedViewId, userId, title, JSON.stringify(specification), at],
     );
 
+    // In the same transaction, so the sweep's queue is one index scan over rows
+    // that always exist rather than a join against every view lacking one. A
+    // Moment cannot be given such a row at creation — nothing decides to assess
+    // it until later — but a saved view can, so this improves on the sweep it
+    // is modelled after rather than copying it.
+    await tx.query(`INSERT INTO saved_view_awareness (saved_view_id) VALUES ($1)`, [savedViewId]);
+
     return savedViewId;
   }
 
@@ -118,6 +126,96 @@ export class SavedViewRepository {
     }
 
     return query.getMany();
+  }
+
+  /**
+   * What was last counted for each of a page of views.
+   *
+   * One statement for the page rather than one per view: resolving this per view
+   * is exactly the cost ADR-132 measured and ruled out, and it would return with
+   * the list rather than in a worker.
+   *
+   * Raw rather than an entity. Four columns read as a lookup, written only by a
+   * sweep, and never navigated from — an entity would carry mapping and identity
+   * machinery that nothing here would use.
+   *
+   * @param savedViewIds - Which views. An empty list reads nothing.
+   * @returns What is stored, keyed by view. A view with no row is absent, which
+   *   the presenter reads as not known.
+   * @throws {Error} If the database refuses.
+   */
+  async awarenessFor(savedViewIds: readonly string[]): Promise<Map<string, StoredAwareness>> {
+    if (savedViewIds.length === 0) {
+      return new Map();
+    }
+
+    const rows: {
+      saved_view_id: string;
+      new_moment_count: number;
+      capped: boolean;
+      visited_through: Date | null;
+      computed_at: Date | null;
+    }[] = await this.dataSource.query(
+      `SELECT saved_view_id, new_moment_count, capped, visited_through, computed_at
+         FROM saved_view_awareness
+        WHERE saved_view_id = ANY($1)`,
+      [savedViewIds],
+    );
+
+    return new Map(
+      rows.map((row) => [
+        row.saved_view_id,
+        {
+          newMomentCount: row.new_moment_count,
+          capped: row.capped,
+          visitedThrough: row.visited_through,
+          computedAt: row.computed_at,
+        },
+      ]),
+    );
+  }
+
+  /**
+   * Record that somebody looked at their own view.
+   *
+   * Both writes together, because a mark moved without its count zeroed would
+   * tell somebody about history they have just been through, and a count zeroed
+   * without its mark moved would be recomputed against the old one.
+   *
+   * `computed_at` is set back to null rather than to now: the zero was asserted
+   * rather than counted, and null puts the view at the head of the sweep's queue
+   * so it learns what arrived while they were reading instead of waiting a full
+   * cycle.
+   *
+   * @param tx - The caller's transaction.
+   * @param savedViewId - Which view.
+   * @param userId - Whose it must be. Ownership is a predicate here as
+   *   everywhere else, so a stranger's visit moves nothing.
+   * @param at - When they looked.
+   * @returns Whether it was theirs to visit.
+   * @throws {Error} If the database refuses.
+   */
+  async visit(tx: Transaction, savedViewId: string, userId: string, at: Date): Promise<boolean> {
+    // `updated_at` is deliberately untouched. Looking at something is not
+    // editing it, and the contract presents that timestamp.
+    const { affected } = await tx.update(
+      SavedViewRow,
+      { savedViewId, userId },
+      { lastVisitedAt: at },
+    );
+
+    if (affected !== 1) {
+      return false;
+    }
+
+    await tx.query(
+      `UPDATE saved_view_awareness
+          SET new_moment_count = 0, capped = false, visited_through = $2, computed_at = NULL
+        WHERE saved_view_id = $1`,
+      [savedViewId, at],
+    );
+
+    return true;
   }
 
   /**

@@ -190,6 +190,7 @@ export {
 export {
   createSavedViewRequestSchema,
   createShareRequestSchema,
+  newMomentsSchema,
   renameSavedViewRequestSchema,
   savedViewListSchema,
   savedViewSchema,
@@ -199,6 +200,7 @@ export {
   sharedViewSchema,
   type CreateSavedViewRequest,
   type CreateShareRequest,
+  type NewMoments,
   type RenameSavedViewRequest,
   type SavedView,
   type SavedViewList,

@@ -15,6 +15,7 @@ import { ValidationError } from "../../lib/errors/validation-error.js";
 import { withTransaction } from "../../lib/database/transaction.js";
 import { decodeCursor, encodeCursor } from "../../lib/pagination/cursor.js";
 import type { UserRepository } from "../users/user.repository.js";
+import { presentAwareness, type StoredAwareness } from "./saved-view-awareness.js";
 import type { SavedViewRow } from "./saved-view.model.js";
 import type { SavedViewRepository } from "./saved-view.repository.js";
 
@@ -71,6 +72,28 @@ export class SavedViewService {
   }
 
   /**
+   * Record that somebody looked at their own view.
+   *
+   * An act rather than a consequence of reading. A client listing views has not
+   * looked at any of them, and clearing a badge because a list was prefetched
+   * would lose somebody the only signal they had.
+   *
+   * @param savedViewId - Which view.
+   * @param userId - Whose it must be.
+   * @returns Nothing.
+   * @throws {NotFoundError} If there is no such view of theirs.
+   */
+  async visit(savedViewId: string, userId: string): Promise<void> {
+    const visited = await withTransaction(this.dataSource, (tx) =>
+      this.savedViews.visit(tx, savedViewId, userId, this.clock()),
+    );
+
+    if (!visited) {
+      throw new NotFoundError("No such saved view");
+    }
+  }
+
+  /**
    * Somebody's saved views.
    *
    * @param userId - Whose.
@@ -86,9 +109,11 @@ export class SavedViewService {
     const rows = await this.savedViews.list(userId, request.limit + 1, after);
     const page = rows.slice(0, request.limit);
     const last = page[page.length - 1];
+    const awareness = await this.savedViews.awarenessFor(page.map((row) => row.savedViewId));
+    const now = this.clock();
 
     return {
-      items: page.map((row) => present(row)),
+      items: page.map((row) => present(row, awareness.get(row.savedViewId), now)),
       nextCursor:
         rows.length > request.limit && last !== undefined
           ? encodeCursor(last.createdAt, last.savedViewId)
@@ -106,7 +131,10 @@ export class SavedViewService {
    *   reads as absent rather than forbidden, so identifiers cannot be probed.
    */
   async get(savedViewId: string, userId: string): Promise<SavedView> {
-    return present(await this.require(savedViewId, userId));
+    const row = await this.require(savedViewId, userId);
+    const awareness = await this.savedViews.awarenessFor([savedViewId]);
+
+    return present(row, awareness.get(savedViewId), this.clock());
   }
 
   /**
@@ -311,15 +339,24 @@ function specificationOf(row: SavedViewRow): ViewSpecification {
  * A stored view as the contract presents it.
  *
  * @param row - The stored view.
+ * @param awareness - What was last counted for it, when anything was.
+ * @param now - What counts as now, for deciding whether that count is too old.
  * @returns The contract shape.
  */
-function present(row: SavedViewRow): SavedView {
+function present(row: SavedViewRow, awareness?: StoredAwareness, now?: Date): SavedView {
+  const view = specificationOf(row);
+  const newMoments = presentAwareness(awareness, view, row.lastVisitedAt ?? null, now);
+
   return {
     savedViewId: row.savedViewId,
     title: row.title,
-    view: specificationOf(row),
+    view,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    ...(row.lastVisitedAt === null || row.lastVisitedAt === undefined
+      ? {}
+      : { lastVisitedAt: row.lastVisitedAt.toISOString() }),
+    ...(newMoments === undefined ? {} : { newMoments }),
     // Whether the context still resolves is a question for whoever opens it:
     // answering it here would mean a query per view on every list, which is
     // exactly the cost the measurement ruled out.
