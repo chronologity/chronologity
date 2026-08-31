@@ -62,12 +62,43 @@ export class TimelineSourceRepository {
   /**
    * Everything a Moment's Timeline row is built from.
    *
+   * A single-Moment view of `momentsFor`, so the query exists once. Its doc
+   * pins the ordering inside the `ARRAY(...)` subqueries because the same
+   * Moment reprojected must produce the same rows; two copies of that query
+   * would eventually disagree about it, and a rebuild would churn.
+   *
    * @param momentId - Which Moment.
    * @returns Its state, or undefined when there is no such Moment — which the
    *   caller treats as an instruction to remove the row rather than as an
    *   error, since a Moment erased between the event and this read is ordinary.
+   * @throws {Error} If the database refuses.
    */
   async momentFor(momentId: string): Promise<TimelineSource | undefined> {
+    return (await this.momentsFor([momentId])).get(momentId);
+  }
+
+  /**
+   * Everything a page of Moments' Timeline rows are built from.
+   *
+   * One statement for the page. A rebuild reading these one at a time pays a
+   * round trip per Moment, which is most of what made it too slow to finish.
+   *
+   * Deliberately not `Promise.all` over the page: `search.indexer.ts` warns
+   * against exactly that, having exhausted a pool of ten with five hundred
+   * concurrent reads. This is the opposite — one query on one connection.
+   *
+   * @param momentIds - Which Moments. Duplicates are harmless.
+   * @returns What each is built from, keyed by identifier. A Moment absent from
+   *   the result no longer exists, which the caller reads as an instruction to
+   *   remove its rows — so absence has to stay distinguishable, and that is why
+   *   this returns a map rather than an array.
+   * @throws {Error} If the database refuses.
+   */
+  async momentsFor(momentIds: readonly string[]): Promise<Map<string, TimelineSource>> {
+    if (momentIds.length === 0) {
+      return new Map();
+    }
+
     const rows: {
       moment_id: string;
       author_user_id: string;
@@ -115,32 +146,31 @@ export class TimelineSourceRepository {
          LEFT JOIN moderation_states ms
            ON ms.subject_type = 'moment' AND ms.subject_id = m.moment_id
          LEFT JOIN moment_locations mloc ON mloc.moment_id = m.moment_id
-        WHERE m.moment_id = $1`,
-      [momentId],
+        WHERE m.moment_id = ANY($1::uuid[])`,
+      [[...new Set(momentIds)]],
     );
 
-    const row = rows[0];
-
-    if (row === undefined) {
-      return undefined;
-    }
-
-    return {
-      momentId: row.moment_id,
-      authorUserId: row.author_user_id,
-      occurrenceStart: row.occurrence_start,
-      recordedAt: row.created_at,
-      occurrenceEnd: row.occurrence_end,
-      occurrencePrecision: row.occurrence_precision,
-      occurrenceOffsetMinutes: row.occurrence_offset_minutes,
-      visibility: row.visibility,
-      discoverable: row.discoverable,
-      deletedAt: row.deleted_at,
-      moderationState: row.moderation_state ?? undefined,
-      locationId: row.location_id ?? undefined,
-      realWorldEventIds: row.real_world_event_ids ?? [],
-      participantUserIds: row.participant_user_ids ?? [],
-    };
+    return new Map(
+      rows.map((row) => [
+        row.moment_id,
+        {
+          momentId: row.moment_id,
+          authorUserId: row.author_user_id,
+          occurrenceStart: row.occurrence_start,
+          recordedAt: row.created_at,
+          occurrenceEnd: row.occurrence_end,
+          occurrencePrecision: row.occurrence_precision,
+          occurrenceOffsetMinutes: row.occurrence_offset_minutes,
+          visibility: row.visibility,
+          discoverable: row.discoverable,
+          deletedAt: row.deleted_at,
+          moderationState: row.moderation_state ?? undefined,
+          locationId: row.location_id ?? undefined,
+          realWorldEventIds: row.real_world_event_ids ?? [],
+          participantUserIds: row.participant_user_ids ?? [],
+        },
+      ]),
+    );
   }
 
   /**
@@ -179,14 +209,18 @@ export class TimelineSourceRepository {
    * @param after - Resume from the Moment after this occurrence and identifier,
    *   so a rebuild is resumable rather than restarting.
    * @param limit - How many at most.
-   * @returns Identifiers, oldest first.
+   * @returns Each Moment's identifier and when it occurred, oldest first. The
+   *   occurrence comes back because it is what the caller's cursor advances on:
+   *   reading it separately would cost a round trip per page and would end the
+   *   walk early if that one Moment happened to be erased mid-rebuild.
+   * @throws {Error} If the database refuses.
    */
   async everyMoment(
     after: { occurredAt: Date; momentId: string } | undefined,
     limit: number,
-  ): Promise<string[]> {
-    const rows: { moment_id: string }[] = await this.dataSource.query(
-      `SELECT moment_id FROM moments
+  ): Promise<{ momentId: string; occurredAt: Date }[]> {
+    const rows: { moment_id: string; occurrence_start: Date }[] = await this.dataSource.query(
+      `SELECT moment_id, occurrence_start FROM moments
         WHERE deleted_at IS NULL
           AND ($1::timestamptz IS NULL
                OR (occurrence_start, moment_id) > ($1::timestamptz, $2::uuid))
@@ -195,6 +229,6 @@ export class TimelineSourceRepository {
       [after?.occurredAt ?? null, after?.momentId ?? null, limit],
     );
 
-    return rows.map((row) => row.moment_id);
+    return rows.map((row) => ({ momentId: row.moment_id, occurredAt: row.occurrence_start }));
   }
 }

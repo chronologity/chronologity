@@ -1,4 +1,11 @@
 import type { ClickHouseClient } from "@clickhouse/client";
+import {
+  byPartitionBudget,
+  contextsNeedingRoom,
+  momentsNeedingRoom,
+  type StoredContextRow,
+  type StoredMomentRow,
+} from "./timeline-batch.js";
 import type { TimelineScopeRef } from "./timeline.eligibility.js";
 import {
   asClickHouseDateTime,
@@ -384,6 +391,232 @@ export class TimelineRepository {
       query: `DELETE FROM timeline_suspended_authors WHERE user_id = {userId: String}`,
       query_params: { userId },
     });
+  }
+
+  /**
+   * Record where a page of Moments sits in history, in a handful of statements.
+   *
+   * The rebuild's path. The live projector keeps writing one Moment at a time,
+   * which is right for its shape — a message arrives, a Moment is projected —
+   * and wrong for a walk over a whole corpus.
+   *
+   * Where `project` asks "do you hold this one?" per Moment, and pays a full
+   * scan to find out because `moment_id` leads neither table's sort key, this
+   * asks once for the whole page. **That question is what made a rebuild
+   * quadratic**, and asking it 500 times less often is most of the fix.
+   *
+   * It also deletes strictly less. A `ReplacingMergeTree` collapses rows sharing
+   * a sort key, so only a Moment whose sort key moved needs its old row cleared
+   * away; everything else the engine absorbs. The trade is that a rebuild in
+   * place now leaves duplicates until a background merge, which is invisible to
+   * readers only because `final: 1` is set client-wide — so that setting is
+   * load-bearing here in a way it was not before.
+   *
+   * @param rows - The Moments as the Timeline holds them.
+   * @param contextsByMoment - Which scopes each belongs to. A Moment absent from
+   *   this writes no context rows.
+   * @param projectedAt - Stamped on every row, and taken by the caller **before
+   *   it read** the Moments. This is the `ReplacingMergeTree` version column, so
+   *   a batch stamped at write time could beat a live projection that had read
+   *   fresher state, and the projection would silently revert.
+   * @returns Nothing.
+   * @throws {Error} If ClickHouse refuses. Retryable: a projection behind is
+   *   recoverable, and pretending it succeeded is not.
+   */
+  async projectBatch(
+    rows: readonly TimelineRow[],
+    contextsByMoment: ReadonlyMap<string, readonly TimelineScopeRef[]>,
+    projectedAt: Date,
+  ): Promise<void> {
+    if (rows.length === 0) {
+      return;
+    }
+
+    const momentIds = rows.map((row) => row.momentId);
+    const goingTo = new Map(rows.map((row) => [row.momentId, row.occurredAt.getTime()]));
+    const desiredContexts = new Map(
+      rows.map((row) => [
+        row.momentId,
+        {
+          occurredAtMs: row.occurredAt.getTime(),
+          contexts: contextsByMoment.get(row.momentId) ?? [],
+        },
+      ]),
+    );
+
+    // Two fixed queries, not one per row — which is the distinction
+    // `search.indexer.ts` is drawing when it forbids `Promise.all` over a page.
+    // Five hundred concurrent reads exhausted a pool; two do not.
+    const [storedMoments, storedContexts] = await Promise.all([
+      this.storedMoments(momentIds),
+      this.storedContexts(momentIds),
+    ]);
+
+    await this.makeRoom(
+      "timeline_moments",
+      [...momentsNeedingRoom(storedMoments, goingTo)],
+    );
+    await this.makeRoom(
+      "timeline_moment_contexts",
+      [...contextsNeedingRoom(storedContexts, desiredContexts)],
+    );
+
+    // Split so no single insert spans more partitions than ClickHouse accepts.
+    // A page is contiguous in occurrence, so in an ordinary history this is one
+    // chunk; a sparse one, or a scoped rebuild naming arbitrary Moments, is why
+    // it exists.
+    for (const chunk of byPartitionBudget(rows, (row) => row.occurredAt.getUTCFullYear())) {
+      await this.client.insert({
+        table: "timeline_moments",
+        values: chunk.map((row) => toRecord(row, projectedAt, this.version)),
+        format: "JSONEachRow",
+      });
+    }
+
+    const contextRows = rows.flatMap((row) =>
+      (contextsByMoment.get(row.momentId) ?? []).map((context) => ({
+        context_type: context.type,
+        context_id: context.id,
+        occurred_at: asClickHouseDateTime(row.occurredAt),
+        moment_id: row.momentId,
+        author_user_id: row.authorUserId,
+        visibility: row.visibility,
+        moderation_state: row.moderationState,
+        projected_at: asClickHouseDateTime(projectedAt),
+        projection_version: this.version,
+        occurredAtYear: row.occurredAt.getUTCFullYear(),
+      })),
+    );
+
+    for (const chunk of byPartitionBudget(contextRows, (row) => row.occurredAtYear)) {
+      await this.client.insert({
+        table: "timeline_moment_contexts",
+        values: chunk.map(({ occurredAtYear: _year, ...value }) => value),
+        format: "JSONEachRow",
+      });
+    }
+  }
+
+  /**
+   * Take a page of Moments out of this projection version, unconditionally.
+   *
+   * **Deliberately separate from `projectBatch`, and deliberately asks nothing
+   * first.** These identifiers come from finding the Moments gone from the
+   * authoritative store; the ones `projectBatch` deletes come from a probe.
+   * Merging the two would be correct today and would read as "delete what the
+   * probe said" — so the next narrowing of that probe would silently narrow an
+   * erasure. `holds` carries the same warning for the same reason.
+   *
+   * @param momentIds - Which Moments.
+   * @returns Nothing.
+   * @throws {Error} If ClickHouse refuses.
+   */
+  async removeBatch(momentIds: readonly string[]): Promise<void> {
+    if (momentIds.length === 0) {
+      return;
+    }
+
+    for (const table of ["timeline_moments", "timeline_moment_contexts"] as const) {
+      await this.client.command({
+        query: `DELETE FROM ${table}
+                 WHERE moment_id IN {momentIds: Array(String)}
+                   AND projection_version = {version: String}`,
+        query_params: { momentIds: [...momentIds], version: this.version },
+      });
+    }
+  }
+
+  /**
+   * Clear stale rows out of a batch's way.
+   *
+   * @param table - Which table.
+   * @param momentIds - Only those a batch decision named. An empty list writes
+   *   nothing, which is the ordinary outcome when rebuilding into a fresh
+   *   version and is what makes "a rebuild issues no mutations" true rather
+   *   than assumed.
+   * @returns Nothing.
+   * @throws {Error} If ClickHouse refuses.
+   */
+  private async makeRoom(table: string, momentIds: readonly string[]): Promise<void> {
+    if (momentIds.length === 0) {
+      return;
+    }
+
+    await this.client.command({
+      query: `DELETE FROM ${table}
+               WHERE moment_id IN {momentIds: Array(String)}
+                 AND projection_version = {version: String}`,
+      query_params: { momentIds: [...momentIds], version: this.version },
+    });
+  }
+
+  /**
+   * Where a page of Moments is currently stored, if anywhere.
+   *
+   * @param momentIds - Which Moments.
+   * @returns One entry per stored row. A Moment stored at two occurrences —
+   *   which a delete missed once already — yields two, and the decision reads
+   *   both.
+   * @throws {Error} If ClickHouse refuses.
+   */
+  private async storedMoments(momentIds: readonly string[]): Promise<StoredMomentRow[]> {
+    const result = await this.client.query({
+      query: `SELECT moment_id, toUnixTimestamp64Milli(occurred_at) AS occurred_at_ms
+                FROM timeline_moments
+               WHERE moment_id IN {momentIds: Array(String)}
+                 AND projection_version = {version: String}`,
+      query_params: { momentIds: [...momentIds], version: this.version },
+      // A write-path decision rather than a read, and safe without the merge:
+      // an unmerged duplicate carries an *equal* occurrence, which changes no
+      // answer, while a genuinely stale row carries a different one and must be
+      // seen. Skipping it also lets the skip index on `moment_id` do its work.
+      clickhouse_settings: { final: 0 },
+      format: "JSONEachRow",
+    });
+    const rows = await result.json<{ moment_id: string; occurred_at_ms: string }>();
+
+    return rows.map((row) => ({
+      momentId: row.moment_id,
+      occurredAtMs: Number(row.occurred_at_ms),
+    }));
+  }
+
+  /**
+   * Which scopes a page of Moments is currently stored under.
+   *
+   * Reads the membership, not merely the occurrence. A Moment whose Location was
+   * corrected keeps its occurrence and changes its sort key, so a probe that
+   * read dates alone would conclude nothing was in the way and leave it showing
+   * at both places for ever.
+   *
+   * @param momentIds - Which Moments.
+   * @returns One entry per stored context row.
+   * @throws {Error} If ClickHouse refuses.
+   */
+  private async storedContexts(momentIds: readonly string[]): Promise<StoredContextRow[]> {
+    const result = await this.client.query({
+      query: `SELECT moment_id, context_type, context_id,
+                     toUnixTimestamp64Milli(occurred_at) AS occurred_at_ms
+                FROM timeline_moment_contexts
+               WHERE moment_id IN {momentIds: Array(String)}
+                 AND projection_version = {version: String}`,
+      query_params: { momentIds: [...momentIds], version: this.version },
+      clickhouse_settings: { final: 0 },
+      format: "JSONEachRow",
+    });
+    const rows = await result.json<{
+      moment_id: string;
+      context_type: string;
+      context_id: string;
+      occurred_at_ms: string;
+    }>();
+
+    return rows.map((row) => ({
+      momentId: row.moment_id,
+      contextType: row.context_type,
+      contextId: row.context_id,
+      occurredAtMs: Number(row.occurred_at_ms),
+    }));
   }
 
   /**
