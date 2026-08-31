@@ -144,17 +144,6 @@ export class TimelineSourceRepository {
   }
 
   /**
-   * Every Moment that belongs on the Timeline, oldest first.
-   *
-   * For rebuilding. Ordered by occurrence so a partial rebuild fills history
-   * from its beginning rather than in whatever order the table returns.
-   *
-   * @param after - Resume from the Moment after this occurrence and identifier,
-   *   so a rebuild is resumable rather than restarting.
-   * @param limit - How many at most.
-   * @returns Identifiers, oldest first.
-   */
-  /**
    * Every account whose history is currently withheld.
    *
    * Read by a full rebuild, which has to restore the suspension dimension
