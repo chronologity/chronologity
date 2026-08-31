@@ -115,18 +115,15 @@ export async function rebuildTimeline(
       return { projected, removed, ...(await reconcileSuspensions(projector, source, startedAt)) };
     }
 
-    await apply(page);
+    await apply(page.map((entry) => entry.momentId));
 
-    const last = await source.momentFor(page[page.length - 1]!);
+    // Advanced from what the listing already returned. Reading the last Moment
+    // again cost a round trip per page and, worse, ended the walk outright when
+    // that one Moment had been erased since being listed — reporting success
+    // having silently skipped the rest of history.
+    const last = page[page.length - 1]!;
 
-    if (last === undefined) {
-      // Erased between being listed and being read. Ordinary rather than
-      // exceptional, and there is nothing left to resume from — so the walk
-      // stops rather than looping on a cursor it cannot advance.
-      return { projected, removed, ...(await reconcileSuspensions(projector, source, startedAt)) };
-    }
-
-    after = { occurredAt: last.occurrenceStart, momentId: last.momentId };
+    after = { occurredAt: last.occurredAt, momentId: last.momentId };
   }
 }
 
