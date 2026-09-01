@@ -57,13 +57,16 @@ async function main(): Promise<void> {
   await connectDatabase(database);
   const messaging = createMessaging(config.messaging);
 
+  const momentRepository = new MomentRepository(database.dataSource);
+  const follows = new FollowRepository(database.dataSource);
+
   const moments = new MomentService(
     database.dataSource,
-    new MomentRepository(database.dataSource),
+    momentRepository,
     new UploadRepository(database.dataSource),
     new LocationRepository(database.dataSource),
     new RealWorldEventRepository(database.dataSource),
-    new FollowRepository(database.dataSource),
+    follows,
     new UserRepository(database.dataSource),
     new ModerationRepository(database.dataSource),
     new MomentCommentRepository(database.dataSource),
@@ -92,7 +95,11 @@ async function main(): Promise<void> {
     kafka: messaging.kafka,
     groupId: GROUP_ID,
     topics: NOTIFICATION_GENERATOR_BOUNDARIES.map((boundary) => topicName(boundary)),
-    handler: (event) => notifyFromEvent(generator, event),
+    handler: (event) =>
+      notifyFromEvent(generator, event, undefined, {
+        contextsOf: (momentId) => momentRepository.contextsOf(momentId),
+        followersOf: (context, limit, after) => follows.followersOf(context, limit, after),
+      }),
   });
 
   const shutdown = async (): Promise<void> => {

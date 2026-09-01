@@ -194,6 +194,12 @@ export function moderationPermits(alias: string): string {
   )`;
 }
 
+/** A place or an occasion a Moment belongs to. */
+export interface MomentContextRef {
+  readonly type: "location" | "real_world_event";
+  readonly id: string;
+}
+
 /** Reads and writes Moments. */
 export class MomentRepository {
   /**
@@ -375,6 +381,37 @@ export class MomentRepository {
    */
   async isInAudience(momentId: string, userId: string): Promise<boolean> {
     return this.dataSource.getRepository(MomentAudience).existsBy({ momentId, userId });
+  }
+
+  /**
+   * The places and occasions a Moment belongs to.
+   *
+   * Read without a Viewer, deliberately. This answers "what shared history is
+   * this part of", which is a fact about the Moment rather than about who is
+   * looking — and the caller uses it to find people who follow those places,
+   * each of whom then has their own eligibility checked separately. Filtering
+   * here would be filtering by the wrong person entirely.
+   *
+   * @param momentId - Which Moment.
+   * @returns Its contexts, in a stable order so that a fan-out over them does
+   *   the same work twice if it is run twice.
+   * @throws {Error} If the database refuses.
+   */
+  async contextsOf(momentId: string): Promise<MomentContextRef[]> {
+    const rows: { context_type: string; context_id: string }[] = await this.dataSource.query(
+      `SELECT 'location' AS context_type, location_id AS context_id
+         FROM moment_locations WHERE moment_id = $1
+       UNION ALL
+       SELECT 'real_world_event', real_world_event_id
+         FROM moment_real_world_events WHERE moment_id = $1
+       ORDER BY context_type, context_id`,
+      [momentId],
+    );
+
+    return rows.map((row) => ({
+      type: row.context_type === "location" ? ("location" as const) : ("real_world_event" as const),
+      id: row.context_id,
+    }));
   }
 
   /**

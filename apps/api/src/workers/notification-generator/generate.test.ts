@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { describe, it } from "vitest";
 import { registeredEvent } from "@chronologity/contracts";
 import type { ConsumedEvent } from "../../lib/messaging/consumer.js";
-import { NOTIFICATION_GENERATOR_EVENTS, candidateFrom } from "./generate.js";
+import { NOTIFICATION_GENERATOR_EVENTS, candidateFrom, notifyFromEvent } from "./generate.js";
 
 const message = (eventType: string, payload: unknown): ConsumedEvent => ({
   topic: "chronologity.domain-reactions.v1",
@@ -45,12 +45,39 @@ const EXPECTED: Readonly<Record<string, { type: string; recipient: string }>> = 
   ModerationStateChanged: { type: "content_moderated", recipient: "affectedUserId" },
 };
 
+/**
+ * The one handled message that names no single recipient.
+ *
+ * A Moment arriving somewhere concerns however many people follow the places it
+ * arrived at, so it takes the fan-out path rather than producing one candidate.
+ * Named here rather than filtered silently, so that a *second* such message
+ * cannot be added without somebody deciding it belongs on this list.
+ */
+const FANS_OUT: readonly string[] = ["MomentRecorded"];
+
+const ADDRESSED = NOTIFICATION_GENERATOR_EVENTS.filter((type) => !FANS_OUT.includes(type));
+
 describe("reading a message as something somebody should hear about", () => {
   it("has an expectation for everything it handles", () => {
-    assert.deepEqual([...NOTIFICATION_GENERATOR_EVENTS].sort(), Object.keys(EXPECTED).sort());
+    assert.deepEqual(
+      [...ADDRESSED, ...FANS_OUT].sort(),
+      [...NOTIFICATION_GENERATOR_EVENTS].sort(),
+      "a handled message is neither addressed to somebody nor fanned out",
+    );
+    assert.deepEqual([...ADDRESSED].sort(), Object.keys(EXPECTED).sort());
   });
 
-  for (const eventType of NOTIFICATION_GENERATOR_EVENTS) {
+  it("produces no candidate for the message that fans out", () => {
+    // It has no single recipient to name, so reading it as one would be reading
+    // it wrongly. `notifyFromEvent` routes it before this is ever consulted.
+    for (const eventType of FANS_OUT) {
+      const example = registeredEvent(eventType)!.example;
+
+      assert.equal(candidateFrom(message(eventType, example)), undefined, eventType);
+    }
+  });
+
+  for (const eventType of ADDRESSED) {
     it(`tells the right person about ${eventType}`, () => {
       const example = registeredEvent(eventType)!.example;
       const expected = EXPECTED[eventType]!;
@@ -71,6 +98,130 @@ describe("reading a message as something somebody should hear about", () => {
 
   it("ignores an event type it was never taught", () => {
     assert.equal(candidateFrom(message("SomethingElseHappened", { actorUserId: randomUUID() })), undefined);
+  });
+});
+
+describe("telling followers a place has more in it", () => {
+  const PLACE = randomUUID();
+  const AUTHOR = randomUUID();
+  const MOMENT = randomUUID();
+
+  /** A generator that records what it was asked to consider. */
+  const recording = () => {
+    const considered: { type: string; subjectUserId: string; sourceId: string }[] = [];
+
+    return {
+      considered,
+      generator: {
+        consider: async (candidate: {
+          type: string;
+          subjectUserId: string;
+          sourceId: string;
+        }) => {
+          considered.push(candidate);
+
+          return "notified" as const;
+        },
+      },
+    };
+  };
+
+  const recorded = () =>
+    message("MomentRecorded", { momentId: MOMENT, authorUserId: AUTHOR });
+
+  it("tells everybody following the place", async () => {
+    const { considered, generator } = recording();
+    const followers = [randomUUID(), randomUUID()];
+
+    await notifyFromEvent(generator as never, recorded(), undefined, {
+      contextsOf: async () => [{ type: "location", id: PLACE }],
+      followersOf: async (_context, _limit, after) => (after === undefined ? followers : []),
+    });
+
+    assert.deepEqual(
+      considered.map((candidate) => candidate.subjectUserId).sort(),
+      [...followers].sort(),
+    );
+    assert.ok(considered.every((candidate) => candidate.type === "location_expanded"));
+  });
+
+  it("points at the place rather than the Moment", async () => {
+    // So that everything arriving there folds into one unread entry. Pointing
+    // at the Moment would give a busy Location one notification per photograph.
+    const { considered, generator } = recording();
+
+    await notifyFromEvent(generator as never, recorded(), undefined, {
+      contextsOf: async () => [{ type: "location", id: PLACE }],
+      followersOf: async (_context, _limit, after) =>
+        after === undefined ? [randomUUID()] : [],
+    });
+
+    assert.equal(considered[0]?.sourceId, PLACE);
+  });
+
+  it("does not tell the author about their own Moment", async () => {
+    const { considered, generator } = recording();
+
+    await notifyFromEvent(generator as never, recorded(), undefined, {
+      contextsOf: async () => [{ type: "location", id: PLACE }],
+      followersOf: async (_context, _limit, after) => (after === undefined ? [AUTHOR] : []),
+    });
+
+    assert.deepEqual(considered, []);
+  });
+
+  it("walks a place with more followers than one page holds", async () => {
+    // A well-known Location could be followed by everybody, and gathering that
+    // list to notify it would hold the whole thing for the duration.
+    const { considered, generator } = recording();
+    const everybody: string[] = Array.from({ length: 450 }, () => randomUUID() as string).sort();
+    const pages: number[] = [];
+
+    await notifyFromEvent(generator as never, recorded(), undefined, {
+      contextsOf: async () => [{ type: "location", id: PLACE }],
+      followersOf: async (_context, limit, after) => {
+        const from = after === undefined ? 0 : everybody.indexOf(after) + 1;
+        const page = everybody.slice(from, from + limit);
+
+        pages.push(page.length);
+
+        return page;
+      },
+    });
+
+    assert.equal(considered.length, everybody.length, "somebody following was never told");
+    assert.ok(pages.length > 1, "the whole list was read at once");
+  });
+
+  it("tells followers of every place a Moment belongs to", async () => {
+    const { considered, generator } = recording();
+    const occasion = randomUUID();
+    const follower = randomUUID();
+
+    await notifyFromEvent(generator as never, recorded(), undefined, {
+      contextsOf: async () => [
+        { type: "location", id: PLACE },
+        { type: "real_world_event", id: occasion },
+      ],
+      followersOf: async (_context, _limit, after) =>
+        after === undefined ? [follower] : [],
+    });
+
+    assert.deepEqual(considered.map((candidate) => candidate.type).sort(), [
+      "location_expanded",
+      "real_world_event_expanded",
+    ]);
+  });
+
+  it("says nothing about a Moment belonging nowhere", async () => {
+    const { considered, generator } = recording();
+
+    await notifyFromEvent(generator as never, recorded(), undefined, {
+      contextsOf: async () => [],
+      followersOf: async () => [],
+    });
+
+    assert.deepEqual(considered, []);
   });
 });
 

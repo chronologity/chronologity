@@ -388,6 +388,51 @@ export class FollowRepository {
   }
 
   /**
+   * Read a page of the people following a place or an occasion.
+   *
+   * The reverse of `listFollowedEvents` and `listFollowedLocations`, which until
+   * now was the only direction this table could be read in — so following a
+   * Location was recorded and consumed by nothing.
+   *
+   * **Paged, not gathered.** A well-known place could be followed by everybody,
+   * and a fan-out that read the whole list into memory to notify it would hold
+   * that list for as long as the notifying took. The caller walks instead.
+   *
+   * Identifiers only. The caller wants somebody to notify, not a profile to
+   * render, and reading whole accounts here would fetch a great deal that is
+   * then thrown away.
+   *
+   * @param context - Which place or occasion.
+   * @param limit - How many at most.
+   * @param after - Resume after this follower, so a walk is resumable and does
+   *   not depend on the set staying still.
+   * @returns Their identifiers, oldest relationship first — a stable order that
+   *   a new follower cannot insert into the middle of.
+   * @throws {Error} If the database refuses.
+   */
+  async followersOf(
+    context: { type: "location"; id: string } | { type: "real_world_event"; id: string },
+    limit: number,
+    after?: string,
+  ): Promise<string[]> {
+    const [table, column] =
+      context.type === "location"
+        ? ["location_follows", "location_id"]
+        : ["real_world_event_follows", "real_world_event_id"];
+
+    const rows: { follower_user_id: string }[] = await this.dataSource.query(
+      `SELECT follower_user_id FROM ${table}
+        WHERE ${column} = $1
+          AND ($2::uuid IS NULL OR follower_user_id > $2::uuid)
+        ORDER BY follower_user_id ASC
+        LIMIT $3`,
+      [context.id, after ?? null, limit],
+    );
+
+    return rows.map((row) => row.follower_user_id);
+  }
+
+  /**
    * Read a page of the places somebody follows.
    *
    * @param followerUserId - Whose list.

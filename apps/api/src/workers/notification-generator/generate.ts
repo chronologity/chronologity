@@ -1,6 +1,7 @@
 import {
   COMMENTS_BOUNDARY,
   MODERATION_BOUNDARY,
+  MOMENTS_BOUNDARY,
   REACTIONS_BOUNDARY,
   SECURITY_BOUNDARY,
   SOCIAL_BOUNDARY,
@@ -108,8 +109,19 @@ const HANDLED: Readonly<
   },
 };
 
-/** The event types this worker knows what to do with. */
-export const NOTIFICATION_GENERATOR_EVENTS: readonly string[] = Object.keys(HANDLED);
+/**
+ * The event types this worker knows what to do with.
+ *
+ * The candidate map, plus the one message that does not go through it.
+ * `MomentRecorded` concerns however many people follow the places it arrived at
+ * rather than one person, so it takes the fan-out path — but it is handled, and
+ * a list that omitted it would say this worker subscribes to a boundary it
+ * ignores.
+ */
+export const NOTIFICATION_GENERATOR_EVENTS: readonly string[] = [
+  ...Object.keys(HANDLED),
+  "MomentRecorded",
+];
 
 /**
  * The boundaries this worker subscribes to.
@@ -119,6 +131,9 @@ export const NOTIFICATION_GENERATOR_EVENTS: readonly string[] = Object.keys(HAND
  * a list nothing can read.
  */
 export const NOTIFICATION_GENERATOR_BOUNDARIES: readonly string[] = [
+  // Moments, for the fan-out: a Moment arriving at a followed place is the only
+  // thing here that concerns people other than the two in the interaction.
+  MOMENTS_BOUNDARY,
   REACTIONS_BOUNDARY,
   COMMENTS_BOUNDARY,
   SOCIAL_BOUNDARY,
@@ -182,6 +197,9 @@ function build(
  * @param generator - Where the decisions are made.
  * @param event - The message.
  * @param logger - Where outcomes are reported.
+ * @param contexts - Optional. Where to read a Moment's places and who follows
+ *   them, for the one message that concerns many people rather than one. Absent
+ *   in an application without following, where nothing fans out.
  * @returns Nothing. A message that produces no notification is acknowledged
  *   rather than retried: not everything that happens is something to tell
  *   somebody about, and a consumer that retried those would never drain.
@@ -190,7 +208,16 @@ export async function notifyFromEvent(
   generator: NotificationGenerator,
   event: ConsumedEvent,
   logger?: Logger,
+  contexts?: ContextFanOut,
 ): Promise<void> {
+  // A Moment arriving somewhere is the one message that concerns many people
+  // rather than one, so it takes its own path.
+  if (event.envelope.eventType === "MomentRecorded" && contexts !== undefined) {
+    await tellFollowersOfItsPlaces(generator, event, contexts, logger);
+
+    return;
+  }
+
   const candidate = candidateFrom(event);
 
   if (candidate === undefined) {
@@ -214,4 +241,123 @@ export async function notifyFromEvent(
     },
     "Considered",
   );
+}
+
+
+/**
+ * How many followers of one place are told at a time.
+ *
+ * A well-known Location could be followed by everybody. Reading the whole list
+ * to notify it would hold that list for as long as the notifying took, so the
+ * fan-out walks instead.
+ */
+const FOLLOWERS_PER_PAGE = 200;
+
+/** What the fan-out needs in order to find who to tell. */
+export interface ContextFanOut {
+  /** The places and occasions a Moment belongs to. */
+  contextsOf(momentId: string): Promise<readonly { type: string; id: string }[]>;
+  /** A page of the people following one of them. */
+  followersOf(
+    context: { type: "location"; id: string } | { type: "real_world_event"; id: string },
+    limit: number,
+    after?: string,
+  ): Promise<string[]>;
+}
+
+/**
+ * Tell everybody following a place that history there has grown.
+ *
+ * The one place this system fans a single message out to many recipients.
+ *
+ * **Idempotent per recipient, with no bookkeeping of its own.** Every
+ * notification it raises carries the message's own event identifier, and the
+ * ledger is keyed on `(source_event_id, recipient_user_id)` — so a redelivery,
+ * or a crash halfway through a large place, re-runs the whole fan-out and
+ * silently skips whoever was already told.
+ *
+ * **Whether a follower may know is decided per follower**, by the same Moment
+ * visibility rule everything else uses: `consider` re-checks it before writing,
+ * so a Moment recorded privately at a public place tells nobody.
+ *
+ * @param generator - Decides, per recipient, whether to write anything.
+ * @param event - The message saying a Moment was recorded.
+ * @param contexts - Where to read the Moment's places and their followers.
+ * @param logger - Optional.
+ * @returns Nothing.
+ * @throws {Error} If either read fails. The message is then retried, which is
+ *   safe for exactly the reason above.
+ */
+async function tellFollowersOfItsPlaces(
+  generator: NotificationGenerator,
+  event: ConsumedEvent,
+  contexts: ContextFanOut,
+  logger?: Logger,
+): Promise<void> {
+  const payload = event.envelope.payload as { momentId?: string; authorUserId?: string };
+  const momentId = payload.momentId;
+
+  if (momentId === undefined) {
+    return;
+  }
+
+  let told = 0;
+
+  for (const context of await contexts.contextsOf(momentId)) {
+    if (context.type !== "location" && context.type !== "real_world_event") {
+      continue;
+    }
+
+    const scope =
+      context.type === "location"
+        ? ({ type: "location", id: context.id } as const)
+        : ({ type: "real_world_event", id: context.id } as const);
+
+    let after: string | undefined;
+
+    for (;;) {
+      const followers = await contexts.followersOf(scope, FOLLOWERS_PER_PAGE, after);
+
+      if (followers.length === 0) {
+        break;
+      }
+
+      for (const followerUserId of followers) {
+        // The author knows. Telling them their own Moment arrived somewhere
+        // would be the system reporting its own work back to them.
+        if (followerUserId === payload.authorUserId) {
+          continue;
+        }
+
+        const outcome = await generator.consider(
+          {
+            type: context.type === "location" ? "location_expanded" : "real_world_event_expanded",
+            // Nobody did this to them. A Moment arrived at a place they follow.
+            actorUserId: undefined,
+            subjectUserId: followerUserId,
+            sourceType: context.type,
+            // The place, not the Moment — so everything arriving there folds
+            // into one unread entry rather than one per Moment.
+            sourceId: context.id,
+            // The Moment whose visibility decides whether this follower may be
+            // told at all.
+            viaMomentId: momentId,
+          },
+          event.envelope.eventId,
+        );
+
+        if (outcome === "notified") {
+          told += 1;
+        }
+      }
+
+      if (followers.length < FOLLOWERS_PER_PAGE) {
+        break;
+      }
+
+      after = followers[followers.length - 1];
+    }
+  }
+
+  logger?.info({ eventId: event.envelope.eventId, momentId, told }, "Told followers of its places");
 }
