@@ -19,13 +19,16 @@
 // Usage: pnpm timeline:scale          measure and print
 //        pnpm timeline:scale --save   measure and write the baseline
 
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { cpus, totalmem } from "node:os";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const BASELINE = `${ROOT}docs/architecture/timeline-scale.json`;
+// Written by `pnpm timeline:rebuild --measure`, which is the only thing that can
+// honestly say how fast a rebuild was.
+const FILL = `${ROOT}docs/architecture/timeline-fill.json`;
 const envFile = `${ROOT}.env`;
 
 if (existsSync(envFile)) {
@@ -53,8 +56,16 @@ const CREDENTIALS = {
   database: process.env.CLICKHOUSE_DATABASE ?? "chronologity",
 };
 
-/** Run a query a number of times and report how long it took. */
-async function time(name, run, runs = 10) {
+/**
+ * Run a query a number of times and report how long it took.
+ *
+ * Fifty runs rather than ten. With ten, the "p95" is the worst of ten by
+ * construction — a maximum wearing a percentile's name, and on a laptop sharing
+ * four gigabytes between three databases it moved by a factor of twenty between
+ * back-to-back runs of identical work. Fifty makes the figure mean something,
+ * and the queries are tens of milliseconds, so it costs seconds.
+ */
+async function time(name, run, runs = 50) {
   // One untimed pass first: the first touch of a partition pays for reading it
   // off disk, which is a different question from how the query performs.
   await run();
@@ -69,12 +80,17 @@ async function time(name, run, runs = 10) {
 
   taken.sort((left, right) => left - right);
 
+  const round = (value) => Math.round(value * 10) / 10;
+
   return {
     name,
     runs,
-    p50: Math.round(taken[Math.floor(runs * 0.5)] * 10) / 10,
-    p95: Math.round(taken[Math.floor(runs * 0.95)] * 10) / 10,
-    max: Math.round(taken[runs - 1] * 10) / 10,
+    p50: round(taken[Math.floor(runs * 0.5)]),
+    p95: round(taken[Math.floor(runs * 0.95)]),
+    // Reported alongside rather than instead of: on a contended machine the
+    // slowest run says more about what else was happening than about the query,
+    // and a reader comparing two baselines should be able to see that.
+    max: round(taken[runs - 1]),
   };
 }
 
@@ -211,20 +227,14 @@ async function main() {
       node: process.version,
     },
     caveat:
-      "Measured on one developer machine against local containers, with ClickHouse sharing a 4GB VM with Kafka and PostgreSQL. Comparable to another run on the same machine; not to anything else.",
+      "Measured on one developer machine against local containers, with ClickHouse sharing a 4GB VM with Kafka and PostgreSQL. Comparable to another run on the same machine; not to anything else. Trust p50: on this machine the tail moves with whatever else is running, and `max` is recorded so that is visible rather than hidden inside a percentile.",
     projectionVersion: VERSION,
     corpus: held,
-    // Not measured by this script, which reads a projection that already exists.
-    // Recorded because it is the binding constraint on everything above: filling
-    // the projection is far more expensive than reading it, and a later run
-    // should be compared against these as much as against the latencies.
-    projectionFill: {
-      seedRatePerSecond: 2273,
-      seedNote: "50,000 Moments written to PostgreSQL in 22s by `pnpm seed:history`.",
-      rebuildRatePerSecond: 3.9,
-      rebuildNote:
-        "Into an empty version, so insert-only — zero DELETEs observed, which confirms ADR-128. The cost is per-statement round trip (~42ms for inserts and selects alike), not mutation. One insert per Moment also means one part per Moment: at 5,164 rows the projection held 60 parts, and with `final: 1` on every read the merge cost grows until reads exceed the socket timeout. A rebuild of 5,000 failed that way after 1,530s having written 2,161. Batching inserts is the fix, and belongs to the projector rather than here.",
-    },
+    // Read from the file the rebuild wrote, rather than typed in here. An
+    // earlier version of this script hardcoded these, which meant the artefact
+    // could never disagree with whoever wrote it — and a before-and-after that
+    // cannot disagree with its author proves nothing.
+    ...(existsSync(FILL) ? { projectionFill: JSON.parse(readFileSync(FILL, "utf8")) } : {}),
     scenarios,
   };
 

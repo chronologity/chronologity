@@ -3,6 +3,8 @@
 // than something the runtime provides.
 import "reflect-metadata";
 
+import { writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { ConfigurationError } from "@chronologity/config";
 import { loadConfig } from "../config/app-config.js";
@@ -13,7 +15,11 @@ import { TimelineSourceRepository } from "../features/timeline/timeline-source.r
 import { createAnalytics } from "../lib/clickhouse/clickhouse.js";
 import { connectDatabase, createDatabase } from "../lib/database/postgres.js";
 
-const usage = "Usage: pnpm timeline:rebuild [--version <name>] [--only <momentId>]...";
+const usage =
+  "Usage: pnpm timeline:rebuild [--version <name>] [--only <momentId>]... [--limit <n>] [--page-size <n>] [--measure]";
+
+/** What `timeline.rebuild.ts` uses when nothing says otherwise, for the record it writes. */
+const DEFAULT_PAGE = 500;
 
 /**
  * Rebuild the Timeline projection from authoritative state.
@@ -57,6 +63,9 @@ async function main(): Promise<void> {
     options: {
       only: { type: "string", multiple: true },
       version: { type: "string" },
+      limit: { type: "string" },
+      "page-size": { type: "string" },
+      measure: { type: "boolean", default: false },
     },
     allowPositionals: false,
   });
@@ -74,24 +83,63 @@ async function main(): Promise<void> {
     source,
   );
 
+  const limit = values.limit === undefined ? undefined : Number(values.limit);
+  const pageSize = values["page-size"] === undefined ? undefined : Number(values["page-size"]);
+
   process.stdout.write(
     values.only === undefined
-      ? `Rebuilding every Moment into ${version}\n`
+      ? `Rebuilding ${limit === undefined ? "every Moment" : `${limit} Moment(s)`} into ${version}\n`
       : `Rebuilding ${values.only.length} Moment(s) into ${version}\n`,
   );
 
   try {
+    const startedAt = Date.now();
     const report = await rebuildTimeline(projector, source, {
       ...(values.only === undefined ? {} : { only: values.only }),
+      ...(limit === undefined ? {} : { limit }),
+      ...(pageSize === undefined ? {} : { pageSize }),
       onProgress: (done) => {
         process.stdout.write(`  ${done}\n`);
       },
     });
+    const seconds = (Date.now() - startedAt) / 1000;
+    const handled = report.projected + report.removed;
 
     process.stdout.write(
       `Projected ${report.projected}, removed ${report.removed}, ` +
         `withheld ${report.suspended}, released ${report.reinstated}\n`,
     );
+    // Printed rather than left to be worked out from a stopwatch, and printed
+    // by the thing doing the work rather than typed into a document afterwards.
+    process.stdout.write(
+      `Took ${seconds.toFixed(1)}s for ${handled} Moment(s)` +
+        `${seconds > 0 ? ` — ${(handled / seconds).toFixed(1)} a second` : ""}\n`,
+    );
+
+    if (values.measure) {
+      // Written by the rebuild itself. An earlier attempt at recording this had
+      // the figures typed into the script that reports them, which meant the
+      // artefact could never contradict whoever wrote it.
+      const at = fileURLToPath(new URL("../../../../docs/architecture/timeline-fill.json", import.meta.url));
+
+      writeFileSync(
+        at,
+        `${JSON.stringify(
+          {
+            recordedAt: new Date().toISOString(),
+            projectionVersion: version,
+            moments: handled,
+            seconds: Number(seconds.toFixed(1)),
+            momentsPerSecond: Number((handled / seconds).toFixed(1)),
+            pageSize: pageSize ?? DEFAULT_PAGE,
+          },
+          null,
+          2,
+        )}\n`,
+      );
+
+      process.stdout.write(`Wrote ${at}\n`);
+    }
   } finally {
     // After the stores are closed, not instead of closing them. A rebuild that
     // failed partway has written every row it reached, and the connections it

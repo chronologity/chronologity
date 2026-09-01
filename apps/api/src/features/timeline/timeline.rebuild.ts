@@ -55,6 +55,18 @@ export interface TimelineRebuildOptions {
    * Moments to reach one.
    */
   readonly pageSize?: number;
+  /**
+   * Stop after this many Moments.
+   *
+   * For sampling a rebuild before committing to one — how long a corpus will
+   * take, and whether the projection it produces is right — without waiting for
+   * the whole walk. A bounded run also makes two rebuilds comparable, which an
+   * unbounded one that fails partway does not.
+   *
+   * The walk is resumable either way: it pages by occurrence, so stopping early
+   * leaves history filled from its beginning rather than in patches.
+   */
+  readonly limit?: number;
 }
 
 /**
@@ -103,6 +115,7 @@ export async function rebuildTimeline(
   };
 
   const page = options.pageSize ?? PAGE;
+  const limit = options.limit;
 
   // Named Moments, for an operator who knows which were affected and a test
   // that wants an assertion rather than a walk of every row in the database.
@@ -120,7 +133,13 @@ export async function rebuildTimeline(
   let after: { occurredAt: Date; momentId: string } | undefined;
 
   for (;;) {
-    const listed = await source.everyMoment(after, page);
+    const remaining = limit === undefined ? page : Math.min(page, limit - done);
+
+    if (remaining <= 0) {
+      return { projected, removed, ...(await reconcileSuspensions(projector, source, startedAt)) };
+    }
+
+    const listed = await source.everyMoment(after, remaining);
 
     if (listed.length === 0) {
       return { projected, removed, ...(await reconcileSuspensions(projector, source, startedAt)) };

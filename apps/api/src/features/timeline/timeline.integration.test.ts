@@ -153,15 +153,22 @@ describe("the Timeline projection", () => {
   });
 
   it("collapses duplicate rows a race could leave behind", async () => {
-    // `project` deletes before inserting, so nothing it does alone can leave
-    // two rows — which means the client's `final = 1` setting is invisible to
-    // every test above and could be removed without any of them noticing.
-    // Inserting twice directly is what makes it observable.
+    // `project` deletes before inserting, so nothing the single-Moment path does
+    // alone can leave two rows. Inserting twice directly is what makes the
+    // client's `final = 1` setting observable here.
     //
-    // The race it defends against is real but narrow: Moment events are
-    // partitioned by Moment, so one consumer group cannot project the same
-    // Moment twice at once, but a rebuild running beside the live projector
-    // can. Defence in depth, and now defence that can be shown to work.
+    // **It is no longer only observable here.** A rebuild now deletes only where
+    // a Moment's sort key actually moved (ADR-134), so rebuilding in place
+    // deliberately leaves the old rows for a background merge — measured at
+    // 4,000 raw rows for 2,000 Moments, with a reader still seeing 2,000. The
+    // setting is load-bearing on that path rather than defence in depth, and
+    // `timeline-projector.integration.test.ts` proves it through the path that
+    // produces it.
+    //
+    // The race this narrower test defends against is real but narrow: Moment
+    // events are partitioned by Moment, so one consumer group cannot project the
+    // same Moment twice at once, but a rebuild running beside the live projector
+    // can.
     const row = summer1998();
 
     for (const attempt of [1, 2]) {

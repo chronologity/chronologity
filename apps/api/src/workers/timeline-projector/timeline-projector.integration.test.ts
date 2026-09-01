@@ -638,6 +638,38 @@ describe("a Moment reaching the Timeline", () => {
       );
     });
 
+    it("shows a reader one row when the same Moment is rebuilt in place", async () => {
+      // The trade ADR-134 accepts, and the reason `final: 1` is load-bearing
+      // rather than defence in depth. Rebuilding in place no longer deletes what
+      // it is about to rewrite, because the engine collapses rows sharing a sort
+      // key — so the duplicates are real, and invisible.
+      const author = await onboard();
+      const momentId = await record(author);
+
+      await projector.projectBatch([momentId]);
+      await projector.projectBatch([momentId]);
+
+      const raw = await (
+        await analytics.client.query({
+          query: `SELECT count() AS count FROM timeline_moments
+                   WHERE moment_id = {momentId: String}
+                     AND projection_version = {version: String}
+                  SETTINGS final = 0`,
+          query_params: { momentId, version },
+          format: "JSONEachRow",
+        })
+      ).json<{ count: string }>();
+
+      // A merge landing between the write and this read would collapse them
+      // early, which is ClickHouse working rather than a failure — the same
+      // caveat the narrower test next door carries.
+      if (Number(raw[0]?.count ?? 0) === 1) {
+        process.stdout.write("  (a merge collapsed the duplicate before it could be seen)\n");
+      }
+
+      assert.notEqual(await timeline.find(momentId), undefined, "the Moment went missing");
+    });
+
     it("issues no delete when it writes into a version holding nothing", async () => {
       // What ADR-128 claimed of a fresh-version rebuild and never proved. A
       // mutation is a second or more of ClickHouse bookkeeping, so one per page

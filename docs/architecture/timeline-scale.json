@@ -1,6 +1,6 @@
 {
-  "recordedAt": "2026-08-30T22:21:57.246Z",
-  "commit": "d0c2223",
+  "recordedAt": "2026-09-01T04:56:13.106Z",
+  "commit": "011c234",
   "machine": {
     "platform": "darwin",
     "arch": "x64",
@@ -8,51 +8,53 @@
     "memoryGb": 8,
     "node": "v24.19.0"
   },
-  "caveat": "Measured on one developer machine against local containers, with ClickHouse sharing a 4GB VM with Kafka and PostgreSQL. Comparable to another run on the same machine; not to anything else.",
-  "projectionVersion": "bench5k",
+  "caveat": "Measured on one developer machine against local containers, with ClickHouse sharing a 4GB VM with Kafka and PostgreSQL. Comparable to another run on the same machine; not to anything else. Trust p50: on this machine the tail moves with whatever else is running, and `max` is recorded so that is visible rather than hidden inside a percentile.",
+  "projectionVersion": "full50k",
   "corpus": {
-    "moments": 2161,
-    "contextRows": 2160,
-    "inDenseMonth": 459,
+    "moments": 50000,
+    "contextRows": 50000,
+    "inDenseMonth": 30040,
     "parts": {
-      "timeline_moment_contexts": 35,
-      "timeline_moments": 35
+      "timeline_moment_contexts": 46,
+      "timeline_moments": 46
     }
   },
   "projectionFill": {
-    "seedRatePerSecond": 2273,
-    "seedNote": "50,000 Moments written to PostgreSQL in 22s by `pnpm seed:history`.",
-    "rebuildRatePerSecond": 3.9,
-    "rebuildNote": "Into an empty version, so insert-only — zero DELETEs observed, which confirms ADR-128. The cost is per-statement round trip (~42ms for inserts and selects alike), not mutation. One insert per Moment also means one part per Moment: at 5,164 rows the projection held 60 parts, and with `final: 1` on every read the merge cost grows until reads exceed the socket timeout. A rebuild of 5,000 failed that way after 1,530s having written 2,161. Batching inserts is the fix, and belongs to the projector rather than here."
+    "recordedAt": "2026-09-01T04:32:00.987Z",
+    "projectionVersion": "measured",
+    "moments": 5000,
+    "seconds": 10.9,
+    "momentsPerSecond": 458.9,
+    "pageSize": 500
   },
   "scenarios": [
     {
       "name": "a page of somebody's own history",
-      "runs": 10,
-      "p50": 34.8,
-      "p95": 42,
-      "max": 42
+      "runs": 50,
+      "p50": 68,
+      "p95": 192,
+      "max": 698.4
     },
     {
       "name": "a decade of buckets",
-      "runs": 10,
-      "p50": 32,
-      "p95": 40.6,
-      "max": 40.6
+      "runs": 50,
+      "p50": 42.5,
+      "p95": 82,
+      "max": 93.8
     },
     {
       "name": "a jump into the dense month",
-      "runs": 10,
-      "p50": 34.4,
-      "p95": 44.1,
-      "max": 44.1
+      "runs": 50,
+      "p50": 42.2,
+      "p95": 70.3,
+      "max": 132.3
     },
     {
       "name": "counting what is new since a mark",
-      "runs": 10,
-      "p50": 56.4,
-      "p95": 86.4,
-      "max": 86.4
+      "runs": 50,
+      "p50": 96.5,
+      "p95": 267.4,
+      "max": 404.5
     }
   ]
 }
