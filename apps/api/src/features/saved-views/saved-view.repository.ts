@@ -34,6 +34,8 @@ export interface StaleView {
   readonly specification: unknown;
   readonly createdAt: Date;
   readonly lastVisitedAt: Date | null;
+  /** Whether its owner asked to hear when it grows. */
+  readonly followed: boolean;
 }
 
 /**
@@ -209,8 +211,10 @@ export class SavedViewRepository {
       specification: unknown;
       created_at: Date;
       last_visited_at: Date | null;
+      followed: boolean;
     }[] = await this.dataSource.query(
-      `SELECT v.saved_view_id, v.user_id, v.specification, v.created_at, v.last_visited_at
+      `SELECT v.saved_view_id, v.user_id, v.specification, v.created_at, v.last_visited_at,
+              v.followed
          FROM saved_view_awareness AS a
          JOIN saved_views AS v ON v.saved_view_id = a.saved_view_id
         ORDER BY a.computed_at ASC NULLS FIRST, a.saved_view_id ASC
@@ -224,6 +228,7 @@ export class SavedViewRepository {
       specification: row.specification,
       createdAt: row.created_at,
       lastVisitedAt: row.last_visited_at,
+      followed: row.followed,
     }));
   }
 
@@ -352,6 +357,28 @@ export class SavedViewRepository {
     );
 
     return true;
+  }
+
+  /**
+   * Start or stop hearing about a view.
+   *
+   * @param tx - The caller's transaction.
+   * @param savedViewId - Which view.
+   * @param userId - Whose it must be. A view has one owner and so one possible
+   *   follower, which is why this is a column rather than a table.
+   * @param followed - Whether to hear about it.
+   * @returns Whether it was theirs to change.
+   * @throws {Error} If the database refuses.
+   */
+  async follow(
+    tx: Transaction,
+    savedViewId: string,
+    userId: string,
+    followed: boolean,
+  ): Promise<boolean> {
+    const { affected } = await tx.update(SavedViewRow, { savedViewId, userId }, { followed });
+
+    return affected === 1;
   }
 
   /**

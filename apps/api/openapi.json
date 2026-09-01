@@ -36017,6 +36017,9 @@
                     "available": {
                       "type": "boolean"
                     },
+                    "followed": {
+                      "type": "boolean"
+                    },
                     "lastVisitedAt": {
                       "type": "string",
                       "format": "date-time",
@@ -36053,7 +36056,8 @@
                     "view",
                     "createdAt",
                     "updatedAt",
-                    "available"
+                    "available",
+                    "followed"
                   ],
                   "additionalProperties": false
                 }
@@ -36485,6 +36489,9 @@
                           "available": {
                             "type": "boolean"
                           },
+                          "followed": {
+                            "type": "boolean"
+                          },
                           "lastVisitedAt": {
                             "type": "string",
                             "format": "date-time",
@@ -36521,7 +36528,8 @@
                           "view",
                           "createdAt",
                           "updatedAt",
-                          "available"
+                          "available",
+                          "followed"
                         ],
                         "additionalProperties": false
                       }
@@ -36950,6 +36958,9 @@
                     "available": {
                       "type": "boolean"
                     },
+                    "followed": {
+                      "type": "boolean"
+                    },
                     "lastVisitedAt": {
                       "type": "string",
                       "format": "date-time",
@@ -36986,7 +36997,8 @@
                     "view",
                     "createdAt",
                     "updatedAt",
-                    "available"
+                    "available",
+                    "followed"
                   ],
                   "additionalProperties": false
                 }
@@ -37468,6 +37480,9 @@
                     "available": {
                       "type": "boolean"
                     },
+                    "followed": {
+                      "type": "boolean"
+                    },
                     "lastVisitedAt": {
                       "type": "string",
                       "format": "date-time",
@@ -37504,7 +37519,8 @@
                     "view",
                     "createdAt",
                     "updatedAt",
-                    "available"
+                    "available",
+                    "followed"
                   ],
                   "additionalProperties": false
                 }
@@ -37744,6 +37760,528 @@
           "Saved Views"
         ],
         "description": "Removes it, and every link you made to it. A link to a view that no longer exists stops opening.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "savedViewId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "nullable": true,
+                  "enum": [
+                    null
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation. `details` names the field where it can.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "The request failed validation. `details` names the field where it can."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required, or the session can no longer authenticate a request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authentication is required, or the session can no longer authenticate a request."
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such thing — or it exists and is not for you. These are deliberately indistinguishable, so a 404 must never be read as proof that something does not exist. A Moment you may not see, an account that has blocked you, and an identifier nobody holds all answer this way.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "No such thing — or it exists and is not for you. These are deliberately indistinguishable, so a 404 must never be read as proof that something does not exist. A Moment you may not see, an account that has blocked you, and an identifier nobody holds all answer this way."
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push."
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/saved-views/{savedViewId}/following": {
+      "put": {
+        "summary": "Hear when a view grows",
+        "tags": [
+          "Saved Views"
+        ],
+        "description": "Asks to be told when Moments matching this view are added — including old ones, since somebody scanning a shoebox of 1994 negatives is exactly the addition worth hearing about.\n\n**Following is a second act, not a consequence of saving.** Saving keeps a perspective to come back to; this asks to be told without looking.\n\nYou are told once per view until you open it, however much arrives. What you are told is that there is more to see — never what, because a sentence naming it would be composed now and read later by somebody whose access may have narrowed since.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "savedViewId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "nullable": true,
+                  "enum": [
+                    null
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation. `details` names the field where it can.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "The request failed validation. `details` names the field where it can."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required, or the session can no longer authenticate a request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Authentication is required, or the session can no longer authenticate a request."
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such thing — or it exists and is not for you. These are deliberately indistinguishable, so a 404 must never be read as proof that something does not exist. A Moment you may not see, an account that has blocked you, and an identifier nobody holds all answer this way.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "No such thing — or it exists and is not for you. These are deliberately indistinguishable, so a 404 must never be read as proof that something does not exist. A Moment you may not see, an account that has blocked you, and an identifier nobody holds all answer this way."
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Too many requests. The response says nothing about how many remain, since that would say how hard to push."
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHENTICATION_FAILED",
+                        "AUTHORIZATION_DENIED",
+                        "CONCURRENCY_CONFLICT",
+                        "PROVIDER_UNAVAILABLE",
+                        "VALIDATION_FAILED",
+                        "ONBOARDING_REQUIRED",
+                        "NOT_FOUND",
+                        "RATE_LIMITED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message",
+                    "traceId"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Something failed unexpectedly. `traceId` identifies it in the logs; nothing about the failure itself reaches the caller."
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Stop hearing about a view",
+        "tags": [
+          "Saved Views"
+        ],
+        "description": "The view is kept and stops telling you about itself. Anything already sent stays where it is.",
         "parameters": [
           {
             "schema": {
@@ -61649,7 +62187,10 @@
                               "phone_claimed",
                               "phone_removed",
                               "email_verified",
-                              "sessions_revoked"
+                              "sessions_revoked",
+                              "saved_view_expanded",
+                              "location_expanded",
+                              "real_world_event_expanded"
                             ]
                           },
                           "category": {
@@ -61659,7 +62200,8 @@
                               "media",
                               "moderation",
                               "security",
-                              "participation"
+                              "participation",
+                              "history"
                             ]
                           },
                           "source": {
@@ -61672,7 +62214,10 @@
                                   "comment",
                                   "user",
                                   "upload",
-                                  "participation"
+                                  "participation",
+                                  "saved_view",
+                                  "location",
+                                  "real_world_event"
                                 ]
                               },
                               "id": {
@@ -62159,7 +62704,10 @@
                         "phone_claimed",
                         "phone_removed",
                         "email_verified",
-                        "sessions_revoked"
+                        "sessions_revoked",
+                        "saved_view_expanded",
+                        "location_expanded",
+                        "real_world_event_expanded"
                       ]
                     },
                     "category": {
@@ -62169,7 +62717,8 @@
                         "media",
                         "moderation",
                         "security",
-                        "participation"
+                        "participation",
+                        "history"
                       ]
                     },
                     "source": {
@@ -62182,7 +62731,10 @@
                             "comment",
                             "user",
                             "upload",
-                            "participation"
+                            "participation",
+                            "saved_view",
+                            "location",
+                            "real_world_event"
                           ]
                         },
                         "id": {
@@ -63057,7 +63609,8 @@
                               "media",
                               "moderation",
                               "security",
-                              "participation"
+                              "participation",
+                              "history"
                             ]
                           },
                           "channel": {
@@ -63089,7 +63642,8 @@
                           "media",
                           "moderation",
                           "security",
-                          "participation"
+                          "participation",
+                          "history"
                         ]
                       }
                     }
@@ -63267,7 +63821,8 @@
                             "media",
                             "moderation",
                             "security",
-                            "participation"
+                            "participation",
+                            "history"
                           ]
                         },
                         "channel": {
@@ -63317,7 +63872,8 @@
                               "media",
                               "moderation",
                               "security",
-                              "participation"
+                              "participation",
+                              "history"
                             ]
                           },
                           "channel": {
@@ -63349,7 +63905,8 @@
                           "media",
                           "moderation",
                           "security",
-                          "participation"
+                          "participation",
+                          "history"
                         ]
                       }
                     }

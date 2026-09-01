@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import { viewSpecificationSchema } from "@chronologity/contracts";
 import type { DataSource } from "typeorm";
 import { withTransaction } from "../../lib/database/transaction.js";
 import { markFor } from "../../features/saved-views/saved-view-awareness.js";
 import type { SavedViewRepository, StaleView } from "../../features/saved-views/saved-view.repository.js";
+import type { NotificationGenerator } from "../../features/notifications/notification.generator.js";
 import type { TimelineService } from "../../features/timeline/timeline.service.js";
 
 /**
@@ -43,6 +45,45 @@ export interface RecountOptions {
   readonly batchSize: number;
   /** Injected so a test can pin what a rolling range resolves to. */
   readonly now?: () => Date;
+  /**
+   * Tells somebody a view they follow has grown.
+   *
+   * Optional: an application with no notifications still keeps its counts
+   * correct, and the sweep's own job is the count rather than the telling.
+   */
+  readonly notify?: NotificationGenerator | undefined;
+}
+
+/**
+ * The identifier under which one view's growth is announced.
+ *
+ * **Derived rather than random, and this is what makes the sweep safe to run
+ * every minute.** The notification ledger is keyed on
+ * `(source_event_id, recipient_user_id)`, so an identifier derived from the view
+ * and the visit it is counted against means every pass over an unvisited window
+ * presents the *same* event — recorded once and thereafter recognised as a
+ * duplicate. Visiting moves the mark, which opens a new window and a new
+ * identifier, so the next arrival is announced again.
+ *
+ * A random identifier would announce on every pass. A digest of the count would
+ * announce again on every new Moment, which for a busy place is the same thing.
+ *
+ * @param savedViewId - Which view.
+ * @param mark - The visit the count is relative to, or null before any visit.
+ * @returns A stable UUID for this view and this unvisited window.
+ */
+export function announcementIdFor(savedViewId: string, mark: Date | null): string {
+  const digest = createHash("sha256")
+    .update(`saved-view-expanded:${savedViewId}:${mark === null ? "never" : mark.toISOString()}`)
+    .digest();
+  const bytes = Buffer.from(digest.subarray(0, 16));
+
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+
+  const hex = bytes.toString("hex");
+
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 /**
@@ -61,7 +102,7 @@ export interface RecountOptions {
  */
 export async function recountOne(
   view: StaleView,
-  options: Pick<RecountOptions, "dataSource" | "savedViews" | "timeline" | "now">,
+  options: Pick<RecountOptions, "dataSource" | "savedViews" | "timeline" | "now" | "notify">,
 ): Promise<boolean> {
   const now = (options.now ?? (() => new Date()))();
   const specification = viewSpecificationSchema.parse(view.specification);
@@ -79,7 +120,7 @@ export async function recountOne(
 
   const capped = counted > COUNT_CEILING;
 
-  return withTransaction(options.dataSource, (tx) =>
+  const recorded = await withTransaction(options.dataSource, (tx) =>
     options.savedViews.recordCount(
       tx,
       view.savedViewId,
@@ -89,6 +130,29 @@ export async function recountOne(
       now,
     ),
   );
+
+  // Only when there is something to say, only if they asked to hear it, and only
+  // if the count was actually recorded — a count superseded by a visit means
+  // they have just looked, which is the one moment not to tell them.
+  if (recorded && counted > 0 && view.followed && options.notify !== undefined) {
+    await options.notify.consider(
+      {
+        type: "saved_view_expanded",
+        // Nobody did this. History expanded, which is a different claim.
+        actorUserId: undefined,
+        subjectUserId: view.userId,
+        sourceType: "saved_view",
+        sourceId: view.savedViewId,
+        // Deliberately absent. The Moment-visibility re-check exists for
+        // notifications *about* a Moment; this one is about a view its owner
+        // saved, and every Moment behind it was already counted under their own
+        // eligibility. Naming one would also be the leak the wording avoids.
+      },
+      announcementIdFor(view.savedViewId, view.lastVisitedAt),
+    );
+  }
+
+  return recorded;
 }
 
 /**

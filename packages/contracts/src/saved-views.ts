@@ -94,6 +94,14 @@ export const savedViewSchema = z.object({
    * somebody's list quietly acquiring an item that errors.
    */
   available: z.boolean(),
+  /**
+   * Whether its owner asked to hear when it grows.
+   *
+   * Saving keeps a perspective to come back to; following asks to be told
+   * without looking. `saved-views.md` draws that distinction explicitly, so the
+   * two are separate acts rather than one implying the other.
+   */
+  followed: z.boolean(),
   /** When its owner last opened it, absent if they never have. */
   lastVisitedAt: timestampSchema.optional(),
   /** What has arrived since, absent when that is not known. */

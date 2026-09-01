@@ -52,6 +52,16 @@ export class SavedViewRow {
   @Column("timestamptz", { name: "last_visited_at", nullable: true })
   lastVisitedAt!: Date | null;
 
+  /**
+   * Whether its owner wants to hear when it grows.
+   *
+   * Saving and following are different acts: one keeps a perspective to return
+   * to, the other asks to be told without looking. Defaulting this to true would
+   * start notifying everybody who ever saved anything.
+   */
+  @Column("boolean", { default: false })
+  followed!: boolean;
+
   @ManyToOne(() => User)
   @JoinColumn({ name: "user_id" })
   user?: User;

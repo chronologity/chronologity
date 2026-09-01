@@ -138,6 +138,49 @@ export function savedViewRoutes(savedViews: SavedViewService) {
       },
     );
 
+    app.put(
+      "/saved-views/:savedViewId/following",
+      {
+        schema: {
+          summary: "Hear when a view grows",
+          description: [
+            "Asks to be told when Moments matching this view are added — including old ones, since somebody scanning a shoebox of 1994 negatives is exactly the addition worth hearing about.",
+            "",
+            "**Following is a second act, not a consequence of saving.** Saving keeps a perspective to come back to; this asks to be told without looking.",
+            "",
+            "You are told once per view until you open it, however much arrives. What you are told is that there is more to see — never what, because a sentence naming it would be composed now and read later by somebody whose access may have narrowed since.",
+          ].join("\n"),
+          params: viewParams,
+          response: { 204: z.null(), ...errors(400, 401, 404) },
+        },
+        preHandler: requireUser,
+      },
+      async (request, reply) => {
+        await savedViews.follow(request.params.savedViewId, request.user.userId, true);
+
+        return reply.status(204).send(null);
+      },
+    );
+
+    app.delete(
+      "/saved-views/:savedViewId/following",
+      {
+        schema: {
+          summary: "Stop hearing about a view",
+          description:
+            "The view is kept and stops telling you about itself. Anything already sent stays where it is.",
+          params: viewParams,
+          response: { 204: z.null(), ...errors(400, 401, 404) },
+        },
+        preHandler: requireUser,
+      },
+      async (request, reply) => {
+        await savedViews.follow(request.params.savedViewId, request.user.userId, false);
+
+        return reply.status(204).send(null);
+      },
+    );
+
     app.post(
       "/saved-views/:savedViewId/visits",
       {

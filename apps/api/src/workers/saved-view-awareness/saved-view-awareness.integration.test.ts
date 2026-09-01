@@ -8,7 +8,22 @@ import { migrate } from "../../lib/database/migrations.js";
 import { connectDatabase, createDatabase, type Database } from "../../lib/database/postgres.js";
 import { testAppConfig } from "../../testing/app-config.js";
 import { createUser } from "../../testing/fixtures.js";
+import { IdentityRepository } from "../../features/authentication/identity.repository.js";
+import { LocationRepository } from "../../features/locations/location.repository.js";
+import { ModerationRepository } from "../../features/moderation/moderation.repository.js";
+import { MomentCommentRepository } from "../../features/moments/moment-comment.repository.js";
+import { MomentRepository } from "../../features/moments/moment.repository.js";
+import { MomentService } from "../../features/moments/moment.service.js";
+import { NotificationDeliveryRepository } from "../../features/notifications/notification.delivery.repository.js";
+import { NotificationDeliveryService } from "../../features/notifications/notification.delivery.service.js";
+import { NotificationGenerator } from "../../features/notifications/notification.generator.js";
+import { StoredRecipientDirectory } from "../../features/notifications/notification.recipients.js";
+import { NotificationRepository } from "../../features/notifications/notification.repository.js";
+import { RealWorldEventRepository } from "../../features/real-world-events/real-world-event.repository.js";
 import { SavedViewRepository } from "../../features/saved-views/saved-view.repository.js";
+import { FollowRepository } from "../../features/social/follow.repository.js";
+import { UploadRepository } from "../../features/uploads/upload.repository.js";
+import { UserRepository } from "../../features/users/user.repository.js";
 import { TimelineEligibilityResolver } from "../../features/timeline/timeline.eligibility.js";
 import { TimelineReadRepository } from "../../features/timeline/timeline.read.repository.js";
 import { TimelineRepository } from "../../features/timeline/timeline.repository.js";
@@ -40,6 +55,7 @@ describe("recounting what saved views have gained", () => {
   let projector: TimelineRepository;
   let savedViews: SavedViewRepository;
   let timeline: TimelineService;
+  let notify: NotificationGenerator;
 
   beforeAll(async () => {
     database = createDatabase(config.database);
@@ -53,6 +69,36 @@ describe("recounting what saved views have gained", () => {
     timeline = new TimelineService(
       new TimelineReadRepository(analytics.client, version),
       new TimelineEligibilityResolver(database.dataSource),
+    );
+
+    // The real generator, against the real tables. Substituting it would leave
+    // the two properties worth proving — that one window says one thing, and
+    // that a new window says something new — resting on a stand-in that agrees
+    // with whatever the sweep does.
+    const accounts = new UserRepository(database.dataSource);
+    const notifications = new NotificationRepository(database.dataSource);
+
+    notify = new NotificationGenerator(
+      database.dataSource,
+      notifications,
+      new MomentService(
+        database.dataSource,
+        new MomentRepository(database.dataSource),
+        new UploadRepository(database.dataSource),
+        new LocationRepository(database.dataSource),
+        new RealWorldEventRepository(database.dataSource),
+        new FollowRepository(database.dataSource),
+        accounts,
+        new ModerationRepository(database.dataSource),
+        new MomentCommentRepository(database.dataSource),
+      ),
+      new NotificationDeliveryService(
+        database.dataSource,
+        new NotificationDeliveryRepository(database.dataSource),
+        notifications,
+        accounts,
+        new StoredRecipientDirectory(accounts, new IdentityRepository(database.dataSource)),
+      ),
     );
   });
 
@@ -80,19 +126,21 @@ describe("recounting what saved views have gained", () => {
   const aView = async (
     userId: string,
     specification: ViewSpecification,
-    over: { createdAt?: Date; lastVisitedAt?: Date } = {},
+    over: { createdAt?: Date; lastVisitedAt?: Date; followed?: boolean } = {},
   ): Promise<string> => {
     const savedViewId = randomUUID();
     await database.dataSource.query(
       `INSERT INTO saved_views
-         (saved_view_id, user_id, title, specification, created_at, updated_at, last_visited_at)
-       VALUES ($1, $2, 'A view', $3::jsonb, $4, $4, $5)`,
+         (saved_view_id, user_id, title, specification, created_at, updated_at,
+          last_visited_at, followed)
+       VALUES ($1, $2, 'A view', $3::jsonb, $4, $4, $5, $6)`,
       [
         savedViewId,
         userId,
         JSON.stringify(specification),
         over.createdAt ?? new Date("2020-01-01T00:00:00.000Z"),
         over.lastVisitedAt ?? null,
+        over.followed ?? false,
       ],
     );
     await database.dataSource.query(
@@ -300,6 +348,161 @@ describe("recounting what saved views have gained", () => {
 
     assert.equal(bounded.recounted + bounded.superseded, 1, "a pass exceeded its batch");
     assert.equal(bounded.reachedEnd, false, "a full batch reported nothing left to do");
+  });
+
+  describe("telling somebody a view they follow has grown", () => {
+    const notificationsFor = async (userId: string) => {
+      const rows: { type: string; source_id: string; read_at: Date | null }[] =
+        await database.dataSource.query(
+          `SELECT type, source_id, read_at FROM notifications
+            WHERE recipient_user_id = $1 AND type = 'saved_view_expanded'`,
+          [userId],
+        );
+
+      return rows;
+    };
+
+    const sweepOnce = async (savedViewId: string) =>
+      recountOne(await stale(savedViewId), {
+        dataSource: database.dataSource,
+        savedViews,
+        timeline,
+        notify,
+      });
+
+    it("says nothing about a view nobody follows", async () => {
+      const person = await anAccount();
+      const savedViewId = await aView(person, ofPerson(person));
+      await place(person, "1969-07-20T00:00:00.000Z", new Date());
+
+      await sweepOnce(savedViewId);
+
+      assert.deepEqual(await notificationsFor(person), []);
+    });
+
+    it("says nothing about a followed view that has gained nothing", async () => {
+      const person = await anAccount();
+      const savedViewId = await aView(person, ofPerson(person), { followed: true });
+
+      await sweepOnce(savedViewId);
+
+      assert.deepEqual(await notificationsFor(person), []);
+    });
+
+    it("tells somebody once, however many times it sweeps", async () => {
+      // The behaviour that matters: the sweep recounts the same views for ever,
+      // and announcing on every pass would be a notification a minute for one
+      // photograph.
+      //
+      // Two things hold it, and this proves the pair rather than either. While
+      // the notification is unread the aggregation key collapses repeats; once
+      // it is read the derived event identifier does. The test below reads it
+      // first, which is what isolates the second.
+      const person = await anAccount();
+      const savedViewId = await aView(person, ofPerson(person), { followed: true });
+      await place(person, "1969-07-20T00:00:00.000Z", new Date());
+
+      await sweepOnce(savedViewId);
+      await sweepOnce(savedViewId);
+      await sweepOnce(savedViewId);
+
+      const told = await notificationsFor(person);
+
+      assert.equal(told.length, 1, `told ${told.length} times about one view`);
+      assert.equal(told[0]?.source_id, savedViewId);
+    });
+
+    it("does not tell somebody again after they read it but before they looked", async () => {
+      // The case only the derived identifier can prevent, and the reason it
+      // exists. While a notification is unread, the partial unique index on the
+      // aggregation key collapses repeats on its own — so a sweep announcing
+      // under a fresh identifier every pass would still leave one entry, and
+      // would look correct.
+      //
+      // Reading it frees that key. From then on the *only* thing between an
+      // unvisited view and a notification a minute is the event identifier
+      // staying the same across the window.
+      const person = await anAccount();
+      const savedViewId = await aView(person, ofPerson(person), { followed: true });
+      await place(person, "1969-07-20T00:00:00.000Z", new Date());
+
+      await sweepOnce(savedViewId);
+
+      await database.dataSource.query(
+        `UPDATE notifications SET read_at = now() WHERE recipient_user_id = $1`,
+        [person],
+      );
+
+      // Requeued rather than visited: they have read the notification but have
+      // not opened the view, so the window they were told about is still open.
+      await database.dataSource.query(
+        `UPDATE saved_view_awareness SET computed_at = NULL WHERE saved_view_id = $1`,
+        [savedViewId],
+      );
+
+      await sweepOnce(savedViewId);
+
+      const told = await notificationsFor(person);
+
+      assert.equal(told.length, 1, `told ${told.length} times about one unvisited window`);
+    });
+
+    it("tells somebody again once they have looked and more has arrived", async () => {
+      // Visiting opens a new window. Without that, somebody who read the first
+      // notification would never hear about that view again.
+      const person = await anAccount();
+      const savedViewId = await aView(person, ofPerson(person), { followed: true });
+      await place(person, "1969-07-20T00:00:00.000Z", new Date());
+
+      await sweepOnce(savedViewId);
+
+      const visitedAt = new Date();
+      await database.dataSource.query(
+        `UPDATE saved_views SET last_visited_at = $2 WHERE saved_view_id = $1`,
+        [savedViewId, visitedAt],
+      );
+      await database.dataSource.query(
+        `UPDATE saved_view_awareness
+            SET new_moment_count = 0, visited_through = $2, computed_at = NULL
+          WHERE saved_view_id = $1`,
+        [savedViewId, visitedAt],
+      );
+      // Read, so the unread-collapsing index cannot be what keeps the count at
+      // one — otherwise this test would pass without the window having moved.
+      await database.dataSource.query(
+        `UPDATE notifications SET read_at = now() WHERE recipient_user_id = $1`,
+        [person],
+      );
+
+      await place(person, "1970-01-01T00:00:00.000Z", new Date());
+      await sweepOnce(savedViewId);
+
+      assert.equal((await notificationsFor(person)).length, 2, "a new window said nothing");
+    });
+
+    it("says nothing when somebody looked while it was counting", async () => {
+      // The count was superseded, so it was not recorded — and they have just
+      // seen everything it would have announced.
+      const person = await anAccount();
+      const savedViewId = await aView(person, ofPerson(person), { followed: true });
+      await place(person, "1969-07-20T00:00:00.000Z", new Date());
+
+      const due = await stale(savedViewId);
+      const visitedAt = new Date();
+
+      await database.dataSource.query(
+        `UPDATE saved_views SET last_visited_at = $2 WHERE saved_view_id = $1`,
+        [savedViewId, visitedAt],
+      );
+      await database.dataSource.query(
+        `UPDATE saved_view_awareness SET visited_through = $2 WHERE saved_view_id = $1`,
+        [savedViewId, visitedAt],
+      );
+
+      await recountOne(due, { dataSource: database.dataSource, savedViews, timeline, notify });
+
+      assert.deepEqual(await notificationsFor(person), []);
+    });
   });
 
   it("forgets what it counted for both sides of a block", async () => {

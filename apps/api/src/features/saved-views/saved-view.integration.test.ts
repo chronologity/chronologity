@@ -621,6 +621,106 @@ describe("saved views", () => {
     });
   });
 
+  describe("following one", () => {
+    const followedFor = async (savedViewId: string) => {
+      const rows: { followed: boolean }[] = await database.dataSource.query(
+        `SELECT followed FROM saved_views WHERE saved_view_id = $1`,
+        [savedViewId],
+      );
+
+      return rows[0]?.followed;
+    };
+
+    it("keeps saving and following apart", async () => {
+      // Saving keeps a perspective to come back to; following asks to be told
+      // without looking. Reading the second into the first would start
+      // notifying everybody who ever saved anything.
+      const person = await onboard();
+      const kept = await keep(person.accessToken, "Just saved", {
+        context: { type: "person", id: person.userId },
+      });
+
+      assert.equal(kept.body.followed, false, "saving a view started notifying about it");
+      assert.equal(await followedFor(kept.savedViewId), false);
+    });
+
+    it("starts and stops telling somebody about it", async () => {
+      const person = await onboard();
+      const kept = await keep(person.accessToken, "Watched", {
+        context: { type: "person", id: person.userId },
+      });
+
+      const followed = await app.inject({
+        method: "PUT",
+        url: `/saved-views/${kept.savedViewId}/following`,
+        headers: authed(person.accessToken),
+      });
+
+      assert.equal(followed.statusCode, 204, followed.body);
+      assert.equal(await followedFor(kept.savedViewId), true);
+
+      const read = await app.inject({
+        method: "GET",
+        url: `/saved-views/${kept.savedViewId}`,
+        headers: authed(person.accessToken),
+      });
+
+      assert.equal(read.json().followed, true, "following was not presented");
+
+      const stopped = await app.inject({
+        method: "DELETE",
+        url: `/saved-views/${kept.savedViewId}/following`,
+        headers: authed(person.accessToken),
+      });
+
+      assert.equal(stopped.statusCode, 204, stopped.body);
+      assert.equal(await followedFor(kept.savedViewId), false);
+    });
+
+    it("survives renaming and visiting", async () => {
+      const person = await onboard();
+      const kept = await keep(person.accessToken, "Before", {
+        context: { type: "person", id: person.userId },
+      });
+
+      await app.inject({
+        method: "PUT",
+        url: `/saved-views/${kept.savedViewId}/following`,
+        headers: authed(person.accessToken),
+      });
+      await app.inject({
+        method: "PATCH",
+        url: `/saved-views/${kept.savedViewId}`,
+        headers: authed(person.accessToken),
+        payload: { title: "After" },
+      });
+      await app.inject({
+        method: "POST",
+        url: `/saved-views/${kept.savedViewId}/visits`,
+        headers: authed(person.accessToken),
+      });
+
+      assert.equal(await followedFor(kept.savedViewId), true, "following was lost");
+    });
+
+    it("refuses to follow somebody else's view", async () => {
+      const owner = await onboard();
+      const stranger = await onboard();
+      const kept = await keep(owner.accessToken, "Not yours", {
+        context: { type: "person", id: owner.userId },
+      });
+
+      const theirs = await app.inject({
+        method: "PUT",
+        url: `/saved-views/${kept.savedViewId}/following`,
+        headers: authed(stranger.accessToken),
+      });
+
+      assert.equal(theirs.statusCode, 404, theirs.body);
+      assert.equal(await followedFor(kept.savedViewId), false, "a stranger started notifications");
+    });
+  });
+
   describe("sharing one", () => {
     const shareOf = async (
       accessToken: string,

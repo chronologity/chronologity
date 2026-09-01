@@ -5,7 +5,22 @@ import "reflect-metadata";
 
 import { ConfigurationError } from "@chronologity/config";
 import { loadConfig } from "../../config/app-config.js";
+import { LocationRepository } from "../../features/locations/location.repository.js";
+import { ModerationRepository } from "../../features/moderation/moderation.repository.js";
+import { MomentCommentRepository } from "../../features/moments/moment-comment.repository.js";
+import { MomentRepository } from "../../features/moments/moment.repository.js";
+import { MomentService } from "../../features/moments/moment.service.js";
+import { IdentityRepository } from "../../features/authentication/identity.repository.js";
+import { NotificationDeliveryRepository } from "../../features/notifications/notification.delivery.repository.js";
+import { NotificationDeliveryService } from "../../features/notifications/notification.delivery.service.js";
+import { NotificationGenerator } from "../../features/notifications/notification.generator.js";
+import { StoredRecipientDirectory } from "../../features/notifications/notification.recipients.js";
+import { NotificationRepository } from "../../features/notifications/notification.repository.js";
+import { RealWorldEventRepository } from "../../features/real-world-events/real-world-event.repository.js";
 import { SavedViewRepository } from "../../features/saved-views/saved-view.repository.js";
+import { FollowRepository } from "../../features/social/follow.repository.js";
+import { UploadRepository } from "../../features/uploads/upload.repository.js";
+import { UserRepository } from "../../features/users/user.repository.js";
 import { TimelineEligibilityResolver } from "../../features/timeline/timeline.eligibility.js";
 import { TimelineReadRepository } from "../../features/timeline/timeline.read.repository.js";
 import { TimelineService } from "../../features/timeline/timeline.service.js";
@@ -72,6 +87,35 @@ async function main(): Promise<void> {
   await connectDatabase(database);
 
   const savedViews = new SavedViewRepository(database.dataSource);
+  const accounts = new UserRepository(database.dataSource);
+  const notifications = new NotificationRepository(database.dataSource);
+
+  // Built here rather than shared, as every worker builds its own. The sweep is
+  // the first thing in this system to raise a notification from a *derivation*
+  // rather than from a message — nothing publishes "a saved view grew", because
+  // nothing happened to publish.
+  const notify = new NotificationGenerator(
+    database.dataSource,
+    notifications,
+    new MomentService(
+      database.dataSource,
+      new MomentRepository(database.dataSource),
+      new UploadRepository(database.dataSource),
+      new LocationRepository(database.dataSource),
+      new RealWorldEventRepository(database.dataSource),
+      new FollowRepository(database.dataSource),
+      accounts,
+      new ModerationRepository(database.dataSource),
+      new MomentCommentRepository(database.dataSource),
+    ),
+    new NotificationDeliveryService(
+      database.dataSource,
+      new NotificationDeliveryRepository(database.dataSource),
+      notifications,
+      accounts,
+      new StoredRecipientDirectory(accounts, new IdentityRepository(database.dataSource)),
+    ),
+  );
   const timeline = new TimelineService(
     new TimelineReadRepository(analytics.client, config.clickhouse.projectionVersion),
     new TimelineEligibilityResolver(database.dataSource),
@@ -99,6 +143,7 @@ async function main(): Promise<void> {
       dataSource: database.dataSource,
       savedViews,
       timeline,
+      notify,
       batchSize: BATCH_SIZE,
     });
 

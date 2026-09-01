@@ -68,6 +68,7 @@ export class SavedViewService {
       createdAt: at.toISOString(),
       updatedAt: at.toISOString(),
       available: true,
+      followed: false,
     };
   }
 
@@ -135,6 +136,25 @@ export class SavedViewService {
     const awareness = await this.savedViews.awarenessFor([savedViewId]);
 
     return present(row, awareness.get(savedViewId), this.clock());
+  }
+
+  /**
+   * Start or stop hearing about a view.
+   *
+   * @param savedViewId - Which view.
+   * @param userId - Whose it must be.
+   * @param followed - Whether to hear about it.
+   * @returns Nothing.
+   * @throws {NotFoundError} If there is no such view of theirs.
+   */
+  async follow(savedViewId: string, userId: string, followed: boolean): Promise<void> {
+    const changed = await withTransaction(this.dataSource, (tx) =>
+      this.savedViews.follow(tx, savedViewId, userId, followed),
+    );
+
+    if (!changed) {
+      throw new NotFoundError("No such saved view");
+    }
   }
 
   /**
@@ -353,6 +373,7 @@ function present(row: SavedViewRow, awareness?: StoredAwareness, now?: Date): Sa
     view,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    followed: row.followed,
     ...(row.lastVisitedAt === null || row.lastVisitedAt === undefined
       ? {}
       : { lastVisitedAt: row.lastVisitedAt.toISOString() }),
