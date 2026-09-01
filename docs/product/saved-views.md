@@ -366,7 +366,11 @@ newly contributed past Moments
 representation of history becomes richer
 ```
 
-Following Saved Views is not required for the initial Saved Views implementation, but the data model should avoid preventing it.
+Following a Saved View is built, and is a second act rather than a consequence of saving: saving keeps a perspective to come back to, following asks to be told about it without looking. A view is followed by its owner, who is its only possible follower.
+
+Following a Location or a real-world Event is likewise consumed rather than merely recorded — somebody following a place is told when history there grows.
+
+What such a notification says is that there is more to see, and never what. Naming the new Moment would mean composing a sentence now that is read later by somebody whose access may have narrowed since; opening the thing re-derives it for whoever opened it, which is the only safe way to find out. Whether each follower is told at all is decided by that Moment's own visibility, so a Moment recorded privately at a public place tells nobody.
 
 ## Sharing
 

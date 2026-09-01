@@ -561,6 +561,22 @@ const ATTEMPTS: readonly Attempt[] = [
     url: (o) => `/saved-views/${o.savedViewId}`,
     refusal: 404,
   },
+  // Asking to be told when somebody else's view grows. A write, and one that
+  // would send them notifications they never asked for.
+  {
+    method: "PUT",
+    path: "/saved-views/:savedViewId/following",
+    url: (o) => `/saved-views/${o.savedViewId}/following`,
+    refusal: 404,
+    indistinguishable: true,
+  },
+  {
+    method: "DELETE",
+    path: "/saved-views/:savedViewId/following",
+    url: (o) => `/saved-views/${o.savedViewId}/following`,
+    refusal: 404,
+  },
+
   // Saying you have looked at somebody else's view. Not a read at all but a
   // write, and one that would blank whatever their own count had been telling
   // them — so the answer is the one an identifier nobody holds gets.

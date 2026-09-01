@@ -4546,3 +4546,55 @@ Two probes per Moment became two per page. The full 50,000 — which the old cod
 ## Deliberately Not Here
 
 The live path pays the same needless mutation: a visibility change or an accepted participation costs a probe returning true plus a delete, for a change the engine would absorb. Reusing the same rule there would remove it, but it changes behaviour `timeline.integration.test.ts` currently proves through the delete, and deserves its own reasoning.
+
+---
+
+# ADR-135 — Following Is a Second Act, and What It Announces Says Nothing About What Arrived
+
+## Status
+
+Accepted.
+
+## Context
+
+ADR-133 gave a Saved View a count of what it has gained since its owner last looked. That closes the loop only for somebody who opens their list; `saved-views.md` also describes *following* a view — "keep this perspective and surface meaningful changes to it" — as distinct from saving it.
+
+Two other things could already be followed and did nothing. `20260822222514-add-context-following.sql` records that somebody follows a Location or a real-world Event, and `follow.repository.ts` could answer "what do I follow" but never "who follows this". No notification type mentioned either. It was a stored relationship nothing consumed.
+
+`glossary.md` also says plainly that "neither kind follows a Timeline, which is derived", which reads as forbidding a followed Saved View.
+
+## Decision
+
+**What is followed is the specification, not the Timeline.** The glossary conflict resolves the way the Location migration already resolved it: what an interface presents as "follow this Timeline" is a following of the *scope*, and a View Specification is "another explicitly defined scope" in the glossary's own words. One line was added there rather than leaving the next reader to rediscover the contradiction.
+
+**Following is a second act.** `saved_views.followed` defaults to false. Somebody who saved a view asked to come back to it; reading a request for notifications into that would start telling people things they never asked to hear.
+
+**A saved view is followed by a column, not a table**, because it has exactly one owner and therefore exactly one possible follower.
+
+**Three types in a new `history` category.** Not social: nobody did anything to the reader, and `saved-views.md` insists this "should not imply that the underlying historical subject itself changed". Silenceable, unlike moderation and security — somebody who finds a busy Location noisy must be able to stop hearing about it without losing the notification that says their account was accessed.
+
+**A notification points at the thing followed, never at the Moment that triggered it.** The aggregation key is `recipient:type:sourceId`, and a partial unique index keeps one unread entry per key — so everything arriving at one place folds into one entry until it is read.
+
+**The wording says there is more to see and never what.** A sentence naming the new Moment would be composed now and read later by somebody whose eligibility may have narrowed since. Opening the thing re-derives it for whoever opened it, which is the only safe way to find out.
+
+**Whether a follower may know is decided per follower**, by the same Moment visibility rule everything else uses. A Moment recorded privately at a public place tells nobody.
+
+**A saved view's announcement carries an identifier derived from `(savedViewId, last_visited_at)`.** This is the first notification in the system raised by a sweep rather than by a message, so there is no event identifier to use. Visiting moves the mark, which opens a new window.
+
+**Fan-out walks its followers rather than gathering them**, 200 at a time, ordered by identifier so a new follower cannot insert into the middle of a walk.
+
+## Alternatives Considered
+
+Saving implying following; a join table for saved-view followers; folding these into `social`; naming the new Moment in the notification; and a random identifier for the sweep's announcement.
+
+## Rationale
+
+**Two mechanisms make repeats impossible, and the tests now say which is which.** This was got wrong twice before it was got right. The claim was that the derived identifier stops the sweep announcing the same growth every minute, and that the message's event identifier stops a redelivered fan-out telling somebody twice. Both were tested; both tests passed with the mechanism deliberately broken — because while a notification is **unread**, the aggregation index collapses repeats on its own.
+
+The two cover different windows. The index holds while the entry is unread; the identifier holds after it has been read and before the thing has been opened. Without the second, somebody who reads a notification and does not immediately open the view gets one a minute, for ever. Both tests now mark the notification read first, which frees the index and leaves only the identifier — and both fail when it is broken. The weaker tests were kept, with corrected comments, because they prove the pair.
+
+**The author is not told about their own Moment.** They know.
+
+**The one message that concerns many people takes its own path.** Everything else the generator handles is one interaction between two people, and `candidateFrom` reads it into a single recipient. `MomentRecorded` cannot be read that way, so it routes before the candidate map is consulted — and the handled-event list names it explicitly, because a list derived from the map alone would have said this worker subscribes to a boundary it ignores. A guard caught exactly that.
+
+**An existing negative test had to move.** It proved the subscription list was real by watching for a Moment being recorded, which the generator ignored. It no longer does, so the negative moved to a Location being recorded — a boundary nothing here reads — and says so.
