@@ -158,6 +158,8 @@ Following does not override privacy, blocking, moderation, or authorization.
 
 A User may also follow a **Historical Context** — a real-world Event, a Location, or another explicitly defined scope — to hear about Moments associated with it. That is a different relationship: a context is shared history rather than a person, so it needs no approval and cannot be blocked. Neither kind follows a Timeline, which is derived.
 
+A **Saved View** may be followed by the person who saved it, and this is the third kind. What is followed is the View Specification — an explicitly defined scope, as above — rather than the Timeline it derives, which stays as unfollowable as ever. An interface may reasonably present it as "follow this view"; the thing recorded is the request, and reopening it derives current history for whoever is looking.
+
 See `product/social-graph.md` and `product/timelines.md`.
 
 ## Follower

@@ -39,6 +39,9 @@ export const notificationTypeSchema = z.enum([
   "phone_removed",
   "email_verified",
   "sessions_revoked",
+  "saved_view_expanded",
+  "location_expanded",
+  "real_world_event_expanded",
 ]);
 
 export type NotificationType = z.infer<typeof notificationTypeSchema>;
@@ -65,6 +68,20 @@ export const notificationCategorySchema = z.enum([
    * that model depends on the easiest to lose.
    */
   "participation",
+  /**
+   * History itself expanding.
+   *
+   * What somebody follows has gained Moments — a place, an occasion, a
+   * perspective they kept. Its own family because nobody *did* anything to
+   * them: `saved-views.md` is explicit that this "should not imply that the
+   * underlying historical subject itself changed", only that Chronologity's
+   * representation of it has grown.
+   *
+   * Silenceable, unlike moderation and security. Somebody following a busy
+   * place must be able to stop hearing about it without losing the notification
+   * that says their account was accessed.
+   */
+  "history",
 ]);
 
 export type NotificationCategory = z.infer<typeof notificationCategorySchema>;
@@ -89,6 +106,17 @@ export const notificationSourceTypeSchema = z.enum([
    * written and then never render for the one person who has to see it.
    */
   "participation",
+  /**
+   * A perspective on history, a place, or an occasion.
+   *
+   * The three things that can be followed. A notification points at the thing
+   * followed rather than at the Moment that triggered it, so that everything
+   * arriving in one followed place folds into a single unread entry instead of
+   * one per Moment.
+   */
+  "saved_view",
+  "location",
+  "real_world_event",
 ]);
 
 export type NotificationSourceType = z.infer<typeof notificationSourceTypeSchema>;

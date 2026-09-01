@@ -142,6 +142,27 @@ const OCCURRENCES: Readonly<Record<string, Occurrence>> = {
     sentence:
       "Every session on your account was signed out. If this was not you, change your password.",
   },
+  // History expanding, said without saying what arrived.
+  //
+  // Deliberately vague, and not for want of detail: the reader is told to go and
+  // look rather than told what is there. A sentence naming the new Moment would
+  // be composed once, stored, and read later by somebody whose eligibility may
+  // have narrowed since — and `saved-views.md` forbids leaking inaccessible
+  // history "through counts, previews, titles, or notifications". Opening the
+  // thing re-derives it for whoever opened it, which is the only safe way to
+  // find out.
+  saved_view_expanded: {
+    subject: "A view you follow has more in it",
+    sentence: "There is more to see in a view you follow.",
+  },
+  location_expanded: {
+    subject: "A place you follow has more in it",
+    sentence: "There is more history at a place you follow.",
+  },
+  real_world_event_expanded: {
+    subject: "An occasion you follow has more in it",
+    sentence: "There is more history at an occasion you follow.",
+  },
 };
 
 /**

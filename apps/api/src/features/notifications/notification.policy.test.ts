@@ -35,6 +35,9 @@ const TYPES: NotificationType[] = [
   "phone_removed",
   "email_verified",
   "sessions_revoked",
+  "saved_view_expanded",
+  "location_expanded",
+  "real_world_event_expanded",
 ];
 
 describe("categoryOf", () => {
@@ -48,6 +51,24 @@ describe("categoryOf", () => {
     assert.equal(categoryOf("moment_reacted"), "social");
     assert.equal(categoryOf("comment_mentioned"), "social");
     assert.equal(categoryOf("user_followed"), "social");
+  });
+
+  it("sorts history expanding into its own family, not into social", () => {
+    // Nobody did anything to the reader. What changed is how much of history
+    // Chronologity holds, which `saved-views.md` insists is a different claim
+    // from the past having changed — and somebody who silences reactions has
+    // not asked to stop hearing that a place they follow has gained a
+    // photograph of 1969.
+    for (const type of ["saved_view_expanded", "location_expanded", "real_world_event_expanded"]) {
+      assert.equal(categoryOf(type), "history", type);
+    }
+  });
+
+  it("lets somebody silence history without silencing security", () => {
+    // The reason it is its own family rather than folded into an existing one.
+    assert.equal(isRequired("history"), false);
+    assert.equal(isRequired("security"), true);
+    assert.equal(isRequired("moderation"), true);
   });
 
   it("sorts upload outcomes into media", () => {

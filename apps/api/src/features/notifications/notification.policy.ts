@@ -40,7 +40,10 @@ export type NotificationType =
   | "phone_claimed"
   | "phone_removed"
   | "email_verified"
-  | "sessions_revoked";
+  | "sessions_revoked"
+  | "saved_view_expanded"
+  | "location_expanded"
+  | "real_world_event_expanded";
 
 /** Which family a notification belongs to. */
 export type NotificationCategory =
@@ -48,13 +51,22 @@ export type NotificationCategory =
   | "media"
   | "moderation"
   | "security"
-  | "participation";
+  | "participation"
+  | "history";
 
 /** Where a notification can be delivered. */
 export type NotificationChannel = "in_app" | "email" | "push";
 
 /** What a notification points at. */
-export type NotificationSourceType = "moment" | "comment" | "user" | "upload" | "participation";
+export type NotificationSourceType =
+  | "moment"
+  | "comment"
+  | "user"
+  | "upload"
+  | "participation"
+  | "saved_view"
+  | "location"
+  | "real_world_event";
 
 /** Which family each type belongs to. */
 const CATEGORIES: Readonly<Record<NotificationType, NotificationCategory>> = {
@@ -79,6 +91,12 @@ const CATEGORIES: Readonly<Record<NotificationType, NotificationCategory>> = {
   phone_removed: "security",
   email_verified: "security",
   sessions_revoked: "security",
+  // History expanding, rather than anybody acting. Deliberately not `social`:
+  // somebody who has silenced reactions and follows has not asked to stop
+  // hearing that a place they follow has gained a photograph of 1969.
+  saved_view_expanded: "history",
+  location_expanded: "history",
+  real_world_event_expanded: "history",
 };
 
 /**
