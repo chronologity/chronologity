@@ -46,6 +46,15 @@ export interface TimelineRebuildOptions {
   readonly only?: readonly string[];
   /** Called after each page, so a long rebuild can be watched. */
   readonly onProgress?: (done: number) => void;
+  /**
+   * How many Moments to read and write at once.
+   *
+   * Operational tuning, which `projections.md` names under rebuild throttling —
+   * a bigger page is fewer round trips and a longer-held slice of both stores.
+   * Also what lets a test drive a page boundary without inventing five hundred
+   * Moments to reach one.
+   */
+  readonly pageSize?: number;
 }
 
 /**
@@ -76,28 +85,30 @@ export async function rebuildTimeline(
   let done = 0;
 
   const apply = async (momentIds: readonly string[]): Promise<void> => {
-    for (const momentId of momentIds) {
-      // Through `project` rather than `handle`: a rebuild is not applying
-      // messages, and recording an event identifier it never saw would leave a
-      // processed-event row that means nothing.
-      const outcome = await projector.project(momentId);
+    // Through `projectBatch` rather than `handle`: a rebuild is not applying
+    // messages, and recording an event identifier it never saw would leave a
+    // processed-event row that means nothing.
+    //
+    // A page at a time rather than a Moment at a time. One Moment at a time
+    // asked the projection "do you already hold this?" twice per Moment, and
+    // because `moment_id` leads neither sort key each question was a full scan —
+    // so the work grew with the square of the corpus and a rebuild of any size
+    // eventually outlived the client's timeout rather than merely being slow.
+    const tally = await projector.projectBatch(momentIds);
 
-      if (outcome === "projected") {
-        projected += 1;
-      } else {
-        removed += 1;
-      }
-    }
-
+    projected += tally.projected;
+    removed += tally.removed;
     done += momentIds.length;
     options.onProgress?.(done);
   };
 
+  const page = options.pageSize ?? PAGE;
+
   // Named Moments, for an operator who knows which were affected and a test
   // that wants an assertion rather than a walk of every row in the database.
   if (options.only !== undefined) {
-    for (let index = 0; index < options.only.length; index += PAGE) {
-      await apply(options.only.slice(index, index + PAGE));
+    for (let index = 0; index < options.only.length; index += page) {
+      await apply(options.only.slice(index, index + page));
     }
 
     return { projected, removed, suspended: 0, reinstated: 0 };
@@ -109,19 +120,19 @@ export async function rebuildTimeline(
   let after: { occurredAt: Date; momentId: string } | undefined;
 
   for (;;) {
-    const page = await source.everyMoment(after, PAGE);
+    const listed = await source.everyMoment(after, page);
 
-    if (page.length === 0) {
+    if (listed.length === 0) {
       return { projected, removed, ...(await reconcileSuspensions(projector, source, startedAt)) };
     }
 
-    await apply(page.map((entry) => entry.momentId));
+    await apply(listed.map((entry) => entry.momentId));
 
     // Advanced from what the listing already returned. Reading the last Moment
     // again cost a round trip per page and, worse, ended the walk outright when
     // that one Moment had been erased since being listed — reporting success
     // having silently skipped the rest of history.
-    const last = page[page.length - 1]!;
+    const last = listed[listed.length - 1]!;
 
     after = { occurredAt: last.occurredAt, momentId: last.momentId };
   }

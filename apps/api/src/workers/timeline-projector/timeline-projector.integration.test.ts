@@ -420,6 +420,243 @@ describe("a Moment reaching the Timeline", () => {
     assert.equal(found.length, 1);
   });
 
+  describe("a page at a time", () => {
+    /** Withhold a Moment, the way the moderation tests above do. */
+    const moderate = async (momentId: string, state: string) => {
+      await database.dataSource.query(
+        `INSERT INTO moderation_states (subject_type, subject_id, state, reason, decided_at)
+         VALUES ('moment', $1, $2, 'projector integration test', now())
+         ON CONFLICT (subject_type, subject_id) DO UPDATE SET state = $2`,
+        [momentId, state],
+      );
+    };
+
+    /**
+     * How many statements ClickHouse has finished, from its own records.
+     *
+     * Read from `system.query_log` rather than counted by a wrapper here: a
+     * counter this suite kept about itself could only ever agree with the code
+     * it is testing, where the server's log is the same evidence an operator
+     * would look at.
+     */
+    const countQueries = async (kind?: string): Promise<number> => {
+      await analytics.client.command({ query: "SYSTEM FLUSH LOGS" });
+
+      const rows = await (
+        await analytics.client.query({
+          query: `SELECT count() AS count FROM system.query_log
+                   WHERE type = 'QueryFinish'
+                     AND event_time > now() - INTERVAL 10 MINUTE
+                     ${kind === undefined ? "" : "AND query_kind = {kind: String}"}`,
+          query_params: kind === undefined ? {} : { kind },
+          format: "JSONEachRow",
+        })
+      ).json<{ count: string }>();
+
+      return Number(rows[0]?.count ?? 0);
+    };
+
+    const statementsIssued = () => countQueries();
+    const deletesIssued = () => countQueries("Delete");
+
+    /** Every column of a Moment's rows, but the one that says when it was written. */
+    const storedFor = async (momentIds: readonly string[]) => {
+      const moments = await (
+        await analytics.client.query({
+          query: `SELECT occurred_at, recorded_at, moment_id, author_user_id, occurrence_end,
+                         occurrence_precision, occurrence_offset_minutes, visibility,
+                         moderation_state, discoverable
+                    FROM timeline_moments
+                   WHERE moment_id IN {momentIds: Array(String)}
+                     AND projection_version = {version: String}
+                   ORDER BY moment_id`,
+          query_params: { momentIds: [...momentIds], version },
+          format: "JSONEachRow",
+        })
+      ).json();
+
+      const contexts = await (
+        await analytics.client.query({
+          query: `SELECT context_type, context_id, occurred_at, moment_id, author_user_id,
+                         visibility, moderation_state
+                    FROM timeline_moment_contexts
+                   WHERE moment_id IN {momentIds: Array(String)}
+                     AND projection_version = {version: String}
+                   ORDER BY moment_id, context_type, context_id`,
+          query_params: { momentIds: [...momentIds], version },
+          format: "JSONEachRow",
+        })
+      ).json();
+
+      return { moments, contexts };
+    };
+
+    it("builds exactly what projecting one at a time builds", async () => {
+      // The test the whole change rests on. Everything else here is about how
+      // few statements it takes; this is about it being the same projection.
+      //
+      // A varied set on purpose: a Moment with a place, one with an occasion,
+      // one with neither, and one moderation took away — so a divergence in the
+      // bulk read's joins or its `ARRAY(...)` ordering shows up as a difference
+      // rather than hiding behind a uniform fixture.
+      const author = await onboard();
+      const locationId = await createLocation(database.dataSource, author.userId);
+      const realWorldEventId = await createRealWorldEvent(database.dataSource, author.userId);
+
+      const plain = await record(author);
+      const placed = await recordWithin(author, { locationId });
+      const occasioned = await recordWithin(author, { realWorldEventIds: [realWorldEventId] });
+      const both = await recordWithin(author, {
+        locationId,
+        realWorldEventIds: [realWorldEventId],
+      });
+      const withheld = await record(author);
+
+      await moderate(withheld, "removed");
+
+      const everything = [plain, placed, occasioned, both, withheld];
+
+      for (const momentId of everything) {
+        await projector.project(momentId);
+      }
+
+      const oneAtATime = await storedFor(everything);
+
+      await timeline.removeBatch(everything);
+
+      const tally = await projector.projectBatch(everything);
+      const asABatch = await storedFor(everything);
+
+      assert.deepEqual(asABatch.moments, oneAtATime.moments, "the rows came out different");
+      assert.deepEqual(asABatch.contexts, oneAtATime.contexts, "the scope rows came out different");
+      assert.deepEqual(tally, { projected: 4, removed: 1 });
+    });
+
+    it("does not leave a Moment at a place it has been moved from", async () => {
+      // The batch twin of the single-Moment test below, and the one a probe
+      // reading only occurrence would fail: correcting a Location does not
+      // change when the Moment happened, so nothing about its date says the old
+      // scope row is stale.
+      const author = await onboard();
+      const first = await createLocation(database.dataSource, author.userId);
+      const second = await createLocation(database.dataSource, author.userId);
+      const momentId = await recordWithin(author, { locationId: first });
+
+      await projector.projectBatch([momentId]);
+
+      await database.dataSource.query(
+        `UPDATE moment_locations SET location_id = $2 WHERE moment_id = $1`,
+        [momentId, second],
+      );
+
+      await projector.projectBatch([momentId]);
+
+      const places = (await contextsOf(momentId))
+        .filter((row) => row.context_type === "location")
+        .map((row) => row.context_id);
+
+      assert.deepEqual(places, [second], "the Moment is still at a place it has left");
+    });
+
+    it("moves a corrected Moment and leaves nothing behind", async () => {
+      const author = await onboard();
+      const momentId = await record(author);
+
+      await projector.projectBatch([momentId]);
+
+      await database.dataSource.query(
+        `UPDATE moments SET occurrence_start = $2, occurrence_end = $2 WHERE moment_id = $1`,
+        [momentId, new Date("1969-07-20T00:00:00.000Z")],
+      );
+
+      await projector.projectBatch([momentId]);
+
+      const rows = await (
+        await analytics.client.query({
+          query: `SELECT toYear(occurred_at) AS year FROM timeline_moments
+                   WHERE moment_id = {momentId: String} AND projection_version = {version: String}`,
+          query_params: { momentId, version },
+          format: "JSONEachRow",
+        })
+      ).json<{ year: number }>();
+
+      assert.deepEqual(
+        rows.map((row) => row.year),
+        [1969],
+        "a corrected Moment is in history twice",
+      );
+    });
+
+    it("both projects and removes within one page", async () => {
+      // The withheld Moment is projected *first*, so removing it has something
+      // to remove. Without that, "it holds no rows afterwards" is true of a
+      // Moment that was never written and the test proves nothing.
+      const author = await onboard();
+      const living = await record(author);
+      const withheld = await record(author);
+
+      await projector.projectBatch([withheld]);
+
+      assert.ok((await contextsOf(withheld)).length > 0, "the fixture never reached the Timeline");
+
+      await moderate(withheld, "removed");
+
+      const tally = await projector.projectBatch([living, withheld]);
+
+      assert.deepEqual(tally, { projected: 1, removed: 1 });
+      assert.equal(await timeline.find(withheld), undefined, "a withheld Moment is still there");
+      assert.equal((await contextsOf(withheld)).length, 0, "a withheld Moment kept its scopes");
+      assert.ok((await contextsOf(living)).length > 0, "a living Moment lost its scopes");
+    });
+
+    it("counts a Moment named twice in one page once", async () => {
+      const author = await onboard();
+      const momentId = await record(author);
+
+      const tally = await projector.projectBatch([momentId, momentId]);
+
+      assert.deepEqual(tally, { projected: 1, removed: 0 });
+    });
+
+    it("writes a page in a handful of statements rather than a handful each", async () => {
+      // Counted rather than timed. A stopwatch would be flaky and would prove
+      // nothing about round trips, which are the actual claim.
+      const author = await onboard();
+      const momentIds: string[] = [];
+
+      for (let index = 0; index < 5; index += 1) {
+        momentIds.push(await record(author));
+      }
+
+      const before = await statementsIssued();
+      await projector.projectBatch(momentIds);
+      const after = await statementsIssued();
+
+      assert.ok(
+        after - before <= 8,
+        `a page of five cost ${after - before} statements, which is per-Moment work`,
+      );
+    });
+
+    it("issues no delete when it writes into a version holding nothing", async () => {
+      // What ADR-128 claimed of a fresh-version rebuild and never proved. A
+      // mutation is a second or more of ClickHouse bookkeeping, so one per page
+      // would undo most of the saving.
+      const author = await onboard();
+      const momentId = await record(author);
+      const fresh = new TimelineRepository(analytics.client, `${version}-fresh`);
+      const into = new TimelineProjector(database.dataSource, fresh, sources);
+
+      const before = await deletesIssued();
+      await into.projectBatch([momentId]);
+      const after = await deletesIssued();
+
+      await fresh.removeBatch([momentId]);
+
+      assert.equal(after, before, "a rebuild into an empty version still issued a mutation");
+    });
+  });
+
   it("records which places and occasions a Moment belongs to", async () => {
     const author = await onboard();
     const locationId = await createLocation(database.dataSource, author.userId);

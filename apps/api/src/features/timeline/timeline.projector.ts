@@ -2,7 +2,12 @@ import type { DataSource } from "typeorm";
 import { withTransaction } from "../../lib/database/transaction.js";
 import { timelineRowFor } from "./timeline-projection.js";
 import type { TimelineRepository } from "./timeline.repository.js";
-import type { TimelineSourceRepository } from "./timeline-source.repository.js";
+import type {
+  TimelineSource,
+  TimelineSourceRepository,
+} from "./timeline-source.repository.js";
+import type { TimelineScopeRef } from "./timeline.eligibility.js";
+import type { TimelineRow } from "./timeline-row.js";
 
 /**
  * Keeping the Timeline current.
@@ -119,25 +124,64 @@ export class TimelineProjector {
     }
 
     await this.timeline.project(row);
-    await this.timeline.projectContexts(row, [
-      ...(source.locationId === undefined
-        ? []
-        : [{ type: "location" as const, id: source.locationId }]),
-      ...source.realWorldEventIds.map((id) => ({ type: "real_world_event" as const, id })),
-      // The people whose Timeline this Moment belongs on: whoever recorded it,
-      // and whoever has agreed they were there. `timelines.md:176` defines a
-      // person's Timeline as exactly that union, and writing both kinds as one
-      // context makes it one contiguous range of the sort key rather than a
-      // query that reads two tables and merges them.
-      //
-      // The author's row is not redundant with `timeline_moments.author_user_id`.
-      // It is what lets one query answer "this person's history" without
-      // knowing in advance which half a row came from.
-      { type: "person" as const, id: source.authorUserId },
-      ...source.participantUserIds.map((id) => ({ type: "person" as const, id })),
-    ]);
+    await this.timeline.projectContexts(row, contextsOf(source));
 
     return "projected";
+  }
+
+  /**
+   * Project a page of Moments in a handful of statements.
+   *
+   * The rebuild's path. `project` above stays as it is, because the live worker
+   * projects one Moment because one message arrived — the shape is right for
+   * it, and wrong for a walk over an entire corpus.
+   *
+   * @param momentIds - Which Moments, in the order they should be written.
+   *   Duplicates are counted once.
+   * @returns How many were written and how many taken away, which together
+   *   always equal the number of distinct Moments asked for.
+   * @throws {Error} If either store refuses. One failing page fails the whole
+   *   call: a rebuild will come round again, and a page that half-wrote is a
+   *   page whose Moments stay at the head of the walk.
+   */
+  async projectBatch(momentIds: readonly string[]): Promise<{
+    projected: number;
+    removed: number;
+  }> {
+    const wanted = [...new Set(momentIds)];
+
+    // Before the reads, not before the writes. This becomes `projected_at`,
+    // which is the column `ReplacingMergeTree` resolves ties on — so a batch
+    // stamped after reading could outrank a live projection that had read
+    // *fresher* state, and the projection would quietly revert to older truth.
+    // `reconcileSuspensions` takes its `startedAt` for the same reason.
+    const builtAt = this.now();
+    const sources = await this.source.momentsFor(wanted);
+
+    const rows: TimelineRow[] = [];
+    const contexts = new Map<string, readonly TimelineScopeRef[]>();
+    const gone: string[] = [];
+
+    for (const momentId of wanted) {
+      const source = sources.get(momentId);
+      const row = source === undefined ? undefined : timelineRowFor(source);
+
+      if (source === undefined || row === undefined) {
+        gone.push(momentId);
+        continue;
+      }
+
+      rows.push(row);
+      contexts.set(momentId, contextsOf(source));
+    }
+
+    // Unconditional, and its identifiers come from finding the Moments gone
+    // from the authoritative store rather than from any probe — the property
+    // `remove` carries for the same reason.
+    await this.timeline.removeBatch(gone);
+    await this.timeline.projectBatch(rows, contexts, builtAt);
+
+    return { projected: rows.length, removed: gone.length };
   }
 
   /**
@@ -189,4 +233,34 @@ export class TimelineProjector {
 
     return (rows[0]?.count ?? 0) > 0;
   }
+}
+
+/**
+ * Which Timelines a Moment belongs on.
+ *
+ * Shared by the single-Moment path and the batch, so the two cannot come to
+ * disagree about what a Moment's contexts are — which would show as a rebuild
+ * quietly rewriting history it should have left alone.
+ *
+ * @param source - The Moment as the authoritative store holds it.
+ * @returns Its scopes: the place, the occasions, and the people.
+ */
+function contextsOf(source: TimelineSource): readonly TimelineScopeRef[] {
+  return [
+    ...(source.locationId === undefined
+      ? []
+      : [{ type: "location" as const, id: source.locationId }]),
+    ...source.realWorldEventIds.map((id) => ({ type: "real_world_event" as const, id })),
+    // The people whose Timeline this Moment belongs on: whoever recorded it,
+    // and whoever has agreed they were there. `timelines.md:176` defines a
+    // person's Timeline as exactly that union, and writing both kinds as one
+    // context makes it one contiguous range of the sort key rather than a
+    // query that reads two tables and merges them.
+    //
+    // The author's row is not redundant with `timeline_moments.author_user_id`.
+    // It is what lets one query answer "this person's history" without knowing
+    // in advance which half a row came from.
+    { type: "person" as const, id: source.authorUserId },
+    ...source.participantUserIds.map((id) => ({ type: "person" as const, id })),
+  ];
 }
