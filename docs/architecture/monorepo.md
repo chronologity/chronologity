@@ -868,12 +868,17 @@ apps/
         ├── index.ts
         ├── server/
         │   ├── app.ts
+        │   ├── compose.ts
         │   ├── server.ts
+        │   ├── health.ts
+        │   ├── health.routes.ts
         │   ├── register-graphql.ts
         │   └── register-plugins.ts
         ├── config/
         │   ├── app-config.ts
+        │   ├── auth-config.ts
         │   ├── clickhouse-config.ts
+        │   ├── database-config.ts
         │   ├── env.ts
         │   └── graphql-config.ts
         ├── plugins/
@@ -993,6 +998,8 @@ apps/
         │   │   ├── reaction-summary-read-model.ts
         │   │   ├── user-summary-read-model.ts
         │   │   └── moderation-visibility-read-model.ts
+        │   ├── postgres/
+        │   │   └── client.ts
         │   └── types/
         │       ├── read-model.ts
         │       └── read-model-row.ts
@@ -1047,11 +1054,15 @@ The major directory meanings are:
 - `src/moments/` owns Moment read composition.
 - `src/locations/`, `src/reactions/`, `src/users/`, and `src/moderation/` own read/composition concerns for those domains.
 - `src/read-models/clickhouse/` is the normal persistence adapter boundary.
+- `src/read-models/postgres/` is the narrow exception `feed.md` permits: current Viewer eligibility, and nothing else. Its credential should be able to `SELECT` and no more, and if it is ever needed for every Timeline item the read model is wrong rather than this boundary (ADR-137).
 - `src/loaders/` owns request-scoped batching and deduplication.
 - `src/pagination/` owns opaque, deterministic cursor infrastructure.
 - `src/caching/` owns read-side cache abstractions; the existence of this directory does not imply Redis.
 - `src/auth/` owns request identity/permission interpretation sufficient for read authorization, not session creation.
 - `src/observability/` owns read-service instrumentation.
+- `src/server/` owns application construction, process startup, and the health surface. Liveness and readiness live here rather than in a feature module, because unlike the API the aggregator has no features that own routes: the only HTTP surfaces are GraphQL and health.
+
+The GraphQL server is Mercurius, registered inside an encapsulated scope so that its error handler and the authentication hook cover the GraphQL routes alone (ADR-136). The SDL under `src/graphql/schema/` is carried into `dist` by `scripts/copy-schema.mjs`, because the compiler does not copy files it cannot compile.
 
 The aggregator deliberately does **not** own:
 

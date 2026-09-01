@@ -603,15 +603,15 @@ If credentials cannot be validated reliably, the request must not become authent
 
 It is **not** a second authentication authority.
 
-Two acceptable architectural patterns are possible:
+Two architectural patterns were possible. **Pattern A is the one built** (ADR-137).
 
-### Pattern A: Shared token verification
+### Pattern A: Shared token verification — chosen
 
-The aggregator validates the same access credential format using shared verification configuration/keys.
+The aggregator validates the same access credential format using shared verification configuration/keys, and then reads the Session row to confirm it is still open. Both checks, because revocation is written synchronously and a token is a claim made up to ten minutes ago: verifying the signature alone would stop writes at once and stop reads only when the token lapsed, and reads are the whole of what somebody signs out to stop somebody else seeing.
 
-### Pattern B: Trusted identity propagation
+### Pattern B: Trusted identity propagation — not chosen
 
-An upstream trusted boundary authenticates the request and forwards signed/internal identity context.
+An upstream trusted boundary authenticates the request and forwards signed/internal identity context. There is no such boundary, and a service that believed an identity header would believe anybody who could set one.
 
 Whichever approach is chosen must preserve:
 
@@ -1560,10 +1560,12 @@ The following questions require explicit resolution before implementation harden
 
 ## Feed Aggregator
 
-- Does the aggregator validate JWTs directly?
-- Does it need a Session-revocation lookup?
-- How are key rotations propagated?
-- How does it behave when the auth subsystem is temporarily unavailable?
+Answered by ADR-137: it validates JWTs directly, and it does perform a Session lookup on every credential-carrying request.
+
+Still open:
+
+- How are key rotations propagated? The secret is symmetric today and shared through configuration, so a rotation is a coordinated redeploy. Asymmetric signing would make it a published key instead.
+- How does it behave when PostgreSQL is unavailable? It currently refuses every credential-carrying request, which is the fail-closed direction but reads to a client like everybody being signed out at once. Readiness reports it, so traffic should already have moved.
 
 ## Audit
 

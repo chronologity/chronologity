@@ -1,0 +1,15 @@
+{
+  "extends": "@chronologity/tsconfig/node.json",
+  "_comment": [
+    "No `experimentalDecorators` here, unlike apps/api. That flag exists for TypeORM",
+    "entities, and this application declares none: it reads one table with one",
+    "parameterised query through `pg`, and owns no schema. A read service that could",
+    "declare an entity is a read service that could be asked to write one."
+  ],
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "noEmit": false
+  },
+  "include": ["src/**/*"]
+}

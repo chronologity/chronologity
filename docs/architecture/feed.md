@@ -1708,10 +1708,11 @@ The service remains read-only.
 
 ## Viewer Context
 
-- How is User identity propagated from the mobile request?
-- Does feed aggregator validate JWT directly?
-- Does a gateway validate and pass trusted identity?
-- How is anonymous context represented?
+Settled by ADR-137.
+
+The client sends the same bearer token it sends the API. The aggregator verifies it directly — signature, issuer, audience, expiry — and then reads the Session row, because revocation is immediate and a token is a claim made up to ten minutes ago. No gateway is trusted, since none exists and a service that believed an identity header would believe anybody who could set one.
+
+An anonymous context is a Viewer of its own kind rather than an authenticated one with empty fields, so eligibility code has to branch on it. A request offering no credential is anonymous; a request offering one that does not hold up is refused rather than downgraded.
 
 ## Authorization
 
@@ -1736,10 +1737,14 @@ The service remains read-only.
 
 ## GraphQL
 
+The server is Mercurius on Fastify, schema-first, with SDL under `src/graphql/schema/` (ADR-136). Depth is bounded by configuration from the start.
+
+Still open:
+
 - Exact schema naming?
 - Connections versus custom slice types?
 - Persisted queries at launch?
-- Complexity calculation strategy?
+- Complexity calculation strategy beyond depth?
 - Maximum page sizes?
 
 ## Moment Depth

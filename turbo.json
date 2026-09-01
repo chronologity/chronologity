@@ -31,9 +31,11 @@
       "env": [
         "NODE_ENV",
         "LOG_LEVEL",
+        "FEED_AGGREGATOR_*",
         "POSTGRES_*",
         "KAFKA_*",
         "CLICKHOUSE_*",
+        "TIMELINE_PROJECTION_VERSION",
         "AUTH_*",
         "SMTP_*",
         "MAILPIT_*"

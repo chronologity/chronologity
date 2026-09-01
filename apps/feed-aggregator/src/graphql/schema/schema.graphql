@@ -1,0 +1,54 @@
+"""
+Chronologity's read contract.
+
+This schema is written in product terms and never mirrors storage. Nothing in it
+names a ClickHouse column, a projection version, or a table: mobile navigates
+history, and how history is stored is this service's business rather than the
+client's.
+
+There are no mutations, and there will not be. Commands belong to the API. A
+mutation is not added here merely because GraphQL supports one.
+
+What exists so far is the Viewer. Timeline heads, slices, Moment depth, temporal
+zoom and historical jumps arrive with the phase that composes them; each is a
+read model that has to be queried before it can be typed, and a schema written
+ahead of that would be a guess mobile could start depending on.
+"""
+type Query {
+  """
+  Who this service thinks is asking.
+
+  Resolved from the request's credentials, never from anything the client
+  asserts about itself. It exists so a client can tell an expired session from
+  a quiet one: a Timeline that returned less than expected is a different
+  problem depending on the answer here.
+  """
+  viewer: Viewer!
+}
+
+"""
+The reader of a request.
+
+Anonymous is an ordinary state rather than a failure. Public history is readable
+without an account, and being anonymous is not a way around visibility,
+moderation, deletion or a Location's privacy — those rules simply find no
+relationship to draw on.
+
+A request whose credentials do not hold up is neither of these. It is refused,
+so that a client with an expired token is told to refresh rather than quietly
+shown less of somebody's history than it asked for.
+"""
+type Viewer {
+  """
+  Whether the request carried credentials that held up.
+  """
+  authenticated: Boolean!
+
+  """
+  The account reading, once there is one.
+
+  Null for an anonymous reader, and also for somebody who has signed in but has
+  not finished creating an account — an ordinary state, not an error.
+  """
+  userId: ID
+}

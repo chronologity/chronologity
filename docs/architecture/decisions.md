@@ -4598,3 +4598,95 @@ The two cover different windows. The index holds while the entry is unread; the 
 **The one message that concerns many people takes its own path.** Everything else the generator handles is one interaction between two people, and `candidateFrom` reads it into a single recipient. `MomentRecorded` cannot be read that way, so it routes before the candidate map is consulted — and the handled-event list names it explicitly, because a list derived from the map alone would have said this worker subscribes to a boundary it ignores. A guard caught exactly that.
 
 **An existing negative test had to move.** It proved the subscription list was real by watching for a Moment being recorded, which the generator ignored. It no longer does, so the negative moved to a Location being recorded — a boundary nothing here reads — and says so.
+
+---
+
+# ADR-136 — The Feed Aggregator Runs Mercurius, Inside Its Own Scope
+
+## Status
+
+Accepted.
+
+## Context
+
+`feed.md` requires the aggregator to serve GraphQL and never names a library. Its open questions ask for a complexity strategy, a persisted-query decision and a schema-naming convention, and leave all three open. `monorepo.md:858` is more specific than it looks: the canonical tree contains `server/register-graphql.ts`, `server/register-plugins.ts` and a `plugins/` directory of `*.plugin.ts` files including `cors` and `helmet`. That is the Fastify plugin idiom, written before anything chose a GraphQL server.
+
+## Decision
+
+**Mercurius, on Fastify 5, with `graphql` pinned to 16.14.2.** Mercurius peers on `graphql ^16`; so does Apollo Server 5, so the pin is not a cost of this choice. Only Yoga supports 17.
+
+**Schema-first.** SDL under `src/graphql/schema/`, resolvers attached to it, as the canonical tree's `.graphql` files already assume. `scripts/copy-schema.mjs` carries the files into `dist`, because the compiler will not.
+
+**Mercurius is registered inside an encapsulated scope, and this is load-bearing.** It calls `setErrorHandler` when it loads and is itself a `fastify-plugin`, so registering it at the root would replace the application's error handler everywhere — an unknown path would answer in the GraphQL error format instead of the envelope `packages/contracts` defines. Encapsulating it means GraphQL failures are shaped like GraphQL and everything else keeps the shape the API uses. `register-graphql.test.ts` pins both halves.
+
+**Depth is the only cost control in this phase.** `queryDepth` is configuration; field weighting and a total budget belong with the queries they weigh, and a budget defended against a two-type schema would be a number nobody could defend.
+
+**No mutations and no subscriptions.** `defineMutation` is off so the schema does not grow an empty mutation type, and the tests assert both are absent from introspection. A read service that advertised a mutation type would be inviting the first person in a hurry to add one.
+
+## Alternatives Considered
+
+Apollo Server 5, and GraphQL Yoga.
+
+## Rationale
+
+**One request lifecycle rather than two.** Apollo needs `@as-integrations/fastify` and then runs its own plugin model, context function and error formatting beside Fastify's hooks. The canonical tree's `plugins/auth.plugin.ts` and `plugins/request-context.plugin.ts` would then establish state that Apollo's context function had to go and fetch back out, and the boundary the tree draws would stop matching the code.
+
+**The error taxonomy stays Fastify's.** Mercurius routes failures through an `errorFormatter` and the request's own logger, so the sanitising rule — only errors written to be shown get shown — is written once. Apollo would need a second sanitiser in its own layer, which is a second place to get `feed.md:562` wrong.
+
+**A narrower dependency surface.** Apollo's runtime pulls in `cors`, `body-parser`, `finalhandler` and `negotiator` — an HTTP stack duplicating Fastify's — plus `@apollo/utils.usagereporting` and `@apollo/usage-reporting-protobuf`, telemetry that must be explicitly disabled. `data-storage.md:436` asks this service for least privilege and a narrow profile.
+
+**Tests keep the house shape.** Mercurius being a plugin means `app.inject({ method: "POST", url: "/graphql" })` is the same call every other suite makes, rather than Apollo's `executeOperation`, which skips the HTTP layer the test exists to prove.
+
+## Consequences
+
+Mercurius has a smaller community than Apollo, so there are fewer worked examples when something behaves oddly, and it ships `ws` and `mqemitter` for subscriptions this service does not use. If Fastify's organisation ever deprioritises it the migration is to Yoga rather than sideways.
+
+## Deliberately Not Here
+
+Persisted queries, which `feed.md:1008` says are worth considering and not required initially; and rate limiting, which belongs with abuse protection against a surface that does not exist yet.
+
+---
+
+# ADR-137 — The Aggregator Verifies the Token Itself, and Then Asks Whether the Session Is Still Open
+
+## Status
+
+Accepted. Settles the question `authentication.md:1561` and `feed.md` both leave open.
+
+## Context
+
+`authentication.md:600` offers two patterns and chooses neither: the aggregator verifies the same credential itself (A), or an upstream boundary authenticates and forwards trusted identity (B). Its open questions then ask directly whether the aggregator validates JWTs and whether it needs a Session-revocation lookup.
+
+The API answers both for itself. `auth.plugin.ts` verifies signature, issuer, audience and expiry, and then reads the Session row — two checks, both required, because revocation is written synchronously and a token is a claim made up to ten minutes ago.
+
+`feed.md:307` permits direct PostgreSQL access where it is limited and deliberate and names current Viewer eligibility as a reason; `feed.md:321` forbids ordinary Timeline reads from touching the authoritative tables at all.
+
+## Decision
+
+**Pattern A, with the Session lookup.** The aggregator verifies the token against the same secret, issuer and audience, and then reads `sessions` for `revoked_at IS NULL AND expires_at > now`, matching `authentication.policy.ts:36`.
+
+**A credential that fails is refused, never downgraded to anonymous.** No credential at all is an anonymous Viewer, which is a supported state. A credential that does not hold up is `AUTHENTICATION_FAILED`, because a client silently shown an anonymous Timeline would render somebody's history as though it had shrunk.
+
+**Every refusal is identical.** A revoked Session, an expired one, one that never existed, a forged signature and a malformed claim produce one message. The integration suite asserts the first three are indistinguishable.
+
+**PostgreSQL is reached through `pg`, not TypeORM.** One table, one parameterised query. An ORM here would mean entity classes for tables this application must never write, and a class that can be saved is one somebody can save.
+
+**`userId` comes from the `uid` claim alone.** The API falls back to a lookup when the claim is absent; whether a Viewer mid-onboarding may read anything is a question for the eligibility rules, not for token parsing, so it is left for 9A.
+
+**Authentication is a hook in the GraphQL scope, not a step in the GraphQL context function.** Mercurius rebuilds the request context inside its own error handler when a request failed before one existed, so a context function that threw would be called a second time while the first throw was being reported.
+
+## Alternatives Considered
+
+Verifying the signature alone; and Pattern B, trusting identity forwarded by a gateway.
+
+## Rationale
+
+**Signature-only would have kept PostgreSQL out of this application entirely, and that is precisely what makes it wrong.** It would mean signing out stopped writes at once and stopped reads up to ten minutes later — and reads are the whole of what somebody signs out to stop somebody else seeing.
+
+**There is no gateway to trust.** A service that believed an identity header would believe anybody who could set one, and `authorization.md:294` forbids trusting client-supplied User identifiers.
+
+**9A needs the connection regardless.** Blocks, suspension, audience and a Timeline's openness live in PostgreSQL, which ClickHouse cannot join; `timeline.eligibility.ts` already resolves them that way for the API. Adding the boundary now costs one pool and settles the question before eligibility depends on the answer.
+
+## Consequences
+
+Every authenticated read costs one indexed lookup by primary key, alongside the ClickHouse work it was going to do anyway. PostgreSQL joins ClickHouse as something readiness reports, because without it every credential-carrying request is refused — which would look to a client like everybody being signed out at once. The credential this service is issued should be able to SELECT and nothing more; enforcing that is a deployment decision, and the local stack has one role, so `testing.md:1005`'s runtime-credential test is not yet meaningful here.

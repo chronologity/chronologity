@@ -1,0 +1,175 @@
+import type { ErrorCode } from "@chronologity/contracts";
+import type {
+  ExecutionResult,
+  FormattedExecutionResult,
+  GraphQLError,
+  GraphQLFormattedError,
+} from "graphql";
+import type { MercuriusContext } from "mercurius";
+import { AggregatorError } from "../errors/aggregator-error.js";
+
+/**
+ * What a client is told when something goes wrong.
+ *
+ * The default is deliberately uninformative, and that matters more in a read
+ * service than in a command API. The things that fail here are ClickHouse
+ * queries and cursor decoding, and both describe storage in their message — a
+ * table name, a column, a projection version. `feed.md:562` says a malformed
+ * cursor must produce a semantic error rather than a decoding failure, and the
+ * general form of that rule is: only errors written to be shown get shown.
+ *
+ * Three kinds arrive here.
+ *
+ * An `AggregatorError` was written to be shown. It keeps its message and
+ * carries its stable code, and its status becomes the response's.
+ *
+ * A GraphQL error with no original error came from GraphQL itself — a syntax
+ * error, an unknown field, a document deeper than the limit. It describes the
+ * document the client sent rather than anything behind the schema, so it is
+ * safe and useful to pass through. Refusing to say "there is no such field"
+ * would make the schema undiscoverable without telling an attacker anything.
+ *
+ * Anything else is a failure nobody planned. It becomes one internal error
+ * carrying the trace identifier, and its real message stays in the logs.
+ */
+
+/** The shape Mercurius expects back. */
+export interface FormattedExecution {
+  readonly statusCode: number;
+  readonly response: FormattedExecutionResult;
+}
+
+/** What Mercurius hands the formatter: a result that definitely failed. */
+type FailedExecution = ExecutionResult & Required<Pick<ExecutionResult, "errors">>;
+
+/** Just enough of a logger to record what the client is not told. */
+interface RequestLog {
+  error(details: unknown, message: string): void;
+}
+
+/**
+ * Format an execution's errors for the client.
+ *
+ * @param execution - The result, which always carries at least one error when
+ *   this is called. Partial data may accompany them.
+ * @param context - The GraphQL context, for the trace identifier and the
+ *   request's logger.
+ * @returns The status to reply with and the response body. The status is 200
+ *   where data is present, following the GraphQL-over-HTTP convention that a
+ *   partially successful response is a successful one; otherwise it is the
+ *   status the first describable error asked for.
+ */
+export function formatErrors(
+  execution: FailedExecution,
+  context: MercuriusContext,
+): FormattedExecution {
+  // Defaulted rather than asserted. Mercurius builds a context for the error
+  // path too, but a failure early enough — before a request context existed at
+  // all — can reach here with neither field, and an error report is the last
+  // place that should throw.
+  const traceId = context.traceId ?? "unknown";
+  const log: RequestLog | undefined = context.reply?.log;
+
+  // Validation and depth failures arrive as one error wrapping many. Flattened
+  // so the client is told about each unknown field rather than only that
+  // something was wrong.
+  const flattened = execution.errors.flatMap((error) => {
+    const nested = (error.originalError as { errors?: readonly GraphQLError[] } | undefined)
+      ?.errors;
+
+    return Array.isArray(nested) ? nested : [error];
+  });
+
+  const formatted = flattened.map((error) => describe(error, traceId, log));
+
+  return {
+    statusCode:
+      execution.data === null || execution.data === undefined
+        ? // Unflattened deliberately: a validation failure's status lives on the
+          // wrapper, and the errors it wraps carry none.
+          statusFor(execution.errors)
+        : 200,
+    response: { data: execution.data ?? null, errors: [...formatted] },
+  };
+}
+
+/**
+ * Turn one error into what the client may see.
+ *
+ * @param error - The error as GraphQL produced it.
+ * @param traceId - Quoted back so a report can be found in the logs.
+ * @param log - The request's logger, where an unplanned failure's real message
+ *   is recorded. Absent when the failure happened outside a request.
+ * @returns The error to send: its own message when it was written to be shown
+ *   or came from GraphQL itself, and an opaque internal error otherwise.
+ */
+function describe(
+  error: GraphQLError,
+  traceId: string,
+  log: RequestLog | undefined,
+): GraphQLFormattedError {
+  const original = error.originalError;
+
+  if (original instanceof AggregatorError) {
+    return withCode(error, original.code, traceId);
+  }
+
+  // GraphQL's own errors carry no original: they describe the document rather
+  // than anything behind the schema.
+  if (original === undefined) {
+    return withCode(error, "VALIDATION_FAILED", traceId);
+  }
+
+  log?.error({ err: original, traceId }, "GraphQL execution failed");
+
+  return {
+    message: "An unexpected error occurred",
+    ...(error.path === undefined ? {} : { path: error.path }),
+    extensions: { code: "INTERNAL_ERROR" satisfies ErrorCode, traceId },
+  };
+}
+
+/**
+ * Keep an error's own words, and attach the stable classification.
+ *
+ * @param error - The error to send on.
+ * @param code - Its stable code, from the vocabulary shared with the API.
+ * @param traceId - Quoted back so a report can be found in the logs.
+ * @returns The formatted error.
+ */
+function withCode(error: GraphQLError, code: ErrorCode, traceId: string): GraphQLFormattedError {
+  return {
+    message: error.message,
+    ...(error.locations === undefined ? {} : { locations: error.locations }),
+    ...(error.path === undefined ? {} : { path: error.path }),
+    extensions: { code, traceId },
+  };
+}
+
+/**
+ * The status a failed execution should carry.
+ *
+ * @param errors - Every error, already flattened.
+ * @returns The status of the first error that asked for one, or 200. GraphQL
+ *   over HTTP treats a well-formed response describing a failure as a
+ *   successful exchange, so 200 is the default rather than 500; an error that
+ *   deliberately names a status — an authentication refusal, a validation
+ *   failure — overrides it, because a client's handling of those is different.
+ */
+function statusFor(errors: readonly GraphQLError[]): number {
+  for (const error of errors) {
+    const original = error.originalError;
+
+    if (original instanceof AggregatorError) {
+      return original.status;
+    }
+
+    const status = (original as { statusCode?: unknown } | undefined)?.statusCode;
+
+    if (typeof status === "number" && status >= 400 && status <= 499) {
+      return status;
+    }
+  }
+
+  return 200;
+}
