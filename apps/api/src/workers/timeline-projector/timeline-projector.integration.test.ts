@@ -439,16 +439,16 @@ describe("a Moment reaching the Timeline", () => {
      * it is testing, where the server's log is the same evidence an operator
      * would look at.
      */
-    const countQueries = async (kind?: string): Promise<number> => {
+    const countQueries = async (since: string, kind?: string): Promise<number> => {
       await analytics.client.command({ query: "SYSTEM FLUSH LOGS" });
 
       const rows = await (
         await analytics.client.query({
           query: `SELECT count() AS count FROM system.query_log
                    WHERE type = 'QueryFinish'
-                     AND event_time > now() - INTERVAL 10 MINUTE
+                     AND event_time_microseconds > {since: DateTime64(6)}
                      ${kind === undefined ? "" : "AND query_kind = {kind: String}"}`,
-          query_params: kind === undefined ? {} : { kind },
+          query_params: kind === undefined ? { since } : { since, kind },
           format: "JSONEachRow",
         })
       ).json<{ count: string }>();
@@ -456,8 +456,25 @@ describe("a Moment reaching the Timeline", () => {
       return Number(rows[0]?.count ?? 0);
     };
 
-    const statementsIssued = () => countQueries();
-    const deletesIssued = () => countQueries("Delete");
+    /**
+     * The moment to count from.
+     *
+     * Counting "statements in the last ten minutes" twice does not work: the
+     * window slides, entries age out between the two reads, and the second
+     * number can be *smaller* than the first. A fixed instant does not move.
+     */
+    const marker = async (): Promise<string> => {
+      await analytics.client.command({ query: "SYSTEM FLUSH LOGS" });
+
+      const rows = await (
+        await analytics.client.query({
+          query: `SELECT formatDateTime(now64(6), '%Y-%m-%d %H:%i:%S.%f') AS at`,
+          format: "JSONEachRow",
+        })
+      ).json<{ at: string }>();
+
+      return rows[0]!.at;
+    };
 
     /** Every column of a Moment's rows, but the one that says when it was written. */
     const storedFor = async (momentIds: readonly string[]) => {
@@ -628,14 +645,11 @@ describe("a Moment reaching the Timeline", () => {
         momentIds.push(await record(author));
       }
 
-      const before = await statementsIssued();
+      const since = await marker();
       await projector.projectBatch(momentIds);
-      const after = await statementsIssued();
+      const issued = await countQueries(since);
 
-      assert.ok(
-        after - before <= 8,
-        `a page of five cost ${after - before} statements, which is per-Moment work`,
-      );
+      assert.ok(issued <= 8, `a page of five cost ${issued} statements, which is per-Moment work`);
     });
 
     it("shows a reader one row when the same Moment is rebuilt in place", async () => {
@@ -679,13 +693,13 @@ describe("a Moment reaching the Timeline", () => {
       const fresh = new TimelineRepository(analytics.client, `${version}-fresh`);
       const into = new TimelineProjector(database.dataSource, fresh, sources);
 
-      const before = await deletesIssued();
+      const since = await marker();
       await into.projectBatch([momentId]);
-      const after = await deletesIssued();
+      const deletes = await countQueries(since, "Delete");
 
       await fresh.removeBatch([momentId]);
 
-      assert.equal(after, before, "a rebuild into an empty version still issued a mutation");
+      assert.equal(deletes, 0, "a rebuild into an empty version issued a mutation");
     });
   });
 
