@@ -607,14 +607,6 @@ describe("accounts", () => {
   });
 
   /**
-   * Wait until a backend is blocked on a lock.
-   *
-   * @param pid - The backend to watch.
-   * @returns Nothing, once it is waiting.
-   * @throws {Error} If it never blocks, which means the interleaving the test
-   *   depends on did not happen and the result would prove nothing.
-   */
-  /**
    * A promise something else decides when to resolve.
    *
    * @returns The promise, and the means to resolve it.
@@ -628,6 +620,14 @@ describe("accounts", () => {
     return { opened, open };
   }
 
+  /**
+   * Wait until a backend is blocked on a lock.
+   *
+   * @param pid - The backend to watch.
+   * @returns Nothing, once it is waiting.
+   * @throws {Error} If it never blocks, which means the interleaving the test
+   *   depends on did not happen and the result would prove nothing.
+   */
   async function waitForLock(pid: number): Promise<void> {
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const rows = await database.dataSource.query(
