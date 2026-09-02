@@ -105,9 +105,7 @@ jobs:
       # idempotent and record what they have applied, so the suites that also
       # migrate are unaffected.
       - name: Apply migrations
-        run: |
-          pnpm --filter @chronologity/api migrate
-          pnpm --filter @chronologity/api clickhouse:migrate
+        run: pnpm db:migrate
 
       - name: Integration tests
         run: pnpm test:integration
