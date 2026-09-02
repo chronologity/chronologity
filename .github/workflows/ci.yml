@@ -91,6 +91,24 @@ jobs:
       - name: Validate infrastructure
         run: pnpm infra:validate
 
+      # Before any suite runs, and explicitly rather than as a side effect.
+      #
+      # The API's own integration tests apply migrations in their setup, which
+      # is why this step never existed. The feed aggregator's cannot: it may not
+      # import the API, and the schema it reads — `sessions`, to ask whether a
+      # Session still authenticates — is the API's to create. Whichever suite
+      # turbo happened to start first therefore decided whether the other found
+      # a schema, and when the aggregator won that race the run failed on a
+      # missing relation.
+      #
+      # Both stores, because the aggregator reads both. Migrations are
+      # idempotent and record what they have applied, so the suites that also
+      # migrate are unaffected.
+      - name: Apply migrations
+        run: |
+          pnpm --filter @chronologity/api migrate
+          pnpm --filter @chronologity/api clickhouse:migrate
+
       - name: Integration tests
         run: pnpm test:integration
 

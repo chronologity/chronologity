@@ -1564,6 +1564,12 @@ Fast unit tests should run in parallel.
 
 Integration tests may parallelize only when infrastructure isolation is safe.
 
+Applying the schema is a step of its own rather than a suite's side effect. The
+API's integration tests migrate in their own setup; the aggregator's cannot,
+since it may not import the API and the schema it reads belongs to the API. CI
+therefore migrates both stores before any suite runs, so which suite starts
+first stops being a question anything depends on.
+
 ---
 
 # Flaky Tests
