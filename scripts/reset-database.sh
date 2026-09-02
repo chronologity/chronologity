@@ -122,19 +122,10 @@ bash "$ROOT/scripts/compose.sh" exec -T \
 
 echo "Recreated. Migrating."
 
-# The migration runner is compiled, so the build has to be current or this runs
-# yesterday's schema against today's empty database. Through turbo rather than
-# a filter, because the API's own build does not build the packages it imports
-# and a worktree that has never been built fails on those rather than on
-# anything to do with the schema. Cached, so the usual cost of saying so is
-# nothing — and left unsilenced, because a build that fails quietly here looks
-# exactly like a migration that did not run.
-pnpm build
-pnpm --filter @chronologity/api migrate
-
-# The projection tables, from the second runner. Separate from the relational
-# one because every statement it holds is repeatable and takes no lock, which is
-# not true of the migrations above.
-pnpm --filter @chronologity/api clickhouse:migrate
+# One definition of what migrating means, rather than a second copy of it here.
+# `migrate.sh` seeds and sources .env exactly as this script does, so sourcing
+# it twice is harmless; what matters is that a migration added to one path
+# cannot go missing from the other.
+bash "$ROOT/scripts/migrate.sh"
 
 echo "Done. '$POSTGRES_DATABASE' is empty and migrated."
