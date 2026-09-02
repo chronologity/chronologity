@@ -53258,7 +53258,7 @@
         "tags": [
           "Timeline"
         ],
-        "description": "Ordered by when Moments occurred, never by when they were recorded and never by anything resembling relevance. A Moment added today about 1969 appears in 1969.\n\nWithout a cursor this begins at the newest occurrence and walks backwards, which is where a Timeline opens.\n\n**Positions, not page numbers.** A cursor names a place in history rather than a count of rows, because history grows in the middle: a photograph uploaded today may belong to 1969 and lands between two pages you have already seen. Paging by offset would repeat one Moment and skip another every time that happened.\n\n**A cursor is opaque.** It encodes where to resume and nothing a client should read or construct. One this system did not issue is refused rather than interpreted.\n\n**Both directions cost the same.** Every page carries a cursor at each end, so going back towards the present is one request from wherever you are, not a position you had to keep.",
+        "description": "Ordered by when Moments occurred, never by when they were recorded and never by anything resembling relevance. A Moment added today about 1969 appears in 1969.\n\nWithout a cursor this begins at the newest occurrence and walks backwards, which is where a Timeline opens.\n\n**Positions, not page numbers.** A cursor names a place in history rather than a count of rows, because history grows in the middle: a photograph uploaded today may belong to 1969 and lands between two pages you have already seen. Paging by offset would repeat one Moment and skip another every time that happened.\n\n**A cursor is opaque.** It encodes where to resume and nothing a client should read or construct. One this system did not issue is refused rather than interpreted.\n\n**Both directions cost the same.** Every page carries a cursor at each end, so going back towards the present is one request from wherever you are, not a position you had to keep.\n\n**Going away.** Timeline reads move to the feed aggregator's GraphQL surface, which composes them for the client rather than returning one page at a time. This endpoint is removed once that surface is complete; nothing new should be built against it.",
         "parameters": [
           {
             "schema": {
@@ -53358,6 +53358,7 @@
             "required": false
           }
         ],
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "Default Response",
@@ -53682,7 +53683,7 @@
         "tags": [
           "Timeline"
         ],
-        "description": "The newest occurrence in your history, which is the default entry point. Not the most recently recorded Moment, and not the most anything else: a Timeline head is a position in time rather than a ranking.",
+        "description": "The newest occurrence in your history, which is the default entry point. Not the most recently recorded Moment, and not the most anything else: a Timeline head is a position in time rather than a ranking.\n\n**Going away.** Timeline reads move to the feed aggregator's GraphQL surface, which composes them for the client rather than returning one page at a time. This endpoint is removed once that surface is complete; nothing new should be built against it.",
         "parameters": [
           {
             "schema": {
@@ -53749,6 +53750,7 @@
             "required": false
           }
         ],
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "Default Response",
@@ -54011,7 +54013,7 @@
         "tags": [
           "Timeline"
         ],
-        "description": "Finds the Moment nearest an instant and returns the history either side of it, so navigation continues immediately rather than after a second request.\n\nThe instant need not be one anything happened at. Asking about a quiet decade lands on whichever Moment is closest; asking about a time before all your history lands on its beginning. A Viewer with no history gets an empty answer rather than an error.\n\n**Positions, not page numbers.** A cursor names a place in history rather than a count of rows, because history grows in the middle: a photograph uploaded today may belong to 1969 and lands between two pages you have already seen. Paging by offset would repeat one Moment and skip another every time that happened.\n\n**A cursor is opaque.** It encodes where to resume and nothing a client should read or construct. One this system did not issue is refused rather than interpreted.\n\n**Both directions cost the same.** Every page carries a cursor at each end, so going back towards the present is one request from wherever you are, not a position you had to keep.",
+        "description": "Finds the Moment nearest an instant and returns the history either side of it, so navigation continues immediately rather than after a second request.\n\nThe instant need not be one anything happened at. Asking about a quiet decade lands on whichever Moment is closest; asking about a time before all your history lands on its beginning. A Viewer with no history gets an empty answer rather than an error.\n\n**Positions, not page numbers.** A cursor names a place in history rather than a count of rows, because history grows in the middle: a photograph uploaded today may belong to 1969 and lands between two pages you have already seen. Paging by offset would repeat one Moment and skip another every time that happened.\n\n**A cursor is opaque.** It encodes where to resume and nothing a client should read or construct. One this system did not issue is refused rather than interpreted.\n\n**Both directions cost the same.** Every page carries a cursor at each end, so going back towards the present is one request from wherever you are, not a position you had to keep.\n\n**Going away.** Timeline reads move to the feed aggregator's GraphQL surface, which composes them for the client rather than returning one page at a time. This endpoint is removed once that surface is complete; nothing new should be built against it.",
         "parameters": [
           {
             "schema": {
@@ -54099,6 +54101,7 @@
             "required": false
           }
         ],
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "Default Response",
@@ -54669,7 +54672,7 @@
         "tags": [
           "Timeline"
         ],
-        "description": "Counts per year or per decade, for navigating at a scale where returning every Moment would be neither useful nor fast.\n\nSpans holding nothing are absent rather than zero: a century you recorded nothing in is not a hundred empty rows. Counts agree with what paging returns.",
+        "description": "Counts per year or per decade, for navigating at a scale where returning every Moment would be neither useful nor fast.\n\nSpans holding nothing are absent rather than zero: a century you recorded nothing in is not a hundred empty rows. Counts agree with what paging returns.\n\n**Going away.** Timeline reads move to the feed aggregator's GraphQL surface, which composes them for the client rather than returning one page at a time. This endpoint is removed once that surface is complete; nothing new should be built against it.",
         "parameters": [
           {
             "schema": {
@@ -54748,6 +54751,7 @@
             "required": true
           }
         ],
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "Default Response",
@@ -54977,7 +54981,7 @@
         "tags": [
           "Timeline"
         ],
-        "description": "Every Moment recorded at this Location that you may see. Ordered by when they occurred, never by when they were recorded and never by anything resembling relevance.\n\nWithout a cursor this begins at the newest occurrence you may see and walks backwards.\n\n**You see what you are entitled to see, and no sign of the rest.** A Location's history is written by many people, so every request resolves who you are first — whose history you have blocked or been blocked by, which restricted Moments here name you, whether you are old enough for age-restricted history — and filters on that inside the query rather than after it.\n\nConsequently two people reading the same Location see different history, counts included, and neither can tell from a page's size that anything was withheld. A Location you may see nothing in answers empty rather than refusing, because refusing would itself disclose that there is something there.\n\n**Positions, not page numbers.** A cursor names a place in history rather than a count of rows, because history grows in the middle: a photograph uploaded today may belong to 1969 and lands between two pages you have already seen. Paging by offset would repeat one Moment and skip another every time that happened.\n\n**A cursor is opaque.** It encodes where to resume and nothing a client should read or construct. One this system did not issue is refused rather than interpreted.\n\n**Both directions cost the same.** Every page carries a cursor at each end, so going back towards the present is one request from wherever you are, not a position you had to keep.",
+        "description": "Every Moment recorded at this Location that you may see. Ordered by when they occurred, never by when they were recorded and never by anything resembling relevance.\n\nWithout a cursor this begins at the newest occurrence you may see and walks backwards.\n\n**You see what you are entitled to see, and no sign of the rest.** A Location's history is written by many people, so every request resolves who you are first — whose history you have blocked or been blocked by, which restricted Moments here name you, whether you are old enough for age-restricted history — and filters on that inside the query rather than after it.\n\nConsequently two people reading the same Location see different history, counts included, and neither can tell from a page's size that anything was withheld. A Location you may see nothing in answers empty rather than refusing, because refusing would itself disclose that there is something there.\n\n**Positions, not page numbers.** A cursor names a place in history rather than a count of rows, because history grows in the middle: a photograph uploaded today may belong to 1969 and lands between two pages you have already seen. Paging by offset would repeat one Moment and skip another every time that happened.\n\n**A cursor is opaque.** It encodes where to resume and nothing a client should read or construct. One this system did not issue is refused rather than interpreted.\n\n**Both directions cost the same.** Every page carries a cursor at each end, so going back towards the present is one request from wherever you are, not a position you had to keep.\n\n**Going away.** Timeline reads move to the feed aggregator's GraphQL surface, which composes them for the client rather than returning one page at a time. This endpoint is removed once that surface is complete; nothing new should be built against it.",
         "parameters": [
           {
             "schema": {
@@ -55087,6 +55091,7 @@
             "required": true
           }
         ],
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "Default Response",
@@ -55411,7 +55416,7 @@
         "tags": [
           "Timeline"
         ],
-        "description": "The newest occurrence **you may see** here, which is where this Location's Timeline opens for you.\n\nDeliberately yours rather than the Location's. A head naming a Moment you may not open would disclose that it exists, and roughly when it happened.",
+        "description": "The newest occurrence **you may see** here, which is where this Location's Timeline opens for you.\n\nDeliberately yours rather than the Location's. A head naming a Moment you may not open would disclose that it exists, and roughly when it happened.\n\n**Going away.** Timeline reads move to the feed aggregator's GraphQL surface, which composes them for the client rather than returning one page at a time. This endpoint is removed once that surface is complete; nothing new should be built against it.",
         "parameters": [
           {
             "schema": {
@@ -55488,6 +55493,7 @@
             "required": true
           }
         ],
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "Default Response",
@@ -55795,7 +55801,7 @@
         "tags": [
           "Timeline"
         ],
-        "description": "Finds the Moment nearest an instant among those you may see here, and returns the history either side of it.\n\nThe instant need not be one anything happened at. Nearest is decided after eligibility rather than before, so a jump never lands on something you cannot open, and never reports a gap that is only a gap for you.\n\n**You see what you are entitled to see, and no sign of the rest.** A Location's history is written by many people, so every request resolves who you are first — whose history you have blocked or been blocked by, which restricted Moments here name you, whether you are old enough for age-restricted history — and filters on that inside the query rather than after it.\n\nConsequently two people reading the same Location see different history, counts included, and neither can tell from a page's size that anything was withheld. A Location you may see nothing in answers empty rather than refusing, because refusing would itself disclose that there is something there.\n\n**Positions, not page numbers.** A cursor names a place in history rather than a count of rows, because history grows in the middle: a photograph uploaded today may belong to 1969 and lands between two pages you have already seen. Paging by offset would repeat one Moment and skip another every time that happened.\n\n**A cursor is opaque.** It encodes where to resume and nothing a client should read or construct. One this system did not issue is refused rather than interpreted.\n\n**Both directions cost the same.** Every page carries a cursor at each end, so going back towards the present is one request from wherever you are, not a position you had to keep.",
+        "description": "Finds the Moment nearest an instant among those you may see here, and returns the history either side of it.\n\nThe instant need not be one anything happened at. Nearest is decided after eligibility rather than before, so a jump never lands on something you cannot open, and never reports a gap that is only a gap for you.\n\n**You see what you are entitled to see, and no sign of the rest.** A Location's history is written by many people, so every request resolves who you are first — whose history you have blocked or been blocked by, which restricted Moments here name you, whether you are old enough for age-restricted history — and filters on that inside the query rather than after it.\n\nConsequently two people reading the same Location see different history, counts included, and neither can tell from a page's size that anything was withheld. A Location you may see nothing in answers empty rather than refusing, because refusing would itself disclose that there is something there.\n\n**Positions, not page numbers.** A cursor names a place in history rather than a count of rows, because history grows in the middle: a photograph uploaded today may belong to 1969 and lands between two pages you have already seen. Paging by offset would repeat one Moment and skip another every time that happened.\n\n**A cursor is opaque.** It encodes where to resume and nothing a client should read or construct. One this system did not issue is refused rather than interpreted.\n\n**Both directions cost the same.** Every page carries a cursor at each end, so going back towards the present is one request from wherever you are, not a position you had to keep.\n\n**Going away.** Timeline reads move to the feed aggregator's GraphQL surface, which composes them for the client rather than returning one page at a time. This endpoint is removed once that surface is complete; nothing new should be built against it.",
         "parameters": [
           {
             "schema": {
@@ -55893,6 +55899,7 @@
             "required": true
           }
         ],
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "Default Response",
@@ -56463,7 +56470,7 @@
         "tags": [
           "Timeline"
         ],
-        "description": "Counts per year or per decade, over what you may see.\n\nCounts agree with what paging returns, which is the point: a bucket saying twelve where you may open four would advertise the eight. Spans holding nothing are absent rather than zero.",
+        "description": "Counts per year or per decade, over what you may see.\n\nCounts agree with what paging returns, which is the point: a bucket saying twelve where you may open four would advertise the eight. Spans holding nothing are absent rather than zero.\n\n**Going away.** Timeline reads move to the feed aggregator's GraphQL surface, which composes them for the client rather than returning one page at a time. This endpoint is removed once that surface is complete; nothing new should be built against it.",
         "parameters": [
           {
             "schema": {
@@ -56552,6 +56559,7 @@
             "required": true
           }
         ],
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "Default Response",
@@ -56781,7 +56789,7 @@
         "tags": [
           "Timeline"
         ],
-        "description": "Every Moment recorded at this real-world Event that you may see. Ordered by when they occurred, never by when they were recorded and never by anything resembling relevance.\n\nWithout a cursor this begins at the newest occurrence you may see and walks backwards.\n\n**You see what you are entitled to see, and no sign of the rest.** A real-world Event's history is written by many people, so every request resolves who you are first — whose history you have blocked or been blocked by, which restricted Moments here name you, whether you are old enough for age-restricted history — and filters on that inside the query rather than after it.\n\nConsequently two people reading the same real-world Event see different history, counts included, and neither can tell from a page's size that anything was withheld. A real-world Event you may see nothing in answers empty rather than refusing, because refusing would itself disclose that there is something there.\n\n**Positions, not page numbers.** A cursor names a place in history rather than a count of rows, because history grows in the middle: a photograph uploaded today may belong to 1969 and lands between two pages you have already seen. Paging by offset would repeat one Moment and skip another every time that happened.\n\n**A cursor is opaque.** It encodes where to resume and nothing a client should read or construct. One this system did not issue is refused rather than interpreted.\n\n**Both directions cost the same.** Every page carries a cursor at each end, so going back towards the present is one request from wherever you are, not a position you had to keep.",
+        "description": "Every Moment recorded at this real-world Event that you may see. Ordered by when they occurred, never by when they were recorded and never by anything resembling relevance.\n\nWithout a cursor this begins at the newest occurrence you may see and walks backwards.\n\n**You see what you are entitled to see, and no sign of the rest.** A real-world Event's history is written by many people, so every request resolves who you are first — whose history you have blocked or been blocked by, which restricted Moments here name you, whether you are old enough for age-restricted history — and filters on that inside the query rather than after it.\n\nConsequently two people reading the same real-world Event see different history, counts included, and neither can tell from a page's size that anything was withheld. A real-world Event you may see nothing in answers empty rather than refusing, because refusing would itself disclose that there is something there.\n\n**Positions, not page numbers.** A cursor names a place in history rather than a count of rows, because history grows in the middle: a photograph uploaded today may belong to 1969 and lands between two pages you have already seen. Paging by offset would repeat one Moment and skip another every time that happened.\n\n**A cursor is opaque.** It encodes where to resume and nothing a client should read or construct. One this system did not issue is refused rather than interpreted.\n\n**Both directions cost the same.** Every page carries a cursor at each end, so going back towards the present is one request from wherever you are, not a position you had to keep.\n\n**Going away.** Timeline reads move to the feed aggregator's GraphQL surface, which composes them for the client rather than returning one page at a time. This endpoint is removed once that surface is complete; nothing new should be built against it.",
         "parameters": [
           {
             "schema": {
@@ -56891,6 +56899,7 @@
             "required": true
           }
         ],
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "Default Response",
@@ -57215,7 +57224,7 @@
         "tags": [
           "Timeline"
         ],
-        "description": "The newest occurrence **you may see** here, which is where this real-world Event's Timeline opens for you.\n\nDeliberately yours rather than the real-world Event's. A head naming a Moment you may not open would disclose that it exists, and roughly when it happened.",
+        "description": "The newest occurrence **you may see** here, which is where this real-world Event's Timeline opens for you.\n\nDeliberately yours rather than the real-world Event's. A head naming a Moment you may not open would disclose that it exists, and roughly when it happened.\n\n**Going away.** Timeline reads move to the feed aggregator's GraphQL surface, which composes them for the client rather than returning one page at a time. This endpoint is removed once that surface is complete; nothing new should be built against it.",
         "parameters": [
           {
             "schema": {
@@ -57292,6 +57301,7 @@
             "required": true
           }
         ],
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "Default Response",
@@ -57599,7 +57609,7 @@
         "tags": [
           "Timeline"
         ],
-        "description": "Finds the Moment nearest an instant among those you may see here, and returns the history either side of it.\n\nThe instant need not be one anything happened at. Nearest is decided after eligibility rather than before, so a jump never lands on something you cannot open, and never reports a gap that is only a gap for you.\n\n**You see what you are entitled to see, and no sign of the rest.** A real-world Event's history is written by many people, so every request resolves who you are first — whose history you have blocked or been blocked by, which restricted Moments here name you, whether you are old enough for age-restricted history — and filters on that inside the query rather than after it.\n\nConsequently two people reading the same real-world Event see different history, counts included, and neither can tell from a page's size that anything was withheld. A real-world Event you may see nothing in answers empty rather than refusing, because refusing would itself disclose that there is something there.\n\n**Positions, not page numbers.** A cursor names a place in history rather than a count of rows, because history grows in the middle: a photograph uploaded today may belong to 1969 and lands between two pages you have already seen. Paging by offset would repeat one Moment and skip another every time that happened.\n\n**A cursor is opaque.** It encodes where to resume and nothing a client should read or construct. One this system did not issue is refused rather than interpreted.\n\n**Both directions cost the same.** Every page carries a cursor at each end, so going back towards the present is one request from wherever you are, not a position you had to keep.",
+        "description": "Finds the Moment nearest an instant among those you may see here, and returns the history either side of it.\n\nThe instant need not be one anything happened at. Nearest is decided after eligibility rather than before, so a jump never lands on something you cannot open, and never reports a gap that is only a gap for you.\n\n**You see what you are entitled to see, and no sign of the rest.** A real-world Event's history is written by many people, so every request resolves who you are first — whose history you have blocked or been blocked by, which restricted Moments here name you, whether you are old enough for age-restricted history — and filters on that inside the query rather than after it.\n\nConsequently two people reading the same real-world Event see different history, counts included, and neither can tell from a page's size that anything was withheld. A real-world Event you may see nothing in answers empty rather than refusing, because refusing would itself disclose that there is something there.\n\n**Positions, not page numbers.** A cursor names a place in history rather than a count of rows, because history grows in the middle: a photograph uploaded today may belong to 1969 and lands between two pages you have already seen. Paging by offset would repeat one Moment and skip another every time that happened.\n\n**A cursor is opaque.** It encodes where to resume and nothing a client should read or construct. One this system did not issue is refused rather than interpreted.\n\n**Both directions cost the same.** Every page carries a cursor at each end, so going back towards the present is one request from wherever you are, not a position you had to keep.\n\n**Going away.** Timeline reads move to the feed aggregator's GraphQL surface, which composes them for the client rather than returning one page at a time. This endpoint is removed once that surface is complete; nothing new should be built against it.",
         "parameters": [
           {
             "schema": {
@@ -57697,6 +57707,7 @@
             "required": true
           }
         ],
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "Default Response",
@@ -58267,7 +58278,7 @@
         "tags": [
           "Timeline"
         ],
-        "description": "Counts per year or per decade, over what you may see.\n\nCounts agree with what paging returns, which is the point: a bucket saying twelve where you may open four would advertise the eight. Spans holding nothing are absent rather than zero.",
+        "description": "Counts per year or per decade, over what you may see.\n\nCounts agree with what paging returns, which is the point: a bucket saying twelve where you may open four would advertise the eight. Spans holding nothing are absent rather than zero.\n\n**Going away.** Timeline reads move to the feed aggregator's GraphQL surface, which composes them for the client rather than returning one page at a time. This endpoint is removed once that surface is complete; nothing new should be built against it.",
         "parameters": [
           {
             "schema": {
@@ -58356,6 +58367,7 @@
             "required": true
           }
         ],
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "Default Response",
@@ -58585,7 +58597,7 @@
         "tags": [
           "Timeline"
         ],
-        "description": "Every Moment recorded at this person that you may see. Ordered by when they occurred, never by when they were recorded and never by anything resembling relevance.\n\nWithout a cursor this begins at the newest occurrence you may see and walks backwards.\n\n**You see what you are entitled to see, and no sign of the rest.** A person's history is written by many people, so every request resolves who you are first — whose history you have blocked or been blocked by, which restricted Moments here name you, whether you are old enough for age-restricted history — and filters on that inside the query rather than after it.\n\nConsequently two people reading the same person see different history, counts included, and neither can tell from a page's size that anything was withheld. A person you may see nothing in answers empty rather than refusing, because refusing would itself disclose that there is something there.\n\n**Positions, not page numbers.** A cursor names a place in history rather than a count of rows, because history grows in the middle: a photograph uploaded today may belong to 1969 and lands between two pages you have already seen. Paging by offset would repeat one Moment and skip another every time that happened.\n\n**A cursor is opaque.** It encodes where to resume and nothing a client should read or construct. One this system did not issue is refused rather than interpreted.\n\n**Both directions cost the same.** Every page carries a cursor at each end, so going back towards the present is one request from wherever you are, not a position you had to keep.\n\n**Their history is what they recorded together with what they agreed they were part of.** Somebody who was at an occasion but did not photograph it was still there, and a product where only the person holding the camera owns the memory would record who documented history rather than what happened.\n\n**You see only what you were already entitled to see.** Being on somebody's Timeline widens nothing: each Moment's own audience still decides, so this can never show you something you could not have opened one at a time.\n\n**A Timeline you may see nothing in answers empty rather than refusing** — as does one belonging to somebody who has turned theirs off, or blocked you, or been suspended. Refusing would itself say there is something here.",
+        "description": "Every Moment recorded at this person that you may see. Ordered by when they occurred, never by when they were recorded and never by anything resembling relevance.\n\nWithout a cursor this begins at the newest occurrence you may see and walks backwards.\n\n**You see what you are entitled to see, and no sign of the rest.** A person's history is written by many people, so every request resolves who you are first — whose history you have blocked or been blocked by, which restricted Moments here name you, whether you are old enough for age-restricted history — and filters on that inside the query rather than after it.\n\nConsequently two people reading the same person see different history, counts included, and neither can tell from a page's size that anything was withheld. A person you may see nothing in answers empty rather than refusing, because refusing would itself disclose that there is something there.\n\n**Positions, not page numbers.** A cursor names a place in history rather than a count of rows, because history grows in the middle: a photograph uploaded today may belong to 1969 and lands between two pages you have already seen. Paging by offset would repeat one Moment and skip another every time that happened.\n\n**A cursor is opaque.** It encodes where to resume and nothing a client should read or construct. One this system did not issue is refused rather than interpreted.\n\n**Both directions cost the same.** Every page carries a cursor at each end, so going back towards the present is one request from wherever you are, not a position you had to keep.\n\n**Their history is what they recorded together with what they agreed they were part of.** Somebody who was at an occasion but did not photograph it was still there, and a product where only the person holding the camera owns the memory would record who documented history rather than what happened.\n\n**You see only what you were already entitled to see.** Being on somebody's Timeline widens nothing: each Moment's own audience still decides, so this can never show you something you could not have opened one at a time.\n\n**A Timeline you may see nothing in answers empty rather than refusing** — as does one belonging to somebody who has turned theirs off, or blocked you, or been suspended. Refusing would itself say there is something here.\n\n**Going away.** Timeline reads move to the feed aggregator's GraphQL surface, which composes them for the client rather than returning one page at a time. This endpoint is removed once that surface is complete; nothing new should be built against it.",
         "parameters": [
           {
             "schema": {
@@ -58695,6 +58707,7 @@
             "required": true
           }
         ],
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "Default Response",
@@ -59019,7 +59032,7 @@
         "tags": [
           "Timeline"
         ],
-        "description": "The newest occurrence **you may see** here, which is where this person's Timeline opens for you.\n\nDeliberately yours rather than the person's. A head naming a Moment you may not open would disclose that it exists, and roughly when it happened.\n\n**Their history is what they recorded together with what they agreed they were part of.** Somebody who was at an occasion but did not photograph it was still there, and a product where only the person holding the camera owns the memory would record who documented history rather than what happened.\n\n**You see only what you were already entitled to see.** Being on somebody's Timeline widens nothing: each Moment's own audience still decides, so this can never show you something you could not have opened one at a time.\n\n**A Timeline you may see nothing in answers empty rather than refusing** — as does one belonging to somebody who has turned theirs off, or blocked you, or been suspended. Refusing would itself say there is something here.",
+        "description": "The newest occurrence **you may see** here, which is where this person's Timeline opens for you.\n\nDeliberately yours rather than the person's. A head naming a Moment you may not open would disclose that it exists, and roughly when it happened.\n\n**Their history is what they recorded together with what they agreed they were part of.** Somebody who was at an occasion but did not photograph it was still there, and a product where only the person holding the camera owns the memory would record who documented history rather than what happened.\n\n**You see only what you were already entitled to see.** Being on somebody's Timeline widens nothing: each Moment's own audience still decides, so this can never show you something you could not have opened one at a time.\n\n**A Timeline you may see nothing in answers empty rather than refusing** — as does one belonging to somebody who has turned theirs off, or blocked you, or been suspended. Refusing would itself say there is something here.\n\n**Going away.** Timeline reads move to the feed aggregator's GraphQL surface, which composes them for the client rather than returning one page at a time. This endpoint is removed once that surface is complete; nothing new should be built against it.",
         "parameters": [
           {
             "schema": {
@@ -59096,6 +59109,7 @@
             "required": true
           }
         ],
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "Default Response",
@@ -59403,7 +59417,7 @@
         "tags": [
           "Timeline"
         ],
-        "description": "Finds the Moment nearest an instant among those you may see here, and returns the history either side of it.\n\nThe instant need not be one anything happened at. Nearest is decided after eligibility rather than before, so a jump never lands on something you cannot open, and never reports a gap that is only a gap for you.\n\n**You see what you are entitled to see, and no sign of the rest.** A person's history is written by many people, so every request resolves who you are first — whose history you have blocked or been blocked by, which restricted Moments here name you, whether you are old enough for age-restricted history — and filters on that inside the query rather than after it.\n\nConsequently two people reading the same person see different history, counts included, and neither can tell from a page's size that anything was withheld. A person you may see nothing in answers empty rather than refusing, because refusing would itself disclose that there is something there.\n\n**Positions, not page numbers.** A cursor names a place in history rather than a count of rows, because history grows in the middle: a photograph uploaded today may belong to 1969 and lands between two pages you have already seen. Paging by offset would repeat one Moment and skip another every time that happened.\n\n**A cursor is opaque.** It encodes where to resume and nothing a client should read or construct. One this system did not issue is refused rather than interpreted.\n\n**Both directions cost the same.** Every page carries a cursor at each end, so going back towards the present is one request from wherever you are, not a position you had to keep.\n\n**Their history is what they recorded together with what they agreed they were part of.** Somebody who was at an occasion but did not photograph it was still there, and a product where only the person holding the camera owns the memory would record who documented history rather than what happened.\n\n**You see only what you were already entitled to see.** Being on somebody's Timeline widens nothing: each Moment's own audience still decides, so this can never show you something you could not have opened one at a time.\n\n**A Timeline you may see nothing in answers empty rather than refusing** — as does one belonging to somebody who has turned theirs off, or blocked you, or been suspended. Refusing would itself say there is something here.",
+        "description": "Finds the Moment nearest an instant among those you may see here, and returns the history either side of it.\n\nThe instant need not be one anything happened at. Nearest is decided after eligibility rather than before, so a jump never lands on something you cannot open, and never reports a gap that is only a gap for you.\n\n**You see what you are entitled to see, and no sign of the rest.** A person's history is written by many people, so every request resolves who you are first — whose history you have blocked or been blocked by, which restricted Moments here name you, whether you are old enough for age-restricted history — and filters on that inside the query rather than after it.\n\nConsequently two people reading the same person see different history, counts included, and neither can tell from a page's size that anything was withheld. A person you may see nothing in answers empty rather than refusing, because refusing would itself disclose that there is something there.\n\n**Positions, not page numbers.** A cursor names a place in history rather than a count of rows, because history grows in the middle: a photograph uploaded today may belong to 1969 and lands between two pages you have already seen. Paging by offset would repeat one Moment and skip another every time that happened.\n\n**A cursor is opaque.** It encodes where to resume and nothing a client should read or construct. One this system did not issue is refused rather than interpreted.\n\n**Both directions cost the same.** Every page carries a cursor at each end, so going back towards the present is one request from wherever you are, not a position you had to keep.\n\n**Their history is what they recorded together with what they agreed they were part of.** Somebody who was at an occasion but did not photograph it was still there, and a product where only the person holding the camera owns the memory would record who documented history rather than what happened.\n\n**You see only what you were already entitled to see.** Being on somebody's Timeline widens nothing: each Moment's own audience still decides, so this can never show you something you could not have opened one at a time.\n\n**A Timeline you may see nothing in answers empty rather than refusing** — as does one belonging to somebody who has turned theirs off, or blocked you, or been suspended. Refusing would itself say there is something here.\n\n**Going away.** Timeline reads move to the feed aggregator's GraphQL surface, which composes them for the client rather than returning one page at a time. This endpoint is removed once that surface is complete; nothing new should be built against it.",
         "parameters": [
           {
             "schema": {
@@ -59501,6 +59515,7 @@
             "required": true
           }
         ],
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "Default Response",
@@ -60071,7 +60086,7 @@
         "tags": [
           "Timeline"
         ],
-        "description": "Counts per year or per decade, over what you may see.\n\nCounts agree with what paging returns, which is the point: a bucket saying twelve where you may open four would advertise the eight. Spans holding nothing are absent rather than zero.\n\n**Their history is what they recorded together with what they agreed they were part of.** Somebody who was at an occasion but did not photograph it was still there, and a product where only the person holding the camera owns the memory would record who documented history rather than what happened.\n\n**You see only what you were already entitled to see.** Being on somebody's Timeline widens nothing: each Moment's own audience still decides, so this can never show you something you could not have opened one at a time.\n\n**A Timeline you may see nothing in answers empty rather than refusing** — as does one belonging to somebody who has turned theirs off, or blocked you, or been suspended. Refusing would itself say there is something here.",
+        "description": "Counts per year or per decade, over what you may see.\n\nCounts agree with what paging returns, which is the point: a bucket saying twelve where you may open four would advertise the eight. Spans holding nothing are absent rather than zero.\n\n**Their history is what they recorded together with what they agreed they were part of.** Somebody who was at an occasion but did not photograph it was still there, and a product where only the person holding the camera owns the memory would record who documented history rather than what happened.\n\n**You see only what you were already entitled to see.** Being on somebody's Timeline widens nothing: each Moment's own audience still decides, so this can never show you something you could not have opened one at a time.\n\n**A Timeline you may see nothing in answers empty rather than refusing** — as does one belonging to somebody who has turned theirs off, or blocked you, or been suspended. Refusing would itself say there is something here.\n\n**Going away.** Timeline reads move to the feed aggregator's GraphQL surface, which composes them for the client rather than returning one page at a time. This endpoint is removed once that surface is complete; nothing new should be built against it.",
         "parameters": [
           {
             "schema": {
@@ -60160,6 +60175,7 @@
             "required": true
           }
         ],
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "Default Response",

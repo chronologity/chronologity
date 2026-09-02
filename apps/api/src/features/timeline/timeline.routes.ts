@@ -43,8 +43,29 @@ export function timelineRoutes(timeline: TimelineService) {
   return async function register(instance: FastifyInstance): Promise<void> {
     const app = instance.withTypeProvider<ZodTypeProvider>();
 
+    // Grouped and deprecated in one place rather than sixteen. A hook for the
+    // same reason the tag uses one: a route added here later is covered by
+    // having been written, and marking fifteen of sixteen is the mistake this
+    // shape makes impossible.
+    //
+    // Deprecated rather than removed (ADR-138). Nothing consumes these — mobile
+    // arrives in Phase 11 and speaks GraphQL — but taking a working surface away
+    // before its replacement exists is the riskier move. They go in Phase 10,
+    // once the aggregator composes the same reads and it is clear what a client
+    // actually needs.
     app.addHook("onRoute", (route) => {
-      route.schema = { ...route.schema, tags: ["Timeline"] };
+      route.schema = {
+        ...route.schema,
+        tags: ["Timeline"],
+        deprecated: true,
+        description: [
+          route.schema?.description,
+          "",
+          "**Going away.** Timeline reads move to the feed aggregator's GraphQL surface, which composes them for the client rather than returning one page at a time. This endpoint is removed once that surface is complete; nothing new should be built against it.",
+        ]
+          .filter((part) => part !== undefined)
+          .join("\n"),
+      };
     });
 
     /**
