@@ -9,10 +9,10 @@ client's.
 There are no mutations, and there will not be. Commands belong to the API. A
 mutation is not added here merely because GraphQL supports one.
 
-What exists so far is the Viewer. Timeline heads, slices, Moment depth, temporal
-zoom and historical jumps arrive with the phase that composes them; each is a
-read model that has to be queried before it can be typed, and a schema written
-ahead of that would be a guess mobile could start depending on.
+The types history is described in are defined here; the queries that return them
+arrive with the phases that compose each one. A type nothing yet returns is
+still part of the contract — it is what mobile will be written against — but a
+query is not declared until something can answer it.
 """
 type Query {
   """
@@ -29,14 +29,16 @@ type Query {
 """
 The reader of a request.
 
-Anonymous is an ordinary state rather than a failure. Public history is readable
-without an account, and being anonymous is not a way around visibility,
-moderation, deletion or a Location's privacy — those rules simply find no
-relationship to draw on.
+Anonymous is an ordinary state rather than a failure: a request offering no
+credential resolves to it and is answered. It is simply a state that reads no
+history. Reading history requires an account, because a Block is between two
+accounts and somebody who could read signed out would have routed around one.
 
 A request whose credentials do not hold up is neither of these. It is refused,
 so that a client with an expired token is told to refresh rather than quietly
-shown less of somebody's history than it asked for.
+shown less of somebody's history than it asked for. A request that is signed in
+but has not finished creating an account is refused differently again, so a
+client sends that person to onboarding rather than back to signing in.
 """
 type Viewer {
   """
