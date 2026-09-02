@@ -21,7 +21,7 @@ import { SavedViewRepository } from "../../features/saved-views/saved-view.repos
 import { FollowRepository } from "../../features/social/follow.repository.js";
 import { UploadRepository } from "../../features/uploads/upload.repository.js";
 import { UserRepository } from "../../features/users/user.repository.js";
-import { TimelineEligibilityResolver } from "../../features/timeline/timeline.eligibility.js";
+import { TimelineEligibilityResolver } from "@chronologity/timeline-derivation";
 import { TimelineReadRepository } from "../../features/timeline/timeline.read.repository.js";
 import { TimelineService } from "../../features/timeline/timeline.service.js";
 import { createAnalytics } from "../../lib/clickhouse/clickhouse.js";

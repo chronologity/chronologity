@@ -7,17 +7,17 @@ import type {
   TimelineEligibility,
   TimelineEligibilityResolver,
   TimelineScopeRef,
-} from "./timeline.eligibility.js";
+} from "@chronologity/timeline-derivation";
 import { ValidationError } from "../../lib/errors/validation-error.js";
-import { narrowingFor } from "./view.js";
-import { decodeCursor, encodeCursor, type TimelinePosition } from "./timeline.cursor.js";
+import { narrowingFor } from "@chronologity/timeline-derivation";
+import { decodeCursor, encodeCursor, type TimelinePosition } from "@chronologity/timeline-derivation";
 import type {
   Direction,
   Scale,
   TimelineBucket,
   TimelineReadRepository,
 } from "./timeline.read.repository.js";
-import type { TimelineReading, TimelineRecord } from "./timeline-row.js";
+import type { TimelineReading, TimelineRecord } from "@chronologity/timeline-derivation";
 
 /**
  * Navigating history.
@@ -31,10 +31,6 @@ import type { TimelineReading, TimelineRecord } from "./timeline-row.js";
  * Until that bridge exists the author is the Viewer, the repository applies it
  * in the query, and no cursor a client supplies can widen it.
  */
-
-/** How many Moments one page may carry. */
-const DEFAULT_LIMIT = 50;
-const MAXIMUM_LIMIT = 200;
 
 /** A page of history, and where to continue from in either direction. */
 export interface TimelinePage {
@@ -112,87 +108,6 @@ export class TimelineService {
   ) {}
 
   /**
-   * A page of somebody's own history.
-   *
-   * @param viewerUserId - Whose history, which is always the Viewer's here.
-   * @param request - Where to resume, which way to walk, and how many.
-   * @returns The page, and a cursor when there may be more.
-   * @throws {ValidationError} If the page size is out of bounds or the cursor
-   *   is not one this system issued.
-   */
-  async page(
-    viewerUserId: string,
-    request: { cursor?: string | undefined; direction?: Direction | undefined; limit?: number | undefined },
-  ): Promise<TimelinePage> {
-    const limit = this.pageSize(request.limit);
-    const direction = request.direction ?? "older";
-    const from = request.cursor === undefined ? undefined : decodeCursor(request.cursor);
-
-    return this.pageFrom(viewerUserId, from, direction, limit);
-  }
-
-  /**
-   * Where a Timeline opens.
-   *
-   * @param viewerUserId - Whose history.
-   * @returns The newest occurrence, or undefined for somebody with none.
-   */
-  async head(viewerUserId: string): Promise<TimelineEntry | undefined> {
-    const viewer = await this.eligibility.resolve(viewerUserId, own(viewerUserId));
-    const record = await this.timeline.ownHead(viewer);
-
-    return record === undefined ? undefined : present(record);
-  }
-
-  /**
-   * Jump to a moment in time, and bring back what surrounds it.
-   *
-   * `timeline.md:601` asks that a jump return the closest valid context so
-   * ordinary navigation continues immediately — hence the slices either side
-   * rather than a position a client must then page from.
-   *
-   * @param viewerUserId - Whose history.
-   * @param at - The instant asked for, which need not be one anything happened.
-   * @param limit - How many Moments either side.
-   * @returns Where it landed and the history around it. A Viewer with no
-   *   history gets empty pages rather than an error: asking about a time you
-   *   recorded nothing is an ordinary thing to do.
-   * @throws {ValidationError} If the page size is out of bounds.
-   */
-  async around(viewerUserId: string, at: Date, limit?: number): Promise<TimelineAround> {
-    const size = this.pageSize(limit);
-    const viewer = await this.eligibility.resolve(viewerUserId, own(viewerUserId));
-    const nearest = await this.timeline.ownNearest(viewer, at);
-
-    if (nearest === undefined) {
-      return {
-        at: undefined,
-        older: { moments: [], cursor: undefined, reverseCursor: undefined },
-        newer: { moments: [], cursor: undefined, reverseCursor: undefined },
-      };
-    }
-
-    const position = positionOf(nearest);
-
-    return {
-      at: present(nearest),
-      older: await this.pageFrom(viewerUserId, position, "older", size),
-      newer: await this.pageFrom(viewerUserId, position, "newer", size),
-    };
-  }
-
-  /**
-   * How much history sits in each span.
-   *
-   * @param viewerUserId - Whose history.
-   * @param scale - Year or decade.
-   * @returns One bucket per span holding anything, oldest first.
-   */
-  async buckets(viewerUserId: string, scale: Scale): Promise<readonly TimelineBucket[]> {
-    return this.timeline.ownBuckets(viewerUserId, scale);
-  }
-
-  /**
    * Read a page and work out whether there may be another.
    *
    * One row beyond the page is fetched and discarded. Asking for `limit + 1`
@@ -201,7 +116,11 @@ export class TimelineService {
    * the end by receiving nothing, which is a wasted round trip on every
    * Timeline that ends.
    *
-   * @param viewerUserId - Whose history.
+   * @param viewer - Whose history, and what they may see of it. Taken already
+   *   resolved rather than resolved here, which is what stops a jump costing
+   *   three resolutions: `around` needs one for the anchor and one for each
+   *   half, and they are the same one. The scoped path has always worked this
+   *   way; this one did not.
    * @param from - Where to resume.
    * @param direction - Which way.
    * @param limit - How many the caller asked for.
@@ -211,19 +130,18 @@ export class TimelineService {
    *   context.
    */
   private async pageFrom(
-    viewerUserId: string,
+    viewer: TimelineEligibility,
     from: TimelinePosition | undefined,
     direction: Direction,
     limit: number,
     view?: ViewSpecification,
   ): Promise<TimelinePage> {
-    const viewer = await this.eligibility.resolve(viewerUserId, own(viewerUserId));
     const records = await this.timeline.ownSlice(
       viewer,
       from,
       direction,
       limit + 1,
-      view === undefined ? undefined : narrowingFor(view, CONTEXTS),
+      view === undefined ? undefined : narrowingFor(view, CONTEXTS, this.timeline.version),
     );
     const page = records.slice(0, limit);
     const first = page[0];
@@ -235,155 +153,6 @@ export class TimelineService {
         records.length > limit && last !== undefined ? encodeCursor(positionOf(last)) : undefined,
       reverseCursor: first === undefined ? undefined : encodeCursor(positionOf(first)),
     };
-  }
-
-  /**
-   * Check a requested page size.
-   *
-   * @param limit - What was asked for, if anything.
-   * @returns The size to use.
-   * @throws {ValidationError} If it is not a positive whole number within the
-   *   ceiling. Bounded because one request must not be able to ask for the
-   *   whole of somebody's history.
-   */
-  private pageSize(limit: number | undefined): number {
-    if (limit === undefined) {
-      return DEFAULT_LIMIT;
-    }
-
-    if (!Number.isInteger(limit) || limit < 1 || limit > MAXIMUM_LIMIT) {
-      throw new ValidationError(`A page holds between 1 and ${MAXIMUM_LIMIT} Moments`, {
-        field: "limit",
-      });
-    }
-
-    return limit;
-  }
-
-  /**
-   * A page of a scope's history, as this Viewer may see it.
-   *
-   * The Viewer's context is resolved first, in PostgreSQL, and handed to the
-   * ClickHouse query as parameters — so eligibility filters inside the same
-   * statement that orders and pages. A page comes back full whenever enough
-   * eligible history remains, which is what stops its size disclosing what was
-   * withheld.
-   *
-   * @param viewerUserId - Who is asking.
-   * @param scope - Which Location or real-world Event.
-   * @param request - Where to resume, which way, and how many.
-   * @returns The page, and cursors for either direction.
-   * @throws {ValidationError} If the page size is out of bounds, or the cursor
-   *   is not one this system issued.
-   */
-  async scopedPage(
-    viewerUserId: string,
-    scope: TimelineScopeRef,
-    request: {
-      cursor?: string | undefined;
-      direction?: Direction | undefined;
-      limit?: number | undefined;
-    },
-  ): Promise<TimelinePage> {
-    const limit = this.pageSize(request.limit);
-    const direction = request.direction ?? "older";
-    const from = request.cursor === undefined ? undefined : decodeCursor(request.cursor);
-    const viewer = await this.eligibility.resolve(viewerUserId, scope);
-
-    return this.scopedPageFrom(scope, viewer, from, direction, limit);
-  }
-
-  /**
-   * Where a scope's Timeline opens for this Viewer.
-   *
-   * Their newest eligible occurrence rather than the scope's. A head naming a
-   * Moment they may not see would disclose that it exists, which is what the
-   * rule exists to prevent.
-   *
-   * @param viewerUserId - Who is asking.
-   * @param scope - Which Location or real-world Event.
-   * @returns The newest eligible Moment, or undefined when they may see none.
-   */
-  async scopedHead(
-    viewerUserId: string,
-    scope: TimelineScopeRef,
-  ): Promise<TimelineEntry | undefined> {
-    const viewer = await this.eligibility.resolve(viewerUserId, scope);
-
-    if (!viewer.scopeIsOpen) {
-      return undefined;
-    }
-
-    const record = await this.timeline.scopedHead(scope, viewer);
-
-    return record === undefined ? undefined : present(record);
-  }
-
-  /**
-   * Jump to a moment in time within a scope.
-   *
-   * @param viewerUserId - Who is asking.
-   * @param scope - Which Location or real-world Event.
-   * @param at - The instant asked for, which need not be one anything happened.
-   * @param limit - How many Moments either side.
-   * @returns Where it landed and the eligible history around it.
-   * @throws {ValidationError} If the page size is out of bounds.
-   */
-  async scopedAround(
-    viewerUserId: string,
-    scope: TimelineScopeRef,
-    at: Date,
-    limit?: number,
-  ): Promise<TimelineAround> {
-    const size = this.pageSize(limit);
-    // Resolved once and reused for both halves. Resolving twice could produce
-    // two different answers, and a jump whose halves disagreed about
-    // eligibility would be worse than one that was merely slow.
-    const viewer = await this.eligibility.resolve(viewerUserId, scope);
-    const nearest = viewer.scopeIsOpen
-      ? await this.timeline.scopedNearest(scope, viewer, at)
-      : undefined;
-
-    if (nearest === undefined) {
-      return {
-        at: undefined,
-        older: { moments: [], cursor: undefined, reverseCursor: undefined },
-        newer: { moments: [], cursor: undefined, reverseCursor: undefined },
-      };
-    }
-
-    const position = positionOf(nearest);
-
-    return {
-      at: present(nearest),
-      older: await this.scopedPageFrom(scope, viewer, position, "older", size),
-      newer: await this.scopedPageFrom(scope, viewer, position, "newer", size),
-    };
-  }
-
-  /**
-   * How a scope's history is distributed, counting only what this Viewer sees.
-   *
-   * @param viewerUserId - Who is asking.
-   * @param scope - Which Location or real-world Event.
-   * @param scale - Year or decade.
-   * @returns One bucket per span holding anything eligible, oldest first.
-   */
-  async scopedBuckets(
-    viewerUserId: string,
-    scope: TimelineScopeRef,
-    scale: Scale,
-  ): Promise<readonly TimelineBucket[]> {
-    const viewer = await this.eligibility.resolve(viewerUserId, scope);
-
-    // Empty rather than refused, exactly as an empty page is. A count is a
-    // disclosure too: "this person has four hundred Moments you may not see"
-    // is the thing a closed Timeline exists to withhold.
-    if (!viewer.scopeIsOpen) {
-      return [];
-    }
-
-    return this.timeline.scopedBuckets(scope, viewer, scale);
   }
 
   /**
@@ -420,7 +189,7 @@ export class TimelineService {
       from,
       direction,
       limit + 1,
-      view === undefined ? undefined : narrowingFor(view, CONTEXTS),
+      view === undefined ? undefined : narrowingFor(view, CONTEXTS, this.timeline.version),
     );
     const page = records.slice(0, limit);
     const first = page[0];
@@ -457,7 +226,13 @@ export class TimelineService {
       view.position.cursor === undefined ? undefined : decodeCursor(view.position.cursor);
 
     if (isOwn(viewerUserId, view)) {
-      return this.pageFrom(viewerUserId, from, view.direction, view.limit, view);
+      return this.pageFrom(
+        await this.eligibility.resolve(viewerUserId, own(viewerUserId)),
+        from,
+        view.direction,
+        view.limit,
+        view,
+      );
     }
 
     const viewer = await this.eligibility.resolve(viewerUserId, view.context);
@@ -504,13 +279,13 @@ export class TimelineService {
     // and a jump whose halves disagreed about eligibility would be worse than
     // one that was merely slow.
     const viewer = await this.eligibility.resolve(viewerUserId, view.context);
-    const narrowing = narrowingFor(view, CONTEXTS);
+    const narrowing = narrowingFor(view, CONTEXTS, this.timeline.version);
 
     if (isOwn(viewerUserId, view)) {
       const nearest = await this.timeline.ownNearest(viewer, at, narrowing);
 
       return this.aroundFrom(nearest, (position, direction) =>
-        this.pageFrom(viewerUserId, position, direction, view.limit, view),
+        this.pageFrom(viewer, position, direction, view.limit, view),
       );
     }
 
@@ -541,7 +316,7 @@ export class TimelineService {
     // refusing a view that is otherwise perfectly readable — a saved view
     // failing to open is the outcome worth avoiding.
     const scale: Scale = view.zoom === "decade" ? "decade" : "year";
-    const narrowing = narrowingFor(view, CONTEXTS);
+    const narrowing = narrowingFor(view, CONTEXTS, this.timeline.version);
 
     if (isOwn(viewerUserId, view)) {
       return this.timeline.ownBuckets(viewerUserId, scale, narrowing);
@@ -589,7 +364,7 @@ export class TimelineService {
     cap: number,
     now: Date = new Date(),
   ): Promise<number> {
-    const narrowing = narrowingFor(view, CONTEXTS, now);
+    const narrowing = narrowingFor(view, CONTEXTS, this.timeline.version, now);
 
     if (isOwn(viewerUserId, view)) {
       return this.timeline.ownNewCount(viewerUserId, since, cap, narrowing);

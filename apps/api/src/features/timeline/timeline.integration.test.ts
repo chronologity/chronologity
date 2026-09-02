@@ -12,11 +12,12 @@ import { UserService } from "../users/user.service.js";
 import { migrateAnalytics } from "../../lib/clickhouse/migrations.js";
 import { MAILPIT, testAppConfig } from "../../testing/app-config.js";
 import { createLocation, createRealWorldEvent } from "../../testing/fixtures.js";
-import { TimelineEligibilityResolver } from "./timeline.eligibility.js";
+import { TimelineEligibilityResolver } from "@chronologity/timeline-derivation";
 import { TimelineReadRepository } from "./timeline.read.repository.js";
 import { TimelineRepository } from "./timeline.repository.js";
 import { TimelineService } from "./timeline.service.js";
-import { toRecord, type TimelineRow } from "./timeline-row.js";
+import { toRecord, type TimelineRow } from "@chronologity/timeline-derivation";
+import { viewSpecificationSchema } from "@chronologity/contracts";
 
 /**
  * The Timeline projection, against real ClickHouse.
@@ -343,22 +344,35 @@ describe("navigating your own history", () => {
   const idsOf = (page: { moments: readonly { momentId: string }[] }) =>
     page.moments.map((moment) => moment.momentId);
 
+  /**
+   * The specification a person's own Timeline is derived from.
+   *
+   * The engine has one entry point and it takes one of these, so a test that
+   * called anything else would be exercising a surface no route reaches. This
+   * is what `timeline.routes.ts` assembles, minus the HTTP.
+   */
+  const own = (person: string, over: Record<string, unknown> = {}) =>
+    viewSpecificationSchema.parse({ context: { type: "person", id: person }, ...over });
+
   it("opens at the newest occurrence, not the newest recording", async () => {
     // Every fixture was projected just now, in the order written above — so a
     // head that sorted by when the row was written would answer 2020 by luck.
     // Projecting the oldest last is what makes this assertion mean something.
-    const head = await service.head(author);
+    const head = await service.deriveHead(author, own(author));
 
     assert.equal(head?.momentId, history[3]!.id);
   });
 
   it("walks back through history a page at a time", async () => {
-    const first = await service.page(author, { limit: 2 });
+    const first = await service.derivePage(author, own(author, { limit: 2 }));
 
     assert.deepEqual(idsOf(first), [history[3]!.id, history[2]!.id]);
     assert.notEqual(first.cursor, undefined, "there is more history and no cursor to reach it");
 
-    const second = await service.page(author, { cursor: first.cursor, limit: 2 });
+    const second = await service.derivePage(
+      author,
+      own(author, { position: { cursor: first.cursor }, limit: 2 }),
+    );
 
     assert.deepEqual(idsOf(second), [history[1]!.id, history[0]!.id]);
     assert.equal(second.cursor, undefined, "history ended and a cursor was offered anyway");
@@ -370,21 +384,23 @@ describe("navigating your own history", () => {
     // forwards. Writing this test is what showed it — the first version
     // expected the forward page from the trailing cursor to be the page just
     // read, and it cannot be, because that cursor names the far end.
-    const back = await service.page(author, { limit: 2 });
+    const back = await service.derivePage(author, own(author, { limit: 2 }));
 
     assert.deepEqual(idsOf(back), [history[3]!.id, history[2]!.id]);
 
     // Onwards, from the trailing edge.
-    const older = await service.page(author, { cursor: back.cursor, limit: 2 });
+    const older = await service.derivePage(
+      author,
+      own(author, { position: { cursor: back.cursor }, limit: 2 }),
+    );
 
     assert.deepEqual(idsOf(older), [history[1]!.id, history[0]!.id]);
 
     // And back towards the present, from the leading edge of that same page.
-    const newer = await service.page(author, {
-      cursor: older.reverseCursor,
-      direction: "newer",
-      limit: 2,
-    });
+    const newer = await service.derivePage(
+      author,
+      own(author, { position: { cursor: older.reverseCursor }, direction: "newer", limit: 2 }),
+    );
 
     assert.deepEqual(idsOf(newer), [history[2]!.id, history[3]!.id]);
   });
@@ -394,8 +410,11 @@ describe("navigating your own history", () => {
     // sub-phase's entire authorization story is the author filter. A cursor
     // naming somebody else's position must page through your own history from
     // that point, not theirs.
-    const theirs = await service.page(somebodyElse, { limit: 4 });
-    const mine = await service.page(author, { cursor: theirs.cursor, limit: 4 });
+    const theirs = await service.derivePage(somebodyElse, own(somebodyElse, { limit: 4 }));
+    const mine = await service.derivePage(
+      author,
+      own(author, { position: { cursor: theirs.cursor }, limit: 4 }),
+    );
 
     for (const momentId of idsOf(mine)) {
       assert.ok(
@@ -406,7 +425,10 @@ describe("navigating your own history", () => {
   });
 
   it("lands on the nearest Moment to a time nothing happened at", async () => {
-    const around = await service.around(author, new Date("1975-01-01T00:00:00.000Z"), 2);
+    const around = await service.deriveAround(
+      author,
+      own(author, { position: { anchoredAt: "1975-01-01T00:00:00.000Z" }, limit: 2 }),
+    );
 
     // 1969 is six years back; 1998 is twenty-three years forward.
     assert.equal(around.at?.momentId, history[1]!.id);
@@ -415,14 +437,21 @@ describe("navigating your own history", () => {
   });
 
   it("lands on the earliest when asked about a time before all of it", async () => {
-    const around = await service.around(author, new Date("1800-01-01T00:00:00.000Z"), 2);
+    const around = await service.deriveAround(
+      author,
+      own(author, { position: { anchoredAt: "1800-01-01T00:00:00.000Z" }, limit: 2 }),
+    );
 
     assert.equal(around.at?.momentId, history[0]!.id);
     assert.deepEqual(idsOf(around.older), []);
   });
 
   it("answers a Viewer with no history rather than failing", async () => {
-    const around = await service.around(randomUUID(), new Date(), 2);
+    const stranger = randomUUID();
+    const around = await service.deriveAround(
+      stranger,
+      own(stranger, { position: { anchoredAt: new Date().toISOString() }, limit: 2 }),
+    );
 
     assert.equal(around.at, undefined);
     assert.deepEqual(idsOf(around.older), []);
@@ -433,7 +462,7 @@ describe("navigating your own history", () => {
     // The assertion that would have caught both bucketing defects. ClickHouse's
     // interval arithmetic counts from the epoch, so 1969 came back as 2139 and
     // 1901 as 1970 — correct for everything recent, wrong for most of history.
-    const buckets = await service.buckets(author, "decade");
+    const buckets = await service.deriveBuckets(author, own(author, { zoom: "decade" }));
     const decades = buckets.map((bucket) => bucket.startsAt.getUTCFullYear());
 
     assert.deepEqual(decades, [1900, 1960, 1990, 2020]);
@@ -444,7 +473,7 @@ describe("navigating your own history", () => {
   });
 
   it("counts history by year, including years before 1970", async () => {
-    const buckets = await service.buckets(author, "year");
+    const buckets = await service.deriveBuckets(author, own(author, { zoom: "year" }));
 
     assert.deepEqual(
       buckets.map((bucket) => bucket.startsAt.getUTCFullYear()),
@@ -455,8 +484,8 @@ describe("navigating your own history", () => {
   it("counts only what the pages contain", async () => {
     // The two surfaces must agree: a decade showing three Moments that pages
     // as two is a Timeline that contradicts itself.
-    const buckets = await service.buckets(author, "decade");
-    const everything = await service.page(author, { limit: 100 });
+    const buckets = await service.deriveBuckets(author, own(author, { zoom: "decade" }));
+    const everything = await service.derivePage(author, own(author, { limit: 100 }));
 
     assert.equal(
       buckets.reduce((total, bucket) => total + bucket.count, 0),
@@ -464,13 +493,21 @@ describe("navigating your own history", () => {
     );
   });
 
-  it("refuses a page size beyond the ceiling", async () => {
-    await assert.rejects(() => service.page(author, { limit: 10_000 }), /page holds/);
-    await assert.rejects(() => service.page(author, { limit: 0 }), /page holds/);
+  it("refuses a page size beyond the ceiling, before the engine sees it", () => {
+    // The bound used to live in the service and now lives in the specification
+    // schema, which is where a Saved View also passes through — so a stored
+    // view asking for ten thousand Moments is refused on the way out as well as
+    // on the way in. `view-specification.test.ts` pins the numbers; this proves
+    // the Timeline's own entry point goes through them.
+    assert.throws(() => own(author, { limit: 10_000 }));
+    assert.throws(() => own(author, { limit: 0 }));
   });
 
   it("refuses a cursor it did not issue", async () => {
-    await assert.rejects(() => service.page(author, { cursor: "not-a-cursor" }), /cursor/);
+    await assert.rejects(
+      () => service.derivePage(author, own(author, { position: { cursor: "not-a-cursor" } })),
+      /cursor/,
+    );
   });
 });
 

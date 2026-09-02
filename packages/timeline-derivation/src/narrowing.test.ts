@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { describe, it } from "vitest";
 import { viewSpecificationSchema, type ViewSpecification } from "@chronologity/contracts";
-import { narrowingFor, narrowingSql, resolveRange } from "./view.js";
+import { narrowingFor, narrowingSql, resolveRange } from "./narrowing.js";
+
+/** The projection version the subquery names. Arbitrary here; it is passed through. */
+const VERSION = "timeline-v1";
 
 /**
  * Turning a perspective on history into what the projection needs.
@@ -21,7 +24,11 @@ const view = (over: Record<string, unknown> = {}): ViewSpecification =>
 
 describe("resolveRange", () => {
   it("leaves a fixed range exactly where it was", () => {
-    const range = { kind: "fixed", from: "1969-07-16T00:00:00.000Z", to: "1969-07-24T00:00:00.000Z" } as const;
+    const range = {
+      kind: "fixed",
+      from: "1969-07-16T00:00:00.000Z",
+      to: "1969-07-24T00:00:00.000Z",
+    } as const;
 
     const first = resolveRange(range, new Date("2026-01-01T00:00:00.000Z"));
     const later = resolveRange(range, new Date("2036-01-01T00:00:00.000Z"));
@@ -54,8 +61,10 @@ describe("resolveRange", () => {
     assert.match(from?.toISOString() ?? "", /^2026-0(2|3)/);
 
     assert.equal(
-      resolveRange({ kind: "rolling", unit: "year", count: 1 }, new Date("2026-06-01T00:00:00.000Z"))
-        ?.from.toISOString(),
+      resolveRange(
+        { kind: "rolling", unit: "year", count: 1 },
+        new Date("2026-06-01T00:00:00.000Z"),
+      )?.from.toISOString(),
       "2025-06-01T00:00:00.000Z",
     );
   });
@@ -67,10 +76,10 @@ describe("resolveRange", () => {
 
 describe("narrowingFor", () => {
   const sqlOf = (specification: ViewSpecification) =>
-    narrowingSql(narrowingFor(specification, "t"));
+    narrowingSql(narrowingFor(specification, "t", VERSION));
 
   it("narrows nothing when a view asks for a whole history", () => {
-    const narrowing = narrowingFor(view(), "t");
+    const narrowing = narrowingFor(view(), "t", VERSION);
 
     assert.deepEqual(narrowing.conditions, []);
     assert.equal(narrowingSql(narrowing), "");
@@ -78,7 +87,7 @@ describe("narrowingFor", () => {
 
   describe("perspective", () => {
     it("keeps only what somebody recorded", () => {
-      const narrowing = narrowingFor(view({ perspective: "authored" }), "t");
+      const narrowing = narrowingFor(view({ perspective: "authored" }), "t", VERSION);
 
       assert.match(narrowing.conditions.join(" "), /author_user_id = \{viewPerson/);
       assert.equal(narrowing.params.viewPerson, PERSON);
@@ -88,7 +97,7 @@ describe("narrowingFor", () => {
       // The complement, and expressible without a second table: a person's
       // context rows carry the Moment's author, so anything they did not record
       // is something they agreed to.
-      const narrowing = narrowingFor(view({ perspective: "participated" }), "t");
+      const narrowing = narrowingFor(view({ perspective: "participated" }), "t", VERSION);
 
       assert.match(narrowing.conditions.join(" "), /author_user_id != \{viewPerson/);
     });
@@ -99,7 +108,7 @@ describe("narrowingFor", () => {
       // cheaper one here.
       const place = viewSpecificationSchema.parse({ context: { type: "location", id: PLACE } });
 
-      assert.deepEqual(narrowingFor(place, "t").conditions, []);
+      assert.deepEqual(narrowingFor(place, "t", VERSION).conditions, []);
     });
   });
 
@@ -127,6 +136,7 @@ describe("narrowingFor", () => {
             filters: { authorUserId: PERSON },
           }),
           "t",
+          VERSION,
         ),
       );
 
@@ -138,9 +148,14 @@ describe("narrowingFor", () => {
         view({
           perspective: "participated",
           filters: { locationId: PLACE },
-          range: { kind: "fixed", from: "1990-01-01T00:00:00.000Z", to: "1999-12-31T00:00:00.000Z" },
+          range: {
+            kind: "fixed",
+            from: "1990-01-01T00:00:00.000Z",
+            to: "1999-12-31T00:00:00.000Z",
+          },
         }),
         "t",
+        VERSION,
       );
 
       // Lens, filter, and both ends of the range.
@@ -153,8 +168,15 @@ describe("narrowingFor", () => {
       // A range is a stretch of history. A photograph added today of 1969
       // belongs in a view of the sixties and not in one of this week.
       const narrowing = narrowingFor(
-        view({ range: { kind: "fixed", from: "1960-01-01T00:00:00.000Z", to: "1969-12-31T00:00:00.000Z" } }),
+        view({
+          range: {
+            kind: "fixed",
+            from: "1960-01-01T00:00:00.000Z",
+            to: "1969-12-31T00:00:00.000Z",
+          },
+        }),
         "t",
+        VERSION,
       );
 
       assert.match(narrowing.conditions.join(" "), /occurred_at >=/);
@@ -163,15 +185,33 @@ describe("narrowingFor", () => {
     });
   });
 
+  it("binds the projection version the subquery names", () => {
+    // The condition names {version: String}, so the function that writes the
+    // condition owes the value. Until this was a parameter it was bound by
+    // whichever repository happened to call, which worked only because both of
+    // them did — and would have failed for a third caller that did not.
+    const narrowing = narrowingFor(view({ filters: { locationId: PLACE } }), "t", "timeline-v7");
+
+    assert.match(narrowing.conditions.join(" "), /\{version: String\}/);
+    assert.equal(narrowing.params.version, "timeline-v7");
+  });
+
+  it("binds nothing at all when the view narrows nothing", () => {
+    const narrowing = narrowingFor(view(), "t", VERSION);
+
+    assert.deepEqual(narrowing.conditions, []);
+    assert.deepEqual(narrowing.params, {});
+  });
+
   it("writes conditions against whatever table it is given", () => {
     // The same rule is applied to the person context and to the scope context,
     // which are different tables in different queries.
     assert.match(
-      narrowingSql(narrowingFor(view({ perspective: "authored" }), "rows")),
+      narrowingSql(narrowingFor(view({ perspective: "authored" }), "rows", VERSION)),
       /rows\.author_user_id/,
     );
     assert.match(
-      narrowingSql(narrowingFor(view({ perspective: "authored" }), "other")),
+      narrowingSql(narrowingFor(view({ perspective: "authored" }), "other", VERSION)),
       /other\.author_user_id/,
     );
   });

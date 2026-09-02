@@ -1,4 +1,5 @@
 import type { ErrorResponse } from "@chronologity/contracts";
+import { CursorError } from "@chronologity/timeline-derivation";
 import { hasZodFastifySchemaValidationErrors } from "fastify-type-provider-zod";
 import { DomainError } from "./domain-error.js";
 
@@ -12,8 +13,8 @@ export interface MappedError {
  *
  * The default is deliberately uninformative. Stack traces, SQL errors,
  * event-store errors, secrets, and raw provider failures must never reach a
- * client, so only errors that deliberately describe themselves — `DomainError`
- * and schema validation failures — contribute a message. Everything else
+ * client, so only errors that deliberately describe themselves — `DomainError`,
+ * a refused cursor, and schema validation failures — contribute a message. Everything else
  * becomes an internal error whose detail exists solely in the logs, findable
  * by trace identifier.
  *
@@ -33,6 +34,23 @@ export function toErrorResponse(error: unknown, traceId: string): MappedError {
         message: error.message,
         traceId,
         ...(error.details === undefined ? {} : { details: error.details }),
+      },
+    };
+  }
+
+  // A cursor this system did not issue. It arrives as the package's own error
+  // rather than a `DomainError`, because the package is shared with the feed
+  // aggregator and an error carrying an HTTP status would be choosing transport
+  // for both. Translated here instead, into what a malformed cursor has always
+  // been: a request that failed validation, naming the field.
+  if (error instanceof CursorError) {
+    return {
+      status: 400,
+      body: {
+        code: "VALIDATION_FAILED",
+        message: error.message,
+        traceId,
+        details: { field: "cursor" },
       },
     };
   }

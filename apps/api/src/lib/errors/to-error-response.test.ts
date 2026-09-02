@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { CursorError } from "@chronologity/timeline-derivation";
 import { describe, it } from "vitest";
 import { NotFoundError } from "./not-found-error.js";
 import { UnauthenticatedError, UnauthorizedError } from "./unauthorized-error.js";
@@ -8,6 +9,21 @@ import { ValidationError } from "./validation-error.js";
 const traceId = "trace-1";
 
 describe("toErrorResponse", () => {
+  it("refuses a cursor it did not issue as a validation failure", () => {
+    // Regression. The cursor codec moved into a shared package and started
+    // throwing the package's own error rather than a `DomainError`, which is
+    // right — a package shared with the feed aggregator must not choose an HTTP
+    // status for both — but it meant a forged cursor answered 500 until this
+    // translation existed. The integration suite caught it; this pins it.
+    const { status, body } = toErrorResponse(new CursorError("That is not a usable cursor"), "t-1");
+
+    assert.equal(status, 400);
+    assert.equal(body.code, "VALIDATION_FAILED");
+    assert.equal(body.message, "That is not a usable cursor");
+    assert.deepEqual(body.details, { field: "cursor" });
+    assert.equal(body.traceId, "t-1");
+  });
+
   it("maps a domain error to its documented status and code", () => {
     for (const [error, status, code] of [
       [new NotFoundError("gone"), 404, "NOT_FOUND"],

@@ -19,7 +19,7 @@ import { z } from "zod";
 import { ValidationError } from "../../lib/errors/validation-error.js";
 import { requireUser } from "../../plugins/auth.plugin.js";
 import { errors } from "../../server/error-responses.js";
-import type { TimelineScopeRef } from "./timeline.eligibility.js";
+import type { TimelineScopeRef } from "@chronologity/timeline-derivation";
 import type { TimelineService } from "./timeline.service.js";
 
 /**

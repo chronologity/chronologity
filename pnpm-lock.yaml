@@ -41,6 +41,9 @@ importers:
       '@chronologity/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@chronologity/timeline-derivation':
+        specifier: workspace:*
+        version: link:../../packages/timeline-derivation
       '@clickhouse/client':
         specifier: ^1.23.1
         version: 1.23.1
@@ -129,6 +132,9 @@ importers:
       '@chronologity/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@chronologity/timeline-derivation':
+        specifier: workspace:*
+        version: link:../../packages/timeline-derivation
       '@clickhouse/client':
         specifier: ^1.23.1
         version: 1.23.1
@@ -259,6 +265,25 @@ importers:
       typescript-eslint:
         specifier: ^8.67.0
         version: 8.67.0(eslint@10.8.1(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+
+  packages/timeline-derivation:
+    dependencies:
+      '@chronologity/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@chronologity/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@types/node@24.13.3)(@vitest/coverage-v8@4.1.10)(vite@8.2.1(@types/node@24.13.3)(jiti@2.7.0)(yaml@2.9.0))
 
   packages/tsconfig: {}
 

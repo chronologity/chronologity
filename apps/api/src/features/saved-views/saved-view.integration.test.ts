@@ -10,11 +10,11 @@ import { connectDatabase, createDatabase, type Database } from "../../lib/databa
 import { buildApp } from "../../server/app.js";
 import { MAILPIT, testAppConfig } from "../../testing/app-config.js";
 import { createTestAuthentication, type TestAuthentication } from "../../testing/authentication.js";
-import { TimelineEligibilityResolver } from "../timeline/timeline.eligibility.js";
+import { TimelineEligibilityResolver } from "@chronologity/timeline-derivation";
 import { TimelineReadRepository } from "../timeline/timeline.read.repository.js";
 import { TimelineRepository } from "../timeline/timeline.repository.js";
 import { TimelineService } from "../timeline/timeline.service.js";
-import type { TimelineRow } from "../timeline/timeline-row.js";
+import type { TimelineRow } from "@chronologity/timeline-derivation";
 import { UserRepository } from "../users/user.repository.js";
 import { UserService } from "../users/user.service.js";
 import { SavedViewRepository } from "./saved-view.repository.js";

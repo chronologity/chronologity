@@ -7,10 +7,10 @@ import { createAnalytics, type Analytics } from "../../lib/clickhouse/clickhouse
 import { migrateAnalytics } from "../../lib/clickhouse/migrations.js";
 import { testAppConfig } from "../../testing/app-config.js";
 import { createLocation, createUser } from "../../testing/fixtures.js";
-import { TimelineEligibilityResolver } from "./timeline.eligibility.js";
+import { TimelineEligibilityResolver } from "@chronologity/timeline-derivation";
 import { TimelineReadRepository } from "./timeline.read.repository.js";
 import { TimelineRepository } from "./timeline.repository.js";
-import type { TimelineRow } from "./timeline-row.js";
+import type { TimelineRow } from "@chronologity/timeline-derivation";
 
 /**
  * Who may see what, in a scope with many authors.

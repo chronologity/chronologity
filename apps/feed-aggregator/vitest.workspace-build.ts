@@ -26,7 +26,7 @@ import { fileURLToPath } from "node:url";
  */
 
 /** The workspace packages the aggregator resolves to compiled output. */
-const COMPILED = ["config", "contracts"];
+const COMPILED = ["config", "contracts", "timeline-derivation"];
 
 /**
  * Every module in a directory tree, named the way an import would name it.

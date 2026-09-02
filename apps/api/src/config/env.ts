@@ -1,6 +1,6 @@
 import { booleanSchema, logLevelSchema, nodeEnvSchema, portSchema } from "@chronologity/config";
 import { z } from "zod";
-import { TIMELINE_VERSION } from "../features/timeline/timeline-row.js";
+import { TIMELINE_VERSION } from "@chronologity/timeline-derivation";
 
 /**
  * The API's environment contract.

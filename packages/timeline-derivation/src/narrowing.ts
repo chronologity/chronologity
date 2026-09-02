@@ -71,12 +71,18 @@ export function resolveRange(
  *
  * @param view - The specification.
  * @param alias - The table the conditions are written against.
+ * @param version - Which projection version the subquery reads. Taken rather
+ *   than assumed: the fragment names `{version: String}`, and until this was a
+ *   parameter it was bound by whichever repository happened to call — which
+ *   worked only because both of them did, and would have failed silently for a
+ *   third caller that did not.
  * @param now - Injected so a rolling range can be pinned in a test.
  * @returns Conditions and parameters, empty when the view narrows nothing.
  */
 export function narrowingFor(
   view: ViewSpecification,
   alias: string,
+  version: string,
   now: Date = new Date(),
 ): ViewNarrowing {
   const conditions: string[] = [];
@@ -119,6 +125,9 @@ export function narrowingFor(
          )`,
       );
       params[key] = filter;
+      // Bound here rather than left to the caller. The condition above names it,
+      // so the function that writes the condition is what owes the value.
+      params.version = version;
     }
   }
 

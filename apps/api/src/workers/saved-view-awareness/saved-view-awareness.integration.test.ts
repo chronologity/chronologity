@@ -24,11 +24,11 @@ import { SavedViewRepository } from "../../features/saved-views/saved-view.repos
 import { FollowRepository } from "../../features/social/follow.repository.js";
 import { UploadRepository } from "../../features/uploads/upload.repository.js";
 import { UserRepository } from "../../features/users/user.repository.js";
-import { TimelineEligibilityResolver } from "../../features/timeline/timeline.eligibility.js";
+import { TimelineEligibilityResolver } from "@chronologity/timeline-derivation";
 import { TimelineReadRepository } from "../../features/timeline/timeline.read.repository.js";
 import { TimelineRepository } from "../../features/timeline/timeline.repository.js";
 import { TimelineService } from "../../features/timeline/timeline.service.js";
-import type { TimelineRow } from "../../features/timeline/timeline-row.js";
+import type { TimelineRow } from "@chronologity/timeline-derivation";
 import { COUNT_CEILING, recountAwareness, recountOne } from "./recount-awareness.js";
 
 /**

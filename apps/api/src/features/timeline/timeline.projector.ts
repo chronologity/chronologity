@@ -6,8 +6,8 @@ import type {
   TimelineSource,
   TimelineSourceRepository,
 } from "./timeline-source.repository.js";
-import type { TimelineScopeRef } from "./timeline.eligibility.js";
-import type { TimelineRow } from "./timeline-row.js";
+import type { TimelineScopeRef } from "@chronologity/timeline-derivation";
+import type { TimelineRow } from "@chronologity/timeline-derivation";
 
 /**
  * Keeping the Timeline current.

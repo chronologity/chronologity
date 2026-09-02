@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { describe, it } from "vitest";
-import { ValidationError } from "../../lib/errors/validation-error.js";
-import { decodeCursor, encodeCursor } from "./timeline.cursor.js";
+import { boundaryCondition, CursorError, decodeCursor, encodeCursor, orderFor } from "./cursor.js";
 
 /**
  * Cursors, exhaustively.
@@ -33,7 +32,10 @@ describe("carrying a position through a client", () => {
       momentId: randomUUID(),
     };
 
-    assert.equal(decodeCursor(encodeCursor(position)).occurredAt.getTime(), position.occurredAt.getTime());
+    assert.equal(
+      decodeCursor(encodeCursor(position)).occurredAt.getTime(),
+      position.occurredAt.getTime(),
+    );
   });
 
   it("carries history from before 1970", () => {
@@ -76,7 +78,7 @@ describe("a cursor that cannot be trusted", () => {
   const refused = (cursor: string, why: string) => {
     assert.throws(
       () => decodeCursor(cursor),
-      (error: unknown) => error instanceof ValidationError,
+      (error: unknown) => error instanceof CursorError,
       why,
     );
   };
@@ -99,7 +101,10 @@ describe("a cursor that cannot be trusted", () => {
   });
 
   it("refuses a cursor with a field missing", () => {
-    refused(Buffer.from(JSON.stringify({ v: 1, t: 0 }), "utf8").toString("base64url"), "no identifier");
+    refused(
+      Buffer.from(JSON.stringify({ v: 1, t: 0 }), "utf8").toString("base64url"),
+      "no identifier",
+    );
     refused(Buffer.from(JSON.stringify({ v: 1, m: "x" }), "utf8").toString("base64url"), "no time");
   });
 
@@ -115,13 +120,25 @@ describe("a cursor that cannot be trusted", () => {
   });
 
   it("refuses a cursor from an encoding this code does not know", () => {
-    // Told apart from malformed on purpose. A client holding a cursor from an
-    // older release should start again; that is a different instruction from
+    // Told apart from malformed on purpose. A client holding a cursor from
+    // another release should start again; that is a different instruction from
     // "you sent nonsense", and only distinguishable if the version is checked
     // before the fields are.
     const older = Buffer.from(JSON.stringify({ v: 0, t: 0, m: "x" }), "utf8").toString("base64url");
 
-    assert.throws(() => decodeCursor(older), /older Timeline/);
+    assert.throws(() => decodeCursor(older), /not one this Timeline can read/);
+  });
+
+  it("refuses a cursor from a newer encoding too, and says so neutrally", () => {
+    // Not hypothetical: during a deployment a client that reached a new
+    // instance sends its cursor to an old one. The check is inequality, so this
+    // is refused — and the wording has to be true of it, which "that cursor is
+    // from an older Timeline" was not.
+    const newer = Buffer.from(JSON.stringify({ v: 99, t: 0, m: "x" }), "utf8").toString(
+      "base64url",
+    );
+
+    assert.throws(() => decodeCursor(newer), /not one this Timeline can read/);
   });
 
   it("refuses a cursor somebody edited", () => {
@@ -132,5 +149,40 @@ describe("a cursor that cannot be trusted", () => {
     const cursor = encodeCursor({ occurredAt: summer1998, momentId: randomUUID() });
 
     refused(`${cursor}tampered`, "an altered cursor was accepted");
+  });
+});
+
+describe("resuming from a cursor", () => {
+  it("reads backwards through history for an older page, and forwards for a newer one", () => {
+    assert.match(boundaryCondition("older"), /\(occurred_at, moment_id\) < \(/);
+    assert.match(boundaryCondition("newer"), /\(occurred_at, moment_id\) > \(/);
+  });
+
+  it("compares the same tuple the cursor encodes, in the same order", () => {
+    // The half of the cursor contract that lives in SQL. `encodeCursor` writes
+    // (occurredAt, momentId); if this compared them the other way round, paging
+    // across two Moments sharing an instant would skip one and repeat the other
+    // — quietly, and only where they collide.
+    for (const direction of ["older", "newer"] as const) {
+      assert.match(boundaryCondition(direction), /\(occurred_at, moment_id\)/);
+      assert.match(
+        boundaryCondition(direction),
+        /\(\{at: DateTime64\(3\)\}, \{momentId: String\}\)/,
+      );
+    }
+  });
+
+  it("orders both columns, never occurrence alone", () => {
+    // Occurrence alone leaves two Moments at the same instant in whatever order
+    // the engine returns them, which changes between reads.
+    assert.equal(orderFor("older"), "occurred_at DESC, moment_id DESC");
+    assert.equal(orderFor("newer"), "occurred_at ASC, moment_id ASC");
+  });
+
+  it("orders the way the boundary reads", () => {
+    // A page running backwards through history has to be ordered backwards, or
+    // the first row of the page is not where the next cursor should be taken.
+    assert.ok(boundaryCondition("older").includes("<") && orderFor("older").includes("DESC"));
+    assert.ok(boundaryCondition("newer").includes(">") && orderFor("newer").includes("ASC"));
   });
 });

@@ -5,7 +5,7 @@ import {
   readVisibility,
 } from "../search/search-document.js";
 import type { TimelineSource } from "./timeline-source.repository.js";
-import type { TimelineRow } from "./timeline-row.js";
+import type { TimelineRow } from "@chronologity/timeline-derivation";
 
 /**
  * Deciding what belongs on the Timeline, and where.

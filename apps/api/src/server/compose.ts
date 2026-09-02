@@ -25,7 +25,7 @@ import { AuthorizationService } from "../features/authorization/authorization.se
 import { LocationRepository } from "../features/locations/location.repository.js";
 import { ModerationRepository } from "../features/moderation/moderation.repository.js";
 import { DiscoveryRetrieval } from "../features/discovery/discovery.retrieval.js";
-import { TimelineEligibilityResolver } from "../features/timeline/timeline.eligibility.js";
+import { TimelineEligibilityResolver } from "@chronologity/timeline-derivation";
 import { TimelineReadRepository } from "../features/timeline/timeline.read.repository.js";
 import { TimelineService } from "../features/timeline/timeline.service.js";
 import { createAnalytics } from "../lib/clickhouse/clickhouse.js";

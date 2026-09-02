@@ -6,14 +6,14 @@ import {
   type StoredContextRow,
   type StoredMomentRow,
 } from "./timeline-batch.js";
-import type { TimelineScopeRef } from "./timeline.eligibility.js";
+import type { TimelineScopeRef } from "@chronologity/timeline-derivation";
 import {
   asClickHouseDateTime,
   TIMELINE_VERSION,
   toRecord,
   type TimelineRecord,
   type TimelineRow,
-} from "./timeline-row.js";
+} from "@chronologity/timeline-derivation";
 
 /**
  * The Timeline projection, as stored.

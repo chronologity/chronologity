@@ -1,5 +1,5 @@
 import type { AppConfig } from "../config/app-config.js";
-import { TIMELINE_VERSION } from "../features/timeline/timeline-row.js";
+import { TIMELINE_VERSION } from "@chronologity/timeline-derivation";
 import { TEST_RETENTION_PERIODS } from "./retention.js";
 
 /**

@@ -1,12 +1,12 @@
-import type { DataSource } from "typeorm";
-
 /**
  * What a Viewer may be shown, resolved before any Timeline row is read.
  *
  * The Timeline lives in ClickHouse and the facts that decide eligibility live
- * in PostgreSQL, which cannot be joined. So the facts are gathered first — one
- * round trip — and handed to the ClickHouse query as parameters, where they
- * filter inside the same statement that orders and pages.
+ * in PostgreSQL, which cannot be joined. So the facts are gathered first and
+ * handed to the ClickHouse query as parameters, where they filter inside the
+ * same statement that orders and pages. Three of them are gathered together and
+ * the fourth needs the third, so it is two round trips rather than the one an
+ * earlier version of this sentence claimed.
  *
  * **Inside, not after.** `search.md:249` draws the line: filter, then order,
  * then paginate, never order, paginate, then filter. Removing withheld rows
@@ -19,6 +19,75 @@ import type { DataSource } from "typeorm";
  * lives in ClickHouse as `timeline_suspended_authors`, one row per suspended
  * account, and the query joins it there.
  */
+
+/**
+ * Somewhere to send a PostgreSQL statement.
+ *
+ * The narrowest thing this package needs, declared rather than imported so that
+ * nothing here depends on a particular client. Both applications already
+ * satisfy it: TypeORM's `DataSource` has exactly this method, and a `pg.Pool`
+ * is one small wrapper away.
+ *
+ * Read only by convention rather than by type. The statements below are the
+ * only ones this package issues and every one of them is a `SELECT`; the
+ * credential a deployment issues is what enforces it.
+ */
+export interface Queryable {
+  query<Row>(sql: string, parameters?: readonly unknown[]): Promise<Row[]>;
+}
+
+/**
+ * The condition deciding what a Viewer may be shown.
+ *
+ * The security rule, and the reason this package exists. It is used by every
+ * Timeline read that filters and by the one that reports, in both applications
+ * — and a rule written in several places eventually disagrees with itself.
+ * This is the rule that leaks when it does, so there is one copy of it.
+ *
+ * It reads four parameters the caller must supply — `viewer`, `blocked`,
+ * `audience`, `isAdult` — and there is no variant that omits them. A caller who
+ * forgot one would otherwise get somebody else's history.
+ *
+ * @param alias - The table alias the rows are read under.
+ * @returns A ClickHouse condition, true when this Viewer may be shown this row.
+ */
+export function eligible(alias: string): string {
+  return `(
+    -- Your own history, whatever state it is in. Somebody must be able to
+    -- navigate their own past even where nobody else may.
+    ${alias}.author_user_id = {viewer: String}
+    OR (
+      -- Suspended authors, read from the dimension table rather than joined
+      -- from PostgreSQL. One row per suspended account, and the newest decision
+      -- wins — so reinstating somebody restores their history without touching
+      -- a single Moment of it.
+      ${alias}.author_user_id NOT IN (
+        SELECT user_id FROM timeline_suspended_authors WHERE suspended = 1
+      )
+      AND NOT has({blocked: Array(String)}, ${alias}.author_user_id)
+      AND (
+        (
+          ${alias}.visibility = 'public'
+          AND ${alias}.moderation_state != 'restricted_to_authorized_audience'
+        )
+        OR has({audience: Array(String)}, ${alias}.moment_id)
+      )
+      AND (${alias}.moderation_state != 'age_restricted' OR {isAdult: UInt8} = 1)
+      -- Hidden from everybody but its author while it stands. The moderation
+      -- policy says so of this state and of removal; removal never reaches
+      -- ClickHouse, because a removed Moment is refused projection. This one
+      -- does reach it, which is what made its absence here a leak rather than a
+      -- redundancy: a public Moment taken down pending a decision went on being
+      -- shown to strangers at the place it happened.
+      --
+      -- Outside the visibility branch above rather than inside it. That branch
+      -- is satisfied either by being public or by naming the Viewer, so a rule
+      -- written inside it would withhold a public Moment and show a restricted
+      -- one to the very person it named.
+      AND ${alias}.moderation_state != 'temporarily_unavailable'
+    )
+  )`;
+}
 
 /** What a Viewer's context comes to. */
 export interface TimelineEligibility {
@@ -93,11 +162,14 @@ export class TimelineEligibilityResolver {
   /**
    * Build the resolver.
    *
-   * @param dataSource - PostgreSQL. Read only; nothing here writes.
+   * @param dataSource - Somewhere to send PostgreSQL. Read only; nothing here
+   *   writes. Typed as the narrowest thing that works so this package depends
+   *   on no particular client: the API hands it a TypeORM `DataSource`, the feed
+   *   aggregator a wrapper over its `pg` pool, and both already satisfy it.
    * @param adultAgeYears - The age at which age-restricted history opens.
    */
   constructor(
-    private readonly dataSource: DataSource,
+    private readonly dataSource: Queryable,
     private readonly adultAgeYears: number = 18,
   ) {}
 
@@ -200,10 +272,7 @@ export class TimelineEligibilityResolver {
    * @returns Their identifiers. Bounded by the scope rather than by how many
    *   people have ever named this Viewer.
    */
-  private async audienceWithin(
-    viewerUserId: string,
-    scope: TimelineScopeRef,
-  ): Promise<string[]> {
+  private async audienceWithin(viewerUserId: string, scope: TimelineScopeRef): Promise<string[]> {
     // Three shapes rather than one query with a branch, because the join
     // differs. The predicate is identical, which is what matters: a rule
     // written twice eventually disagrees with itself, and a join written three

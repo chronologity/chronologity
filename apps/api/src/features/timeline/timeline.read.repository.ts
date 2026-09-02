@@ -1,12 +1,17 @@
 import type { ClickHouseClient } from "@clickhouse/client";
-import { narrowingSql, type ViewNarrowing } from "./view.js";
 import {
   asClickHouseDateTime,
+  boundaryCondition,
+  eligible,
+  narrowingSql,
+  orderFor,
   TIMELINE_VERSION,
+  type TimelineEligibility,
+  type TimelinePosition,
   type TimelineReading,
-} from "./timeline-row.js";
-import type { TimelinePosition } from "./timeline.cursor.js";
-import type { TimelineEligibility, TimelineScopeRef } from "./timeline.eligibility.js";
+  type TimelineScopeRef,
+  type ViewNarrowing,
+} from "@chronologity/timeline-derivation";
 
 /**
  * Reading history in the order it happened.
@@ -100,58 +105,6 @@ function withMoments(chosen: string, order: string): string {
 const NOTHING: ViewNarrowing = { conditions: [], params: {} };
 
 /**
- * The condition deciding what a Viewer may be shown.
- *
- * One fragment, used by every read that filters and by the one that reports.
- * A rule written in several places eventually disagrees with itself, and this
- * is the rule that leaks when it does.
- *
- * It reads four parameters the caller must supply — `viewer`, `blocked`,
- * `audience`, `isAdult` — and there is no variant that omits them. A caller who
- * forgot one would otherwise get somebody else's history.
- *
- * @param alias - The table alias the rows are read under.
- * @returns A SQL condition, true when this Viewer may be shown this row.
- */
-function eligible(alias: string): string {
-  return `(
-    -- Your own history, whatever state it is in. Somebody must be able to
-    -- navigate their own past even where nobody else may.
-    ${alias}.author_user_id = {viewer: String}
-    OR (
-      -- Suspended authors, read from the dimension table rather than joined
-      -- from PostgreSQL. One row per suspended account, and the newest decision
-      -- wins — so reinstating somebody restores their history without touching
-      -- a single Moment of it.
-      ${alias}.author_user_id NOT IN (
-        SELECT user_id FROM timeline_suspended_authors WHERE suspended = 1
-      )
-      AND NOT has({blocked: Array(String)}, ${alias}.author_user_id)
-      AND (
-        (
-          ${alias}.visibility = 'public'
-          AND ${alias}.moderation_state != 'restricted_to_authorized_audience'
-        )
-        OR has({audience: Array(String)}, ${alias}.moment_id)
-      )
-      AND (${alias}.moderation_state != 'age_restricted' OR {isAdult: UInt8} = 1)
-      -- Hidden from everybody but its author while it stands. The moderation
-      -- policy says so of this state and of removal; removal never reaches
-      -- ClickHouse, because a removed Moment is refused projection. This one
-      -- does reach it, which is what made its absence here a leak rather than a
-      -- redundancy: a public Moment taken down pending a decision went on being
-      -- shown to strangers at the place it happened.
-      --
-      -- Outside the visibility branch above rather than inside it. That branch
-      -- is satisfied either by being public or by naming the Viewer, so a rule
-      -- written inside it would withhold a public Moment and show a restricted
-      -- one to the very person it named.
-      AND ${alias}.moderation_state != 'temporarily_unavailable'
-    )
-  )`;
-}
-
-/**
  * Reads the Timeline projection, always filtered to one author.
  */
 export class TimelineReadRepository {
@@ -165,7 +118,7 @@ export class TimelineReadRepository {
    */
   constructor(
     private readonly client: ClickHouseClient,
-    private readonly version: string = TIMELINE_VERSION,
+    readonly version: string = TIMELINE_VERSION,
   ) {}
 
   /**
@@ -214,14 +167,8 @@ export class TimelineReadRepository {
     limit: number,
     narrowing: ViewNarrowing = NOTHING,
   ): Promise<TimelineReading[]> {
-    const older = direction === "older";
-    const boundary =
-      from === undefined
-        ? ""
-        : older
-          ? `AND (occurred_at, moment_id) < ({at: DateTime64(3)}, {momentId: String})`
-          : `AND (occurred_at, moment_id) > ({at: DateTime64(3)}, {momentId: String})`;
-    const order = `occurred_at ${older ? "DESC" : "ASC"}, moment_id ${older ? "DESC" : "ASC"}`;
+    const boundary = from === undefined ? "" : boundaryCondition(direction);
+    const order = orderFor(direction);
 
     const result = await this.client.query({
       query: withMoments(
@@ -235,7 +182,7 @@ export class TimelineReadRepository {
             ${boundary}
           ORDER BY ${order}
           LIMIT {limit: UInt32}`,
-        `moment.occurred_at ${older ? "DESC" : "ASC"}, moment.moment_id ${older ? "DESC" : "ASC"}`,
+        orderFor(direction, "moment"),
       ),
       query_params: {
         version: this.version,
@@ -376,15 +323,8 @@ export class TimelineReadRepository {
     limit: number,
     narrowing: ViewNarrowing = NOTHING,
   ): Promise<TimelineReading[]> {
-    const older = direction === "older";
-    const boundary =
-      from === undefined
-        ? ""
-        : older
-          ? `AND (occurred_at, moment_id) < ({at: DateTime64(3)}, {momentId: String})`
-          : `AND (occurred_at, moment_id) > ({at: DateTime64(3)}, {momentId: String})`;
-
-    const order = `occurred_at ${older ? "DESC" : "ASC"}, moment_id ${older ? "DESC" : "ASC"}`;
+    const boundary = from === undefined ? "" : boundaryCondition(direction);
+    const order = orderFor(direction);
 
     const result = await this.client.query({
       query: withMoments(
@@ -398,7 +338,7 @@ export class TimelineReadRepository {
             ${boundary}
           ORDER BY ${order}
           LIMIT {limit: UInt32}`,
-        `moment.${older ? "occurred_at DESC" : "occurred_at ASC"}, moment.moment_id ${older ? "DESC" : "ASC"}`,
+        orderFor(direction, "moment"),
       ),
       query_params: {
         version: this.version,

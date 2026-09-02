@@ -13,11 +13,11 @@ import { createTestAuthentication, type TestAuthentication } from "../../testing
 import { createLocation } from "../../testing/fixtures.js";
 import { UserRepository } from "../users/user.repository.js";
 import { UserService } from "../users/user.service.js";
-import { TimelineEligibilityResolver } from "./timeline.eligibility.js";
+import { TimelineEligibilityResolver } from "@chronologity/timeline-derivation";
 import { TimelineReadRepository } from "./timeline.read.repository.js";
 import { TimelineRepository } from "./timeline.repository.js";
 import { TimelineService } from "./timeline.service.js";
-import type { TimelineRow } from "./timeline-row.js";
+import type { TimelineRow } from "@chronologity/timeline-derivation";
 
 /**
  * Counting what a view has gained since somebody last looked.
