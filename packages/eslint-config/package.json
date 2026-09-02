@@ -1,0 +1,28 @@
+{
+  "name": "@chronologity/eslint-config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared ESLint configuration for Chronologity.",
+  "license": "UNLICENSED",
+  "files": [
+    "index.js"
+  ],
+  "exports": {
+    ".": "./index.js"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
+  },
+  "dependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint-plugin-jsdoc": "^64.1.0",
+    "globals": "^17.9.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.67.0"
+  },
+  "peerDependencies": {
+    "eslint": "^10.0.1"
+  }
+}

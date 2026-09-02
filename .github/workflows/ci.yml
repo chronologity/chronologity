@@ -1,0 +1,105 @@
+name: CI
+
+# Where the test suite is decided.
+#
+# Integration tests run here rather than on a developer's machine, and that is
+# a deliberate reversal. Running the full stack locally means PostgreSQL,
+# Kafka, ClickHouse, object storage and a mail sink competing with the editor
+# and the tests themselves; the roadmap adds four more workers, a second
+# application, and eventually a projector on top of that. A laptop runs out
+# first, and when it does the failures look like code failures — as they did
+# when Docker exhausted its disk and half the suite reported as failed or
+# skipped.
+#
+# A run here starts from nothing every time, which also removes state
+# accumulating between runs as a category of problem.
+#
+# Verification, not deployment. Where Chronologity eventually deploys is an
+# open question the roadmap leaves to the production-infrastructure phase;
+# where its tests run should not wait on that answer.
+
+on:
+  push:
+    branches: [main, development]
+  pull_request:
+
+# A superseded run proves nothing about the commit that replaced it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Before setup-node, which needs pnpm present to resolve its cache.
+      - name: Enable corepack
+        run: corepack enable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # Media checking opens uploaded files with a decoder. It is a system
+      # dependency rather than a bundled package (ADR-086): it is pointed at
+      # files strangers upload, so it should be a version the operating system
+      # keeps patched.
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Narrowest and fastest first, so an obvious failure reports in a minute
+      # rather than after the infrastructure has finished starting.
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+
+      # After the build, since it runs the compiled generator. Needs no
+      # infrastructure: the document describes routes, and routes do not depend
+      # on anybody's credentials.
+      - name: OpenAPI document is current
+        run: pnpm --filter @chronologity/api spec:check
+
+      - name: Unit tests
+        run: pnpm test
+
+      # The same compose file used locally, so there is one definition of what
+      # the stack is. `--wait` blocks until every healthcheck passes, so a test
+      # failing here is a real failure rather than a service that had not
+      # finished starting. The script seeds .env from .env.example, whose
+      # defaults match the compose file.
+      - name: Start infrastructure
+        run: pnpm infra:up
+
+      # Proves the services are not merely running but actually working — a
+      # real write and read against each one, including a presigned upload.
+      - name: Validate infrastructure
+        run: pnpm infra:validate
+
+      - name: Integration tests
+        run: pnpm test:integration
+
+      # Only on failure: a passing run's logs are noise, and a failing one is
+      # usually a service that refused a connection for a reason it recorded.
+      - name: Infrastructure logs
+        if: failure()
+        run: bash scripts/compose.sh ps && bash scripts/compose.sh logs --tail 200
+
+      - name: Stop infrastructure
+        if: always()
+        run: pnpm infra:down

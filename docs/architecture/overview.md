@@ -43,11 +43,12 @@ API (Fastify)          Feed Aggregator
        │                      │
 authoritative writes      derived reads
        ▼                      ▼
-EventStoreDB              ClickHouse
+   PostgreSQL             ClickHouse
        │                      ▲
        └──── projections ─────┘
 
-Postgres supports relational and operational API concerns where required.
+PostgreSQL holds authoritative state for every feature. ClickHouse holds
+read models derived from it, and never the reverse.
 ```
 
 The Gatsby website is a separate, predominantly static application and is not part of the primary Timeline interaction path.
@@ -104,9 +105,9 @@ Significance is derived metadata used to understand and navigate history; it mus
 
 ### Authoritative State
 
-`apps/api` owns authoritative domain decisions: command processing, domain invariants, authorization, event-sourced aggregate behavior where appropriate, canonical mutations, workflows, and moderation decisions.
+`apps/api` owns authoritative domain decisions: domain invariants, authorization, canonical mutations, and moderation decisions.
 
-EventStoreDB holds authoritative event history for event-sourced domains. Postgres supports relational and operational state where appropriate. A successful write does not depend on ClickHouse having caught up.
+PostgreSQL holds authoritative state for every feature (ADR-092). A successful write does not depend on ClickHouse having caught up.
 
 ### Derived State
 
@@ -121,13 +122,13 @@ The API is feature-oriented rather than controller/service-oriented:
 ```text
 routes
   ↓
-commands / queries
+services
   ↓
-handlers
+policies decide the rules
   ↓
-aggregates / domain rules
+repositories write, conditionally
   ↓
-authoritative persistence
+PostgreSQL, with the outbox message in the same transaction
 ```
 
 It must not absorb every high-volume multidimensional Timeline read merely because it owns the underlying facts.
@@ -138,7 +139,7 @@ It must not absorb every high-volume multidimensional Timeline read merely becau
 
 It owns Timeline heads and slices, bidirectional chronological pagination, horizontal adjacency, Moment depth composition, temporal zoom, historical jumps, context around a Moment or temporal position, supported scoped Timeline views, batching, N+1 prevention, neighboring-context prefetching, request-aware visibility filtering, and surfacing projected causality/significance data.
 
-It consumes ClickHouse read models; it does not own the projections that create them. It must not own authoritative commands, aggregates, domain events, EventStoreDB access, authoritative Postgres repositories, authentication workflows, moderation decisions, or state-mutating workflows.
+It consumes ClickHouse read models; it does not own the projections that create them. It must not own authoritative mutations, authoritative PostgreSQL repositories, authentication, moderation decisions, or anything that changes state.
 
 ```text
 GraphQL resolver
@@ -194,31 +195,38 @@ apps/*                ✗ → another app's implementation
 
 Cross-runtime communication occurs through explicit network or event contracts. The monorepo is a development and governance convenience, not one runtime.
 
-## Event Sourcing
+## Authoritative State and Derived Reads
 
-Event sourcing is used where authoritative history, reconstruction, auditability, and deterministic projection rebuilding justify it. It is not required for every table, workflow, cache, or operational concern.
+Chronologity separates two materially different workloads. The write side is
+optimized for invariants, authorization, correctness, and durable decisions. The
+Timeline read side is optimized for chronological range access, multidimensional
+navigation, contextual adjacency, temporal positioning, aggregation, high-volume
+pagination, and composition.
+
+That separation is a boundary between *applications* — the API and the feed
+aggregator — not a split inside either one. Within the API, reading and writing
+touch the same PostgreSQL tables through the same service, and there is no
+command/query division (ADR-091).
 
 ```text
-command
+request
   ↓
-aggregate decision
+service decides and writes
   ↓
-domain event
+PostgreSQL, with an outbox message in the same transaction
   ↓
-EventStoreDB
+Integration Event
   ↓
 projection
   ↓
 read model
 ```
 
-Application-level event history and user-visible historical Moments are related ideas but are not the same thing.
+Chronologity is event-driven, not event-sourced (ADR-092). Events announce what
+was accepted; they are not what makes it true.
 
-## CQRS
-
-CQRS reflects materially different workloads. The command side is optimized for invariants, authorization, correctness, durable decisions, and authoritative history. The Timeline read side is optimized for chronological range access, multidimensional navigation, contextual adjacency, temporal positioning, aggregation, high-volume pagination, and composition.
-
-CQRS does not require ceremonial infrastructure for trivial operations; its value is the authoritative-mutation/read-representation boundary.
+Application-level event history and user-visible historical Moments are related
+ideas but are not the same thing.
 
 ## Projection Architecture
 
@@ -248,13 +256,10 @@ Kafka is transport and distribution infrastructure, not a source of truth. Consu
 
 ## Persistence Responsibilities
 
-### EventStoreDB
+### PostgreSQL
 
-Stores authoritative event streams for event-sourced domains. It is not queried by the Timeline aggregator.
-
-### Postgres
-
-Supports relational and operational concerns associated with the authoritative API where appropriate.
+Holds authoritative state for every feature. It is not queried by the Timeline
+aggregator.
 
 ### ClickHouse
 
@@ -295,9 +300,7 @@ client
   ↓
 API
   ↓
-authoritative decision
-  ↓
-EventStoreDB
+authoritative decision, committed with its outbox message
   ↓
 event distribution
   ↓
@@ -354,7 +357,7 @@ Projection lag is a product-relevant operational metric in an eventually consist
 13. Causality must not be inferred solely from chronology.
 14. Historical significance is derived and recomputable rather than a mutation of historical fact.
 15. High-volume Timeline reads are optimized independently from command processing.
-16. Event sourcing is used deliberately, not universally.
+16. PostgreSQL is the single authority; the system is event-driven, not event-sourced.
 17. New runtime boundaries require a concrete architectural reason.
 18. Derived state, caches, and projections should be recoverable or rebuildable wherever practical.
 
@@ -371,7 +374,7 @@ These boundaries are canonical unless changed by an explicit architecture decisi
 
 ## What This Document Does Not Define
 
-This overview does not define the complete monorepo tree; every route, command, event, aggregate, or projection; exact database schemas; Kafka topics; the exact GraphQL schema; Timeline cursor encoding; historical-significance formulas; causality evidence models; temporal-zoom algorithms; the role/permission matrix; media providers; or deployment topology.
+This overview does not define the complete monorepo tree; every route, service, event, or projection; exact database schemas; Kafka topics; the exact GraphQL schema; Timeline cursor encoding; historical-significance formulas; causality evidence models; temporal-zoom algorithms; the role/permission matrix; media providers; or deployment topology.
 
 Those details belong in focused architecture and technical specifications while preserving the boundaries established here.
 

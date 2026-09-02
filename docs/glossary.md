@@ -140,7 +140,7 @@ See `product/discovery.md`.
 
 See **Real-World Event**.
 
-The unqualified word "event" should be avoided in architecture documentation where it could be confused with an event-sourcing domain event. Use **Real-World Event** for the historical product concept and **Domain Event** for an event-sourcing record.
+The unqualified word "event" should be avoided in architecture documentation where it could be confused with a software event. Use **Real-World Event** for the historical product concept, **Domain Event** for a past-tense fact the API accepted, and **Integration Event** for a message published across a boundary.
 
 ## Feed
 
@@ -156,7 +156,11 @@ A social-graph relationship through which one User elects to receive or more eas
 
 Following does not override privacy, blocking, moderation, or authorization.
 
-See `product/social-graph.md`.
+A User may also follow a **Historical Context** — a real-world Event, a Location, or another explicitly defined scope — to hear about Moments associated with it. That is a different relationship: a context is shared history rather than a person, so it needs no approval and cannot be blocked. Neither kind follows a Timeline, which is derived.
+
+A **Saved View** may be followed by the person who saved it, and this is the third kind. What is followed is the View Specification — an explicitly defined scope, as above — rather than the Timeline it derives, which stays as unfollowable as ever. An interface may reasonably present it as "follow this view"; the thing recorded is the request, and reopening it derives current history for whoever is looking.
+
+See `product/social-graph.md` and `product/timelines.md`.
 
 ## Follower
 
@@ -171,6 +175,8 @@ See `product/social-graph.md`.
 Context that helps explain a Moment, Event, Person, Location, or other historical entity within the broader record of what occurred.
 
 Historical context may be factual, relational, interpretive, causal, uncertain, disputed, or derived and should preserve appropriate provenance.
+
+A Historical Context is also what a **Timeline** is derived from, and what the relationship graph in `product/timeline-first-curation-and-discovery.md` connects. Locations, real-world Events, and People are contexts; a Subject is a context type the product has not yet defined.
 
 ## Historical Correction
 
@@ -396,7 +402,7 @@ A Real-World Event is not a Moment and does not replace Moment chronology.
 
 Multiple Users may contribute Moments associated with the same Real-World Event.
 
-Use the full term when confusion with event-sourcing Domain Events is possible.
+Use the full term when confusion with software events is possible.
 
 See `product/real-world-events.md`.
 
@@ -469,6 +475,8 @@ See `product/timeline.md`, `product/historical-significance.md`, and `product/ac
 Chronologity's primary historical navigation experience.
 
 The Timeline is a derived chronological representation of history rather than a separate User-created container.
+
+A Timeline is never stored, owned, or followed directly. It is what a viewer sees when they look at a **Historical Context**, and following that context is what an interface may present as "following a Timeline".
 
 Its conceptual dimensions are:
 
@@ -592,7 +600,7 @@ Do not describe a Timeline as an arbitrary User-created container unless a futur
 
 Use **Real-World Event** for the historical product concept.
 
-Use **Domain Event** for an event-sourcing event.
+Use **Domain Event** for a past-tense fact the API accepted, and **Integration Event** for a message published to consumers outside it.
 
 Avoid unqualified **Event** in architecture documentation when the meaning would be ambiguous.
 

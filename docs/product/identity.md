@@ -229,7 +229,7 @@ A creator may propose an association between a Moment and another User.
 
 The creator's assertion alone should not grant unlimited public visibility to that association. A tagged User should have meaningful control over whether their account identity is publicly associated with another User's Moment.
 
-The exact day-one consent workflow remains open, but the model should support the conceptual distinction between a proposed and accepted association.
+That control is now defined. Chronologity calls the relationship **participation** rather than tagging, because the word should describe a fact somebody confirms rather than an act performed on them, and a creator's proposal is visible to nobody but the two people in it until the named person accepts. `participation.md` is canonical.
 
 ### Tagging a Non-User Person
 
@@ -460,32 +460,36 @@ Before launch, Chronologity must have explicit product behavior for:
 
 Facial recognition, identity verification, organization accounts, memorialization, and automated identity matching are not required for the initial release.
 
+## Established Identity Decisions
+
+These were open questions. Implementation settled them, and they are requirements now rather than possibilities.
+
+**A handle is three to thirty characters, and may contain letters, numbers, and underscores only.** Nothing else is permitted (`packages/contracts/src/users.ts`).
+
+**Handles are normalised by trimming and lowercasing, and uniqueness is decided on that normalised form.** `@Richard` and `@richard` are one handle. Because only ASCII letters, digits, and underscores are permitted, no Unicode normalisation form applies — the question is closed by the character set rather than answered within it. Reintroducing wider characters would reopen it.
+
+**A set of handles is reserved**, covering route collisions such as `api`, `admin`, and `settings`, and names that would let an account be mistaken for Chronologity itself. A reserved handle is refused identically to one already held: whether a name is reserved or merely taken is not information anyone needs, and distinguishing them would map out the list.
+
+**A released handle stays reserved for thirty days**, during which its previous holder may reclaim it and nobody else may take it. The period is configuration rather than a constant.
+
+**A display name is one to eighty characters after trimming, and is not unique.** It is not an identifier.
+
+**A biography is part of the initial profile and is optional**, up to five hundred characters. It may be cleared as well as changed, and clearing it is distinguishable from leaving it alone.
+
 ## Open Product Questions
 
 The following questions require deliberate resolution:
 
-- What characters are permitted in handles?
-- What are the minimum and maximum handle lengths?
-- Which Unicode normalization rules apply?
-- Which handles are reserved?
 - How often may a User change their handle?
-- How long should a previous handle remain reserved?
 - Should old handle URLs redirect to the current Profile, and for how long?
 - Should a User be able to prevent an old handle from revealing their new handle?
-- What display-name length and content rules apply?
 - Can a User omit a profile image?
 - What profile fields exist on day one beyond display name, handle, image, and potentially biography?
-- Is biography part of the initial Profile?
 - Which Profile fields are publicly visible by default?
 - Can a User make their Profile non-discoverable in direct search?
 - Can a User opt out of recommendations while remaining searchable?
 - What identity information appears beside comments and reactions?
 - What identity information appears in shared Event contexts?
-- What is the exact consent workflow when another User tags someone in a Moment?
-- Is a proposed tag visible to anyone before the tagged User accepts it?
-- Can a tagged User remove their association permanently?
-- Can the creator re-propose a declined tag?
-- Can a User block future tag requests from another User?
 - How are non-User people named within private personal history?
 - Can non-User Person representations ever be shared publicly?
 - Can multiple Users independently create representations of the same non-User person?

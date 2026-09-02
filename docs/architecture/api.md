@@ -4,7 +4,7 @@
 
 This document defines the architecture of `apps/api`, Chronologity's authoritative backend application.
 
-The API is responsible for accepting commands, enforcing authorization and domain invariants, making authoritative state transitions, persisting event-sourced history where appropriate, coordinating state-changing workflows, exposing operational REST queries, and producing the authoritative changes from which downstream read models are derived.
+The API is responsible for accepting requests, enforcing authorization and domain invariants, making authoritative state transitions in PostgreSQL, exposing operational REST queries, and publishing the Integration Events from which downstream read models are derived.
 
 This document is grounded in the canonical `apps/api` structure defined in `docs/architecture/monorepo.md`. It explains the responsibilities and dependency rules behind that structure rather than duplicating the complete directory tree.
 
@@ -14,28 +14,26 @@ The API is not the primary multidimensional Timeline read service. Timeline comp
 
 ## Architectural Role
 
-`apps/api` is the authoritative command-side application for Chronologity.
+`apps/api` is the authoritative write application for Chronologity.
 
 Conceptually:
 
 ```text
-Client command
+Client request
       ↓
-Fastify route
+Fastify route              schema-validated transport
       ↓
 Authentication / authorization
       ↓
-Validation
+Service                    owns the transaction
       ↓
-Command or workflow
+Policy                     decides the rule
       ↓
-Domain decision
+Repository                 conditional write to PostgreSQL
       ↓
-Authoritative persistence
+Outbox                     same transaction as the change
       ↓
-Domain / integration events
-      ↓
-Downstream projections and side effects
+Kafka → downstream read models and side effects
 ```
 
 The API answers the question:
@@ -57,18 +55,14 @@ The API owns:
 - authentication and session lifecycle;
 - backend-enforced authorization;
 - role-based administrative authority;
-- authoritative commands;
-- aggregate behavior where Event Sourcing is used;
+- authoritative state transitions;
 - domain invariants;
-- authoritative Domain Events;
-- EventStoreDB access for event-sourced aggregates;
-- relational/operational PostgreSQL state where appropriate;
+- authoritative state in PostgreSQL, for every feature;
+- the Integration Events it chooses to publish;
 - operational REST queries;
 - uploads and media-processing lifecycle coordination;
-- state-changing workflows;
 - notification creation/delivery orchestration where authoritative behavior is required;
-- moderation decisions and enforcement commands;
-- projection definitions and projection update logic owned by authoritative features;
+- moderation decisions and enforcement;
 - external integration adapters required by API workflows;
 - runtime validation of inbound data;
 - server-side error mapping;
@@ -95,11 +89,13 @@ The API is implemented with:
 Node.js
 TypeScript
 Fastify
-EventStoreDB
 PostgreSQL
 Kafka / asynchronous messaging
 shared contracts from packages/contracts
 ```
+
+PostgreSQL holds authoritative state for every feature (ADR-092). Kafka carries
+Integration Events and is never a source of truth.
 
 Additional infrastructure may support object storage, media processing, email, push notifications, metadata extraction, observability, and projection delivery.
 
@@ -134,9 +130,9 @@ Each area has a distinct responsibility.
 
 # Entry Point
 
-## `src/index.ts`
+## `src/main.ts`
 
-`src/index.ts` is the process entry point.
+`src/main.ts` is the process entry point.
 
 Its responsibilities should remain minimal:
 
@@ -229,7 +225,7 @@ config/
 ├── app-config.ts
 ├── auth-config.ts
 ├── database-config.ts
-└── eventstore-config.ts
+└── storage-config.ts
 ```
 
 Configuration should be validated at startup.
@@ -341,8 +337,9 @@ Canonical areas include:
 
 ```text
 lib/
+├── auth/
 ├── database/
-├── eventstore/
+├── messaging/
 ├── logger/
 ├── errors/
 ├── ids/
@@ -361,7 +358,7 @@ It must not become a generic `shared/` dumping ground.
 
 `lib/database/postgres.ts` establishes the API's PostgreSQL infrastructure boundary.
 
-PostgreSQL is used for relational, operational, or read-side data where EventStoreDB is not the appropriate authority.
+PostgreSQL holds authoritative state for every feature. There is no second write store to reconcile it against, which is the point: a change and the message announcing it commit together or not at all.
 
 Feature modules should not scatter connection construction or pool configuration throughout the codebase.
 
@@ -389,67 +386,6 @@ Therefore API-side ClickHouse access must have a narrowly defined reason, such a
 API feature queries must not gradually begin bypassing the feed aggregator for normal Timeline composition simply because a ClickHouse client exists.
 
 If focused projection architecture demonstrates that the API does not need direct ClickHouse access, this adapter should be removed from the canonical tree.
-
----
-
-# EventStoreDB Infrastructure
-
-## `src/lib/eventstore/`
-
-Canonical primitives include:
-
-```text
-eventstore/
-├── client.ts
-├── append-events.ts
-├── read-stream.ts
-├── subscribe.ts
-└── stream-name.ts
-```
-
-This infrastructure should expose the important semantics of EventStoreDB without leaking low-level client details throughout feature code.
-
----
-
-## Stream Naming
-
-Stream names must be deterministic and domain-aware.
-
-Feature-specific stream naming rules should usually live close to the feature when they encode domain identity.
-
-Shared infrastructure may provide safe construction primitives.
-
-Public/domain entity identifiers must not depend on physical EventStoreDB stream naming.
-
----
-
-## Reading Streams
-
-Aggregate reconstruction should read the appropriate stream in version order and rebuild aggregate state deterministically.
-
-Infrastructure should preserve expected stream version information required for optimistic concurrency.
-
----
-
-## Appending Events
-
-Authoritative event append should include expected-version semantics.
-
-Conceptually:
-
-```text
-Load stream @ version N
-        ↓
-Execute command
-        ↓
-Produce events
-        ↓
-Append expecting version N
-```
-
-If the stream has advanced, the command must not silently overwrite another concurrent decision.
-
-Conflict/retry behavior is feature-specific.
 
 ---
 
@@ -519,10 +455,8 @@ Testable time abstractions may be used where deterministic tests require them.
 Canonical types include:
 
 ```text
-command.ts
-domain-event.ts
+event-metadata.ts
 request-context.ts
-projection.ts
 ```
 
 These are API-local architectural types.
@@ -547,8 +481,7 @@ integrations/
 ├── push/
 ├── storage/
 ├── transcoder/
-├── metadata/
-└── projection-writer/
+└── metadata/
 ```
 
 Integrations are adapters.
@@ -565,7 +498,7 @@ The storage integration coordinates object-storage operations such as:
 - deleting stored objects;
 - future lifecycle actions.
 
-Large binary media must not flow through EventStoreDB event payloads or ordinary JSON domain events.
+Large binary media must not flow through Integration Event payloads.
 
 ---
 
@@ -599,414 +532,226 @@ without product-defined confirmation or inference semantics.
 
 ---
 
-## Projection Writer Integration
-
-`projection-writer/` provides an explicit boundary when API-owned projection logic needs to update an external read store or projection-processing component.
-
-The focused projection architecture must determine whether this remains the correct mechanism.
-
-The important rule is that projection writing remains separate from authoritative aggregate persistence.
-
----
-
-# Workflows
-
-## `src/workflows/`
-
-Workflows coordinate multi-step application behavior that spans multiple feature or integration boundaries.
-
-Canonical workflow groups include:
-
-```text
-workflows/
-├── uploads/
-├── moments/
-├── auth/
-├── notifications/
-└── moderation/
-```
-
-A workflow exists because the operation crosses meaningful boundaries.
-
-Do not use workflows as a generic replacement for command handlers.
-
----
-
-## Workflow Versus Command Handler
-
-A command handler should own one authoritative domain use case where the primary behavior belongs to a feature.
-
-A workflow is appropriate when the use case must coordinate several independently owned steps.
-
-Example:
-
-```text
-Finalize upload
-     ↓
-verify upload state
-     ↓
-extract metadata
-     ↓
-initiate processing
-     ↓
-record authoritative state changes
-```
-
-The workflow coordinates.
-
-Feature aggregates and handlers still own domain decisions.
-
----
-
-## Workflow Failure
-
-Long-running workflows must be explicit about partial failure.
-
-They should not rely on distributed transactions across:
-
-- EventStoreDB;
-- PostgreSQL;
-- object storage;
-- transcoding systems;
-- email/push providers;
-- Kafka;
-- projection stores.
-
-Prefer durable state transitions, retryable work, and compensating/recovery actions where necessary.
-
----
-
 # Feature Architecture
 
 ## `src/features/`
 
-The canonical API features are:
+Each feature owns the behaviour of one capability, and the canonical list is
+maintained in `docs/architecture/monorepo.md` rather than duplicated here.
 
-```text
-features/
-├── auth/
-├── authorization/
-├── users/
-├── uploads/
-├── moments/
-├── reactions/
-├── timelines/
-├── notifications/
-└── moderation/
-```
-
-Each feature owns the application/domain behavior associated with that capability.
-
-Features should remain as independently understandable as practical.
+Features should remain as independently understandable as practical. A feature
+is created when a capability acquires real responsibility, not to populate a
+tree.
 
 ---
 
 # Feature Structure
 
-A feature may contain some or all of:
+A feature is a flat set of files named for what they are:
 
 ```text
 <feature>/
-├── index.ts
-├── aggregates/
-├── commands/
-├── events/
-├── event-handlers/
-├── projections/
-├── queries/
-├── routes/
-├── schemas/
-└── utils/
+├── <feature>.routes.ts          Fastify registration and HTTP concerns
+├── <feature>.service.ts         class, verb-only methods, owns transactions
+├── <feature>.model.ts           TypeORM entities, one per table
+├── <feature>.repository.ts      class, queries
+├── <feature>.policy.ts          pure rules, exhaustively unit tested
+├── <feature>.policy.test.ts
+├── <feature>.types.ts
+└── <feature>.integration.test.ts
 ```
 
-Not every future feature must contain every directory.
+Not every feature needs every file. A feature with two nouns may carry two
+services and two repositories — authentication carries `identity` and `session`
+— when the nouns are genuinely distinct and the dependency between them runs
+one way.
 
-Structure follows actual behavior rather than CQRS/Event Sourcing ceremony.
-
----
-
-# Feature Entry Point
-
-A feature-level `index.ts`, where retained, is a deliberate public entry point for feature registration or externally consumable feature contracts.
-
-It must not become a broad barrel file exporting every internal implementation symbol.
-
-Internal imports should remain explicit.
+There are no `aggregates/`, `commands/`, `queries/`, `event-handlers/`, or
+per-feature `projections/` directories. Those belonged to an event-sourced and
+command/query-split design that ADR-091 and ADR-092 replaced.
 
 ---
 
-# Aggregates
+# Services
 
-## `aggregates/`
+A service owns a capability's behaviour. It is a class, and its methods are
+named for what they do without repeating the noun the class already carries:
+`locationService.record(...)`, `uploadService.finalize(...)`,
+`userService.updateHandle(...)`.
 
-An aggregate owns domain invariants and state transitions for a consistency boundary.
+A service should:
 
-An aggregate should:
+- open the transaction its writes commit in;
+- call repositories for persistence;
+- call pure policy modules for rules;
+- construct and enqueue any Integration Event, in the same transaction as the
+  change it describes;
+- raise domain errors that the transport boundary maps to HTTP.
 
-- reconstruct state from authoritative history where event sourced;
-- expose domain-intent methods;
-- validate invariants;
-- emit authoritative Domain Events;
-- remain independent of Fastify and infrastructure clients.
+A service should not:
 
-An aggregate should not:
+- know Fastify;
+- write SQL inline;
+- decide a rule that a pure function could decide;
+- publish to Kafka directly.
 
-- execute SQL;
-- call Fastify APIs;
-- publish push notifications directly;
-- write ClickHouse rows;
-- call object storage;
-- know GraphQL;
-- return HTTP responses.
-
----
-
-# Commands
-
-## `commands/`
-
-A command represents an intention to change authoritative state.
-
-Examples conceptually include:
-
-```text
-CreateMoment
-AddReaction
-SuspendUser
-RevokeSession
-```
-
-Commands should be explicit and use canonical product language.
-
-Command handlers:
-
-1. receive validated command input and trusted request context;
-2. load required authoritative state;
-3. enforce application authorization where appropriate;
-4. invoke aggregate/domain behavior;
-5. persist resulting authoritative events/state;
-6. trigger or schedule required downstream workflow/integration behavior.
-
-Handlers should remain focused.
-
-If a handler becomes a large orchestration across unrelated feature boundaries, that logic likely belongs in a workflow.
+Dependencies arrive through the constructor. Wiring is manual, in `src/main.ts`.
+There is no container: assembling the application explicitly is what the
+container ceremony was hiding.
 
 ---
 
-# Queries
+# Repositories
 
-## `queries/`
+A repository owns a feature's queries and nothing else. It is a class holding
+the DataSource (ADR-099), and it uses the entities declared beside it in
+`<feature>.model.ts`.
 
-The API may serve queries that belong naturally to its authoritative/operational boundary.
+**Reads take the DataSource; writes take a transaction.** A write's transaction
+is therefore visible at the call site rather than hidden behind the method,
+which is what makes the transactional outbox possible: a state change and the
+message announcing it are only atomic if they share a transaction.
+`withTransaction` opens one.
 
-Examples include:
+A repository returns domain-shaped values, not rows. Entity-to-contract mapping
+belongs here, so nothing above it knows a column name — and nothing above it
+holds an entity. An entity is what the table is; a contract is what a caller
+receives, and the two are deliberately different shapes.
 
-- current session state;
-- authentication provider status;
-- user account/profile state;
-- upload state;
-- moderation case/status where appropriate;
-- notification read state where the API owns it;
-- command-side information necessary for account/settings screens.
+TypeORM's own `Repository<T>` is a data-mapper helper, not this layer. A feature
+repository uses one; it does not replace one. Of the methods here, all but a
+handful are conditional writes or multi-branch policy — claiming a handle,
+moving an upload between states, rotating a credential — which is why the layer
+carries its own names rather than exposing generic CRUD.
 
-The API should **not** become the general high-volume Timeline query service.
+State transitions are conditional updates naming the state they expect to move
+from, and they report whether they moved anything. See **Concurrency**.
 
-The following belong primarily to the feed aggregator:
-
-- Timeline slices;
-- multidimensional navigation;
-- horizontal context composition;
-- Moment depth read composition for Timeline consumption;
-- temporal zoom;
-- historical jumps;
-- Timeline prefetching;
-- high-volume ClickHouse-based Timeline queries.
-
-The boundary is defined by ownership and access pattern, not by whether something is technically a "query."
-
----
-
-# Domain Events
-
-## `events/`
-
-Feature events record accepted authoritative domain facts.
-
-They should be named in past tense and use canonical domain language.
-
-Examples:
-
-```text
-user-created
-reaction-added
-moment-created
-session-revoked
-```
-
-Event schemas are durable contracts.
-
-Changing a persisted event requires more care than changing ordinary internal code.
+Two behaviours of the query builder are load-bearing and easy to get wrong.
+`.returning()` takes property names and silently drops anything it does not
+recognise, producing a statement with no `RETURNING` clause. And an insert with
+`orIgnore()` reports identifiers taken from the values handed to it whether or
+not a row was written, so a conflict is detected from an explicit `.returning()`
+rather than from those identifiers.
 
 ---
 
-## Event Payload Design
+# Policy
 
-Domain Events should contain enough information to represent the accepted fact without becoming indiscriminate snapshots of every aggregate property.
+A policy module is a pure function or set of them. It takes what has been read
+and answers a question: is this handle acceptable, is this Session usable, what
+does this refusal mean, which derivatives are still missing.
 
-Avoid embedding sensitive personal data unnecessarily in immutable streams.
+Policy modules hold the rules precisely because they can be unit tested
+exhaustively — every branch, every boundary — without a database, a network, or
+a fixture. A rule that lives in a service can only be reached through
+infrastructure; a rule that lives here can be enumerated.
 
-This is particularly important for:
-
-- identity information;
-- email addresses;
-- precise locations;
-- media-derived metadata;
-- moderation evidence;
-- other data subject to privacy/erasure obligations.
-
-Focused Event Sourcing and privacy architecture must define how sensitive mutable data is referenced, externalized, redacted, or erased.
+Where a policy establishes a fact, it returns that fact rather than leaving the
+caller to re-derive it. A verdict that proves a file has dimensions carries the
+dimensions.
 
 ---
 
-# Event Handlers
+# Integration Events
 
-## `event-handlers/`
+A service that publishes constructs the external payload explicitly and
+enqueues it to the transactional outbox. Nothing is published automatically,
+and nothing is published as a side effect of persistence.
 
-Event handlers react to accepted Domain Events within application-owned asynchronous or derived behavior.
+An Integration Event is a deliberately versioned contract with consumers
+outside this application. It is not a record of everything that happened
+internally: it carries what a consumer needs and nothing that would be
+difficult to erase.
 
-They may:
-
-- update projections;
-- initiate workflows;
-- create notification candidates;
-- schedule secondary processing;
-- update related application state where the architecture explicitly permits it.
-
-An event handler must be idempotent when delivery can repeat.
-
-Handlers must not rely on exactly-once transport.
+Internal past-tense facts that no other system consumes are not events. They are
+rows, and where they matter for accountability they are audit rows written in
+the same transaction as the change they describe.
 
 ---
-
-# Projections
-
-## `projections/`
-
-Feature projections define how authoritative events produce derived read state.
-
-Examples in the canonical tree include profile, session, upload, Moment, Reaction, Timeline, notification, and moderation projections.
-
-A projection is not the read model itself.
-
-Conceptually:
-
-```text
-Domain Events
-     ↓
-Projection logic
-     ↓
-Materialized read model
-```
-
-Projection logic must be:
-
-- deterministic where practical;
-- idempotent;
-- checkpointable;
-- replayable;
-- observable;
-- versionable where representation changes materially.
-
-Projection rebuild must not resurrect information that current deletion, privacy, moderation, or legal state requires to remain unavailable.
-
-Detailed projection execution belongs in `docs/architecture/projections.md`.
-
----
-
 # Routes
 
-## `routes/`
+## `<feature>.routes.ts`
 
 Feature routes own the HTTP boundary for that feature.
 
 Routes should:
 
-- declare HTTP method/path;
+- declare HTTP method and path;
 - bind request/response schemas;
 - require the appropriate authentication level;
-- translate validated transport input into command/query inputs;
-- invoke the application handler;
-- translate application results/errors into HTTP responses.
+- call a service method with validated input;
+- shape the result into a response.
 
 Routes should not:
 
 - contain SQL;
-- reconstruct aggregates;
 - perform domain calculations;
-- embed large orchestration workflows;
-- duplicate authorization rules that belong to handlers/policies;
-- manually publish Domain Events.
+- duplicate authorization rules the service or a policy owns;
+- enqueue Integration Events.
 
-Routes remain thin by design.
+There is no controller layer. A schema-validated Fastify handler already is one,
+and inserting another would add a file per operation that forwards its arguments
+unchanged (ADR-091).
+
+Routes remain thin by design. Where a route needs more than one service — account
+deactivation ends the account and then its Sessions — it composes them, because
+a service reaching across into another feature's concern would put ownership in
+two places.
+
+One consequence worth stating: Fastify validates a request body during its own
+lifecycle, before any `preHandler` runs. A malformed body is therefore refused
+as a bad request whether or not the caller is authenticated. That is acceptable
+here, since clients compile against the same published schemas, but it is a
+decision rather than an accident.
 
 ---
 
 # Schemas
 
-## `schemas/`
+Validation lives in `packages/contracts`, because mobile and the API client
+compile against the same definitions and two independently maintained schemas
+for one contract will drift.
 
-Feature schemas validate feature-owned transport/application inputs.
-
-Where the exact serialized contract is shared with clients or another deployable application, the canonical schema may belong in `packages/contracts` and be consumed by the feature.
-
-Where a schema is purely API-internal, keep it local.
-
-Do not duplicate two independently maintained runtime schemas for the same cross-boundary contract.
+A feature declares a local schema only where it needs a shape no client sees —
+a transport detail such as which Session a refresh names.
 
 ---
-
-# Feature Utilities
-
-## `utils/`
-
-Feature utilities are allowed when they are genuinely feature-specific and side-effect-light.
-
-Examples:
-
-- canonical stream-name construction;
-- normalization rules owned by the feature;
-- small deterministic helpers.
-
-Do not move domain behavior into vaguely named utility functions to avoid modeling it explicitly.
-
----
-
 # Authentication Feature
 
-## `features/auth`
+## `features/authentication`
 
-The authentication feature owns identity and session behavior.
+The authentication feature owns identity and session behaviour. It carries two
+services, because it has two nouns and the dependency between them runs one way:
+proving who someone is ends in granting them a Session.
 
-The canonical tree includes:
+- `identity.service.ts` — registration, address verification, sign-in by link or
+  password, and the password lifecycle;
+- `session.service.ts` — issuing, refreshing, revoking, listing, and validating
+  Sessions;
+- `identity.repository.ts`, `session.repository.ts`;
+- `authentication.policy.ts` — address normalisation, Session usability, and why
+  a refresh was refused;
+- `authentication.routes.ts`.
 
-- `identity.aggregate.ts`;
-- `session.aggregate.ts`;
-- identity email lifecycle commands;
-- OAuth link/unlink commands;
-- two-factor authentication commands;
-- session creation, refresh, revoke, expire, and revoke-all behavior;
-- auth-related events;
-- auth projections and queries;
-- auth routes and schemas.
+`sessions` is the authority for whether a Session may authenticate a request
+(ADR-094). Revocation is written in the request that causes it, so reading the
+row is fresher than replaying a stream ever was, and it takes an extra store off
+the hot path of every authenticated request.
+
+Refresh-token rotation is a single conditional update requiring the presented
+credential to still be the current one. A presented credential that is not the
+current one means an already-rotated credential is in circulation, and the
+Session ends rather than merely being refused.
 
 The exact supported authentication mechanisms must be finalized in `docs/architecture/authentication.md`.
 
 This document establishes the boundary:
 
 ```text
-Authentication feature
+Authentication
     ↓
-establish identity/session truth
+establish identity and Session truth
 
 Authorization
     ↓
@@ -1027,9 +772,12 @@ Its responsibilities include:
 
 - assigning a role to a User;
 - removing a role from a User;
-- enforcing invariants around role assignment;
-- recording role-assignment Domain Events;
-- projecting current User authorization state;
+- enforcing invariants around role assignment, including that nobody may grant
+  themselves a role — though anyone may remove one from themselves, because the
+  rule is against escalation rather than against standing down;
+- recording every role change, and every refusal, in the relational audit trail;
+- reading current roles on each privileged request rather than trusting a token
+  claim, so removing a role stops the next request rather than the next refresh;
 - exposing current effective permissions for trusted consumers;
 - maintaining the canonical permission registry and role-to-permission mapping;
 - providing reusable authorization policies for feature/application boundaries;
@@ -1040,7 +788,7 @@ The initial canonical model deliberately does **not** include arbitrary per-User
 The feature remains separate from authentication:
 
 ```text
-features/auth
+features/authentication
     → proves identity and manages Sessions
 
 features/authorization
@@ -1065,8 +813,7 @@ Its canonical responsibilities include:
 - user emails where this remains distinct from authentication identity;
 - activation/deactivation;
 - account deletion;
-- user profile/status projections;
-- account/profile queries.
+- account and profile reads, including the public view and the owner's own.
 
 The focused identity architecture must ensure the distinction between:
 
@@ -1088,13 +835,21 @@ The uploads feature owns authoritative upload lifecycle.
 
 It should model:
 
-- upload registration;
-- receipt confirmation;
-- metadata attachment;
-- processing start;
-- processing completion/failure where authoritative;
-- upload deletion;
-- upload status/read models.
+- upload registration, which authorises a direct write to object storage rather
+  than proxying bytes through the API;
+- receipt confirmation, which verifies what actually arrived;
+- what opening the file established, which is authoritative over anything the
+  client declared;
+- readiness, failure, and deletion;
+- upload status reads.
+
+Every transition is a conditional update naming the state it expects to move
+from, because the media pipeline delivers at least once and two workers may be
+handed the same file. Zero rows means another worker got there first, which is
+ordinary rather than exceptional.
+
+Announcing an arrival is enqueued to the outbox in the same transaction as the
+arrival itself, so the pipeline cannot be started for a state that rolled back.
 
 The feature owns upload state.
 
@@ -1121,7 +876,7 @@ The current product model requires:
 
 The canonical monorepo has already removed superseded Sub-Moment files.
 
-Future Moment commands must not recreate that hierarchy under different names.
+Future Moment operations must not recreate that hierarchy under different names.
 
 Moment media ordering and association must be modeled without making each media item a nested historical Moment.
 
@@ -1138,9 +893,8 @@ Its responsibilities include:
 - add Reaction;
 - remove Reaction;
 - update Reaction if supported by product semantics;
-- Reaction domain events;
-- Reaction read/projection state;
-- authorized Reaction queries where appropriate.
+- the Integration Events, if any, that downstream read models need;
+- authorized Reaction reads where appropriate.
 
 Reactions are social activity.
 
@@ -1152,34 +906,21 @@ They must not change Moment occurrence time or become authoritative historical s
 
 ## `features/timelines`
 
-The canonical API tree contains a Timeline aggregate/lifecycle feature.
+`features/timelines/` owns no service and no write operations (ADR-084).
 
-This feature requires careful interpretation.
+The finalized product model establishes that the Timeline is a derived historical representation rather than an arbitrary user-created container. A derived representation has nothing to create, rename, archive, or delete: it changes when the history beneath it changes.
 
-The finalized product model establishes that the Timeline is a derived historical representation rather than an arbitrary user-created container.
+The feature owns what maintains Timeline read models, and nothing else — cursor
+encoding and the projection logic that keeps ClickHouse in step with what
+PostgreSQL has accepted.
 
-Therefore the existence of:
+It must **not** own high-volume Timeline composition. That belongs to
+`apps/feed-aggregator`.
 
-```text
-features/timelines/
-```
-
-must not be interpreted as permission to model every Timeline as CRUD-managed user content.
-
-The API Timeline feature may legitimately own authoritative state such as:
-
-- persisted Timeline definitions/scopes where the product requires them;
-- configuration of historically meaningful Timeline views;
-- lifecycle state for explicitly defined Timeline resources;
-- commands whose effects alter how an authoritative Timeline scope is defined.
-
-It must **not** own high-volume Timeline composition.
-
-That belongs to `apps/feed-aggregator`.
-
-Before implementation, the exact semantic purpose of each Timeline aggregate/command in the canonical tree must be validated against `docs/product/timeline.md` and `docs/product/timelines.md`.
-
-If a lifecycle command has no product-semantic justification after that review, it should be removed rather than implemented ceremonially.
+The earlier canonical tree carried a Timeline aggregate and five lifecycle
+operations. Each was reviewed against `docs/product/timeline.md` and
+`docs/product/timelines.md`, none had a product-semantic justification, and all
+were removed rather than implemented ceremonially.
 
 ---
 
@@ -1196,8 +937,8 @@ Potential responsibilities include:
 - read/unread state;
 - dismissal where supported;
 - notification preference integration;
-- notification-related events and projections;
-- notification queries and routes.
+- the Integration Events notifications publish or consume;
+- notification reads and routes.
 
 External push/email providers deliver messages.
 
@@ -1222,7 +963,8 @@ The feature owns policy-enforced state transitions such as:
 - suspension;
 - moderation case state;
 - appeals where modeled;
-- moderation events and projections.
+- the Integration Events moderation publishes, so that derived read models can
+  honour a restriction rather than discovering it later.
 
 The mobile app may expose administrative interfaces to authorized roles.
 
@@ -1258,24 +1000,24 @@ The detailed role/permission architecture belongs in `docs/architecture/authoriz
 
 ---
 
-# Administrative Commands
+# Administrative Operations
 
-Administrative operations follow the same command architecture as other authoritative mutations.
+Administrative operations follow the same architecture as any other authoritative mutation.
 
 Conceptually:
 
 ```text
 Authorized consumer UI
         ↓
-REST command
+REST request
         ↓
 authenticated request context
         ↓
 permission check
         ↓
-moderation/admin handler
+moderation or administration service
         ↓
-authoritative event/state change
+authoritative state change, plus an audit row in the same transaction
 ```
 
 The fact that the invoking client is the normal consumer application changes nothing about backend authority.
@@ -1288,23 +1030,22 @@ The API's public application interface is REST.
 
 REST routes should be resource/use-case oriented and preserve Chronologity terminology.
 
-Avoid exposing command/event implementation details unnecessarily in URLs.
+Avoid exposing implementation details unnecessarily in URLs.
 
 The client should not need to know:
 
-- aggregate stream names;
-- EventStoreDB versions;
 - Kafka offsets;
-- projection checkpoints;
-- database table names.
+- outbox message identifiers;
+- database table or column names;
+- object-storage keys.
 
 Those are implementation details.
 
 ---
 
-# REST Commands and Idempotency
+# Idempotency
 
-Commands that can be retried after ambiguous network failure should support explicit idempotency where duplicate execution could cause harm.
+Operations that can be retried after an ambiguous network failure should support explicit idempotency where duplicate execution could cause harm.
 
 Examples may include:
 
@@ -1316,13 +1057,13 @@ Examples may include:
 
 The exact idempotency-key mechanism belongs in the API contract documentation.
 
-Idempotency must not be assumed merely because a handler is "usually only called once."
+Idempotency must not be assumed merely because an operation is "usually only called once."
 
 ---
 
 # Request Lifecycle
 
-A typical authenticated command request should follow:
+A typical authenticated write request should follow:
 
 ```text
 HTTP request
@@ -1337,99 +1078,94 @@ authorization prerequisites
     ↓
 route
     ↓
-command handler / workflow
+service
     ↓
-aggregate/domain behavior
+policy decides the rule
     ↓
-authoritative persistence
+repository writes, conditionally
+    ↓
+outbox message, same transaction
     ↓
 result
     ↓
 HTTP response
 ```
 
-Downstream projection/notification/indexing work may continue asynchronously after the authoritative response when the product does not require synchronous completion.
+Downstream projection, notification, and indexing work continues asynchronously after the authoritative response, because the product does not require synchronous completion. The outbox is what makes that safe: the work is already recorded before the response is sent.
 
 ---
 
-# Command Persistence Flow
-
-For an event-sourced aggregate:
+# Persistence Flow
 
 ```text
-Validated command
+Validated request
       ↓
-Load aggregate stream
+Read the current row
       ↓
-Reconstruct aggregate
+Decide, using a pure policy function
       ↓
-Authorize / validate state transition
+Conditional write, naming the state it expects to move from
       ↓
-Execute domain method
+Zero rows means somebody else got there first
       ↓
-Produce Domain Events
+Outbox message, in the same transaction
       ↓
-Append with expected version
-      ↓
-Commit succeeds
-      ↓
-Publish/propagate downstream
+Commit
 ```
 
-The authoritative command is successful when the authoritative persistence boundary commits successfully—not when every downstream projection finishes.
+The write is successful when PostgreSQL commits — not when every downstream read
+model has converged.
+
+Nothing is written to two stores. The change and the message announcing it share
+one transaction, which is the property the previous architecture could not
+offer: it committed to PostgreSQL first and appended to a second store
+afterwards, so a failure between them left PostgreSQL holding a record the
+supposed authority never recorded.
 
 ---
 
 # Reliable Event Publication
 
-A committed authoritative change must eventually reach required downstream consumers.
-
-The API architecture therefore requires a reliable publication mechanism between EventStoreDB and Kafka/projection consumers.
-
-This document does not choose the precise mechanism.
-
-The focused messaging/event architecture must define:
-
-- EventStoreDB subscription strategy;
-- checkpoint ownership;
-- Kafka publication;
-- retry behavior;
-- poison-event handling;
-- deduplication;
-- integration-event versioning.
-
-The required invariant is:
+A committed authoritative change must eventually reach required downstream
+consumers, and an uncommitted one must never appear downstream as accepted fact.
+The transactional outbox provides both (ADR-093).
 
 ```text
-Committed authoritative event
-        ↓
-must not be permanently lost downstream
+Service                    enqueues to outbox_messages, in its own transaction
+      ↓
+Commit                     the change and the message land together, or neither does
+      ↓
+Outbox publisher           claims a batch with FOR UPDATE SKIP LOCKED
+      ↓
+Kafka                      published, then marked published in the same transaction
+      ↓
+Consumers                  idempotent, because delivery repeats
 ```
 
-while also preventing:
+Claiming with `FOR UPDATE SKIP LOCKED` means several publisher instances can run
+at once without coordinating, and without the shared checkpoint the previous
+mechanism needed.
 
-```text
-uncommitted authoritative event
-        ↓
-visible as accepted downstream fact
-```
+A failure to publish is recorded against the message and retried. The batch's
+own transaction has already rolled back at that point, so the failure is
+recorded in a separate one — otherwise the record of the failure would roll back
+with it.
+
+Two things remain to be settled before real traffic: retention of published
+rows, and giving up on a message that can never succeed. Both are noted under
+open questions.
 
 ---
 
-# Operational Queries
+# Operational Reads
 
-Not every API query needs EventStoreDB reconstruction.
+Reads use the representation appropriate to their use case, and for the API that
+is almost always the authoritative row.
 
-Queries should use the read representation appropriate to their use case.
-
-For example:
-
-- user/profile/account state may come from PostgreSQL read models;
-- upload status may come from operational state;
-- session status may come from session read state;
-- moderation status may come from moderation read models.
-
-The API should not force event replay on ordinary request paths where a safe read projection is the correct representation.
+There is no separate read model to reconcile inside the API, and no replay on a
+request path. Where a read is genuinely expensive — Timeline composition,
+historical aggregation — it belongs to the feed aggregator over ClickHouse
+rather than to a read model maintained here.
 
 ---
 
@@ -1437,33 +1173,54 @@ The API should not force event replay on ordinary request paths where a safe rea
 
 Transactions should be local to the system that owns the authoritative change.
 
-Do not attempt distributed transactions across EventStoreDB, PostgreSQL, Kafka, object storage, ClickHouse, and external providers.
+Do not attempt distributed transactions across PostgreSQL, Kafka, object storage, ClickHouse, and external providers. The outbox is what removes the need for one: the only two things that must agree — a change and the message announcing it — already share a transaction.
 
 Prefer:
 
 ```text
-local authoritative commit
-        ↓
-durable workflow/event
+local authoritative commit, with its outbox message
         ↓
 asynchronous propagation
         ↓
-retry/recovery
+retry / recovery
 ```
 
-When a multi-step workflow has visible intermediate states, those states should be explicit.
+When a multi-step operation has visible intermediate states, those states should
+be explicit and stored — an upload is `registered`, then `received`, then
+`ready`, and each transition is guarded.
 
 ---
 
 # Concurrency
 
-Event-sourced aggregates should use optimistic concurrency.
+**Guard a state transition with a conditional update rather than a
+read-then-write.** Reading a row, deciding, and then writing leaves a gap that
+another request can commit inside. Naming the expected state in the `WHERE`
+clause closes it, and the row count reports whether this call was the one that
+moved anything:
 
-Relational state should use appropriate transactional or optimistic concurrency mechanisms according to feature semantics.
+```sql
+UPDATE uploads SET state = 'received', ...
+ WHERE upload_id = $1 AND state = 'registered'
+```
 
-The API must not rely on application-process memory as the only protection against concurrent commands.
+The same shape covers every hazard the API has:
 
-Horizontally scaled API instances must produce the same correctness behavior.
+- **credential rotation** — the presented refresh token must still be the
+  current one, the Session unrevoked and unexpired, all in one statement;
+- **first claim wins** — a unique constraint decides which of two simultaneous
+  claims to an address or a handle succeeds, and the loser reads back the
+  winner's row;
+- **first revocation wins** — `COALESCE` keeps the reason that actually ended a
+  Session, so a later logout cannot overwrite evidence of a suspected theft;
+- **bulk revocation** — one statement rather than a list followed by a loop, so
+  a Session opened while the loop ran cannot survive a "log out everywhere" that
+  was meant to include it.
+
+The API must not rely on application-process memory as the only protection
+against concurrent writes. Horizontally scaled instances must produce the same
+correctness behaviour, which is exactly what pushing the condition into the
+statement achieves.
 
 ---
 
@@ -1495,7 +1252,7 @@ Examples:
 
 - authenticated identity required;
 - referenced resource exists;
-- command preconditions.
+- preconditions the operation depends on.
 
 ## Domain validation
 
@@ -1505,7 +1262,7 @@ Answers:
 
 Examples:
 
-- invalid aggregate state transition;
+- a state transition the current state does not permit;
 - impossible lifecycle change;
 - Moment invariant violation.
 
@@ -1530,7 +1287,7 @@ At a conceptual level:
 
 Exact schema belongs in `docs/api/errors.md`.
 
-Internal stack traces, SQL errors, EventStoreDB errors, secrets, or raw provider failures must not be exposed to clients.
+Internal stack traces, SQL errors, secrets, or raw provider failures must not be exposed to clients.
 
 ---
 
@@ -1543,11 +1300,9 @@ Important fields may include:
 - trace ID;
 - request ID;
 - authenticated user/identity ID where safe and appropriate;
-- command name;
-- aggregate ID;
-- event stream/version;
-- workflow ID;
-- downstream message correlation ID.
+- the operation being performed;
+- the identifier of the resource it acts on;
+- the outbox message correlation ID, so a change can be followed downstream.
 
 Logs must avoid unnecessary sensitive payloads.
 
@@ -1556,7 +1311,7 @@ Metrics should make it possible to identify:
 - command latency;
 - command failure rates;
 - optimistic concurrency conflicts;
-- EventStoreDB latency;
+- outbox depth and publication lag;
 - PostgreSQL latency;
 - workflow failure;
 - integration failure;
@@ -1617,9 +1372,9 @@ while technical operations remain bounded.
 
 The API is optimized for authoritative correctness, not for serving every read from the write model.
 
-Key command paths should remain efficient, but high-volume derived reads should be delegated to read models and the aggregator.
+Key write paths should remain efficient, and high-volume derived reads should be delegated to read models and the aggregator.
 
-Avoid rebuilding large aggregate histories on request paths without snapshots or another justified strategy if stream length becomes materially expensive.
+Optimize measured bottlenecks. Prefer better queries, indexes, and batching before reaching for a cache, and never add cross-request caching that could outlive an authorization change.
 
 Performance optimizations must preserve correctness and auditability.
 
@@ -1629,81 +1384,68 @@ Performance optimizations must preserve correctness and auditability.
 
 Tests are colocated with implementation by default.
 
-The API requires several test levels.
+The architecture decides the test strategy, because the architecture decides
+what can be tested without infrastructure. **Rules live in pure policy modules
+and are unit tested exhaustively; services orchestrate repositories and are
+proven by integration tests against real PostgreSQL.**
 
-## Aggregate tests
+There is no third option. A service cannot be unit tested without substituting
+the database, and the rules that matter now live in SQL — `ON CONFLICT` deciding
+a race, a conditional `UPDATE` returning zero rows, `FOR UPDATE SKIP LOCKED`
+handing one worker a batch. A fake repository would have to reimplement those
+semantics to answer at all: get them right and you have written a database, get
+them wrong and the tests are green about exactly the properties this
+architecture exists to establish.
 
-Verify:
+## Policy tests
 
-- invariant enforcement;
-- state reconstruction;
-- emitted events;
-- invalid state transitions;
-- concurrency-relevant behavior.
+Unit tests, no infrastructure. Every branch, every boundary, success and
+failure. A policy module exists so that its rules can be enumerated, and a
+branch left uncovered is either a missing test or a branch that cannot happen —
+and the second is a defect worth removing rather than a line worth faking.
 
-Aggregate tests should not require networked infrastructure.
+## Service tests
 
-## Command-handler tests
+Integration tests against real PostgreSQL, driving the service directly rather
+than through HTTP. This is the only way to reach the behaviour the HTTP surface
+cannot arrange: nothing makes two HTTP requests interleave inside one
+transaction on purpose.
 
-Verify:
-
-- authorization;
-- aggregate loading;
-- correct domain invocation;
-- persistence behavior;
-- expected errors;
-- idempotency behavior where applicable.
-
-## Query-handler tests
-
-Verify:
-
-- correct read-store usage;
-- authorization filtering;
-- result mapping;
-- not-found and unavailable states.
+A race test must be able to fail. Firing several concurrent callers does not
+reliably produce a collision — the losers' reads tend to land after the winner
+commits and take an earlier, cheaper exit — so a test that only asserts the
+outcome will pass whether or not the race occurred. Where the interleaving
+matters, arrange it: hold an uncommitted transaction, wait until the contending
+statement is actually blocked, then commit. A test that cannot observe the
+contention should say so and fail rather than pass quietly.
 
 ## Route tests
 
-Verify:
+Integration tests through `app.inject()`, never a real port. Verify method and
+path, schema validation, authentication and authorization requirements, status
+and error mapping, and serialization.
 
-- HTTP method/path;
-- schema validation;
-- authentication requirements;
-- status/error mapping;
-- serialization.
+They should not duplicate domain rules already proven below the route layer.
 
-They should not duplicate every domain rule already tested below the route layer.
+## Worker tests
 
-## Projection tests
+Verify behaviour under repeated delivery, partial failure, and the distinction
+between a failure worth retrying and one that will reach the same answer every
+time.
 
-Verify:
+## Contract tests
 
-- deterministic updates;
-- duplicate-event safety;
-- ordering assumptions;
-- rebuild behavior;
-- deletion/privacy/moderation propagation.
+REST, GraphQL, Integration Events, and external adapters.
 
-## Workflow tests
+## What may be substituted
 
-Verify:
+Only third-party boundaries: a subprocess decoder, an SMTP conversation, an
+outbound HTTP call to a map service. Never this system's own database or broker
+— doing so removes the behaviour under test.
 
-- state transitions across steps;
-- partial failure;
-- retry;
-- external-integration failure;
-- compensation/recovery behavior.
-
-## Integration tests
-
-Use real infrastructure where behavior cannot be trusted through mocks alone, particularly:
-
-- EventStoreDB expected-version behavior;
-- PostgreSQL transactions/queries;
-- Kafka or publication behavior;
-- storage/upload integration boundaries;
-- projection persistence.
+Even at those boundaries, prefer a recorded response or a hand-written stub over
+a mocking framework, and substitute only where the test is about how a failure
+is *classified* rather than about the work itself.
 
 ---
 
@@ -1716,25 +1458,25 @@ A useful conceptual direction is:
 ```text
 server / routes / plugins
           ↓
-commands / queries / workflows
+services
           ↓
-domain aggregates and policies
-          ↑
-infrastructure adapters
+policies          repositories
+                       ↓
+              infrastructure adapters
 ```
 
 Specific rules:
 
-1. aggregates must not import Fastify;
-2. aggregates must not import database clients;
-3. routes may import feature handlers/contracts, not persistence internals;
-4. workflows may coordinate features/integrations but should not absorb aggregate invariants;
+1. policies must not import Fastify, a database client, or anything else with a
+   side effect — a policy that cannot be called from a unit test is not one;
+2. services must not import Fastify;
+3. services must not write SQL; repositories own it;
+4. routes may call services, not repositories;
 5. integrations do not make domain decisions;
-6. projections consume authoritative facts but do not mutate aggregate history;
-7. features do not import implementation from another deployable application;
-8. cross-runtime serialized contracts come from `packages/contracts`;
-9. application-local infrastructure stays in `apps/api`;
-10. `lib/` must not become an unowned generic utility layer.
+6. features do not import implementation from another deployable application;
+7. cross-runtime serialized contracts come from `packages/contracts`;
+8. application-local infrastructure stays in `apps/api`;
+9. `lib/` must not become an unowned generic utility layer.
 
 ---
 
@@ -1744,20 +1486,34 @@ Feature-to-feature imports should be minimized.
 
 When one feature needs another feature's behavior, prefer one of:
 
-- an explicit application-level port/interface;
-- a workflow that coordinates both;
-- an event-driven reaction when synchronous coupling is unnecessary;
+- composing both services at the route, where the operation genuinely spans two
+  capabilities;
+- one service depending on another where the dependency runs one way and always
+  will — proving an identity ends in granting a Session, and that direction does
+  not reverse;
+- an Integration Event when synchronous coupling is unnecessary;
 - a shared cross-boundary contract where the dependency is truly serialized.
 
-Avoid importing another feature's aggregate internals simply because both live in one application.
+Avoid importing another feature's repository simply because both live in one
+application. A repository is a feature's private SQL.
 
 Feature boundaries should remain meaningful enough that future extraction is possible if scale or ownership ever justifies it.
 
 ---
 
-# No Global Controller/Service/Repository Architecture
+# Layers Within a Feature, Not Across the Application
 
-Chronologity deliberately does not organize the API as:
+Chronologity organises the API by feature, and layers *inside* each one:
+
+```text
+features/<feature>/<feature>.routes.ts
+features/<feature>/<feature>.service.ts
+features/<feature>/<feature>.repository.ts
+features/<feature>/<feature>.policy.ts
+```
+
+What it deliberately does not do is hoist those layers into application-wide
+buckets:
 
 ```text
 controllers/
@@ -1766,15 +1522,13 @@ repositories/
 models/
 ```
 
-for all features globally.
+That structure groups code by technical role while scattering one capability
+across the whole application. Changing how uploads work should mean opening one
+directory, not four.
 
-That structure groups code by technical role while scattering one domain capability across the entire application.
-
-Chronologity instead keeps behavior feature-local.
-
-A feature may still contain infrastructure adapters or application services when those abstractions are genuinely useful.
-
-The prohibition is against using generic layer buckets as the dominant repository architecture.
+There is no controller layer at all. A schema-validated Fastify handler already
+receives typed, validated input and already is one; adding another would produce
+a file per operation whose body forwards its arguments unchanged (ADR-091).
 
 ---
 
@@ -1788,9 +1542,9 @@ There is no:
 apps/admin/
 ```
 
-and there should not be a parallel `admin-api` merely because some commands require elevated permissions.
+and there should not be a parallel `admin-api` merely because some operations require elevated permissions.
 
-Administrative commands remain feature/domain operations protected by role/permission policy.
+Administrative operations remain feature/domain operations protected by role/permission policy.
 
 A future internal operational service would require a separate architecture decision based on an actual runtime/security need.
 
@@ -1819,38 +1573,23 @@ Before Chronologity's initial release, `apps/api` must support:
 - unlimited product-level media membership through bounded upload operations;
 - per-video 90-second validation;
 - Reaction lifecycle;
-- authoritative Timeline definition behavior that survives semantic revalidation;
 - notification state and workflows required by launch;
 - moderation/report/enforcement behavior;
-- EventStoreDB aggregate persistence where selected;
-- optimistic concurrency;
-- PostgreSQL operational/read state;
-- reliable event publication;
+- authoritative PostgreSQL state for every feature;
+- state transitions guarded by conditional updates;
+- reliable event publication through the transactional outbox;
 - idempotent downstream handling contracts;
 - external storage integration;
 - media-processing integration;
 - tracing/logging/metrics;
 - graceful startup/shutdown;
-- unit, integration, route, projection, and workflow tests appropriate to critical paths.
+- exhaustive unit tests for policy, and integration tests against real infrastructure for services, routes, and workers.
 
 ---
 
 # Open Architectural Questions
 
 The following questions must be resolved in focused architecture documents before implementation hardens their answers.
-
-## Event-Sourced Aggregate Boundaries
-
-- Which canonical features are definitively event sourced?
-- Are both `identity` and `session` event-sourced aggregates?
-- Is `User` event sourced?
-- Is `Upload` event sourced?
-- Is `Moment` event sourced?
-- Is `Reaction` event sourced?
-- What exactly is the authoritative role of the API Timeline aggregate?
-- Is Notification event sourced or relational/operational?
-- Is Moderation case/enforcement state event sourced?
-- Which aggregates need snapshots as streams grow?
 
 ## Authentication
 
@@ -1860,7 +1599,6 @@ The following questions must be resolved in focused architecture documents befor
 - Is two-factor authentication day one?
 - What are session/access-token lifetimes?
 - How are refresh credentials represented and revoked?
-- Which session information can safely live in immutable event payloads?
 
 ## Authorization
 
@@ -1881,30 +1619,30 @@ The following questions must be resolved in focused architecture documents befor
 
 ## Timeline Feature
 
-- What authoritative information does `features/timelines` own?
-- Which existing create/update/archive/restore/delete commands remain valid after the finalized derived-Timeline product model?
-- Is Timeline a true aggregate or a persisted definition/resource feeding read-side composition?
+- What authoritative information, if any, does `features/timelines` own?
 - Which Timeline types have authoritative definitions versus purely derived scopes?
-- Which commands should be removed before implementation?
 
 ## Reliable Publication
 
-- How are EventStoreDB changes published reliably to Kafka?
-- Which process owns the subscription?
-- Where are checkpoints persisted?
-- Are Domain Events published directly or transformed into integration events?
-- How are schema versions handled?
-- How are poison messages quarantined?
-- How is downstream replay initiated?
+The mechanism is settled: services enqueue to the transactional outbox, and a
+publisher claims batches with `FOR UPDATE SKIP LOCKED` (ADR-093, ADR-096). What
+remains open is its operation at volume.
+
+- How long are published outbox rows retained, and what removes them?
+- When does a message that keeps failing stop being retried, and where does it go?
+- How are Integration Event schema versions negotiated with consumers?
+- How is downstream replay initiated without resurrecting erased data?
 
 ## Projection Execution
 
-- Do feature projection definitions execute inside API worker entry points?
-- Is there a dedicated projection process inside `apps/api`?
-- Does `projection-writer` publish to a separate worker?
-- Which projections write PostgreSQL?
-- Which write ClickHouse?
-- Does the API actually need `lib/database/clickhouse.ts` after projection architecture is finalized?
+No projector exists yet. The outbox-to-Kafka half works end to end; what reads
+Kafka and writes ClickHouse is a later phase.
+
+- Which process owns the projector, and does it live in `apps/api` or beside it?
+- How does a projector record what it has already applied, given that Kafka owns
+  consumer offsets and the previous checkpoint table was removed with the event
+  store?
+- Does the API need direct ClickHouse access at all once the projector exists?
 
 ## Media
 
@@ -1919,7 +1657,7 @@ The following questions must be resolved in focused architecture documents befor
 
 ## Notifications
 
-- Is notification creation synchronous with the triggering command or event-driven?
+- Is notification creation synchronous with the triggering change, or driven by an Integration Event?
 - What state is authoritative?
 - Where is read/unread state persisted?
 - How are push/email delivery attempts separated from notification truth?
@@ -1927,10 +1665,10 @@ The following questions must be resolved in focused architecture documents befor
 
 ## Moderation
 
-- What are the authoritative moderation aggregate boundaries?
+- What are the authoritative moderation state boundaries?
 - Is a Report separate from a moderation Case?
 - How are appeals modeled?
-- Which administrative commands require which permissions?
+- Which administrative operations require which permissions?
 - How does enforcement propagate to ClickHouse and other read systems?
 - How are emergency actions handled without bypassing auditability?
 
@@ -1939,14 +1677,14 @@ The following questions must be resolved in focused architecture documents befor
 - Which profile/user queries should remain in the API versus move to Timeline read composition?
 - Does Moment detail have both an authoritative API representation and an aggregator-composed Timeline representation?
 - How are operational queries distinguished from high-volume derived reads consistently?
-- What are the client contracts for projection-lag cases?
+- What does a client see while a derived read model has not yet caught up?
 
 ## Idempotency
 
 - Which REST mutation endpoints require idempotency keys?
 - Where are keys/results stored?
 - How long are they retained?
-- How do idempotency semantics interact with optimistic concurrency?
+- How do idempotency semantics interact with conditional state transitions?
 
 ## Errors
 
@@ -1954,14 +1692,14 @@ The following questions must be resolved in focused architecture documents befor
 - Which stable error codes exist?
 - How are validation details represented?
 - Which errors are retryable?
-- How are projection-lag or asynchronous-processing states represented without treating them as failures?
+- How are asynchronous-processing states represented without treating them as failures?
 
 ## Observability
 
 - Which tracing implementation is used?
-- How does trace context propagate into Kafka and workflows?
-- What event publication lag is acceptable?
-- How are aggregate concurrency conflicts measured?
+- How does trace context propagate through the outbox into Kafka?
+- What outbox publication lag is acceptable, and what alerts on it?
+- How often does a conditional update match nothing, and is that rate worth alerting on?
 - How are sensitive administrative actions audited?
 
 These questions should be answered in the focused documents that own them rather than embedded ad hoc into implementation.
@@ -1972,44 +1710,48 @@ These questions should be answered in the focused documents that own them rather
 
 1. `apps/api` is Chronologity's authoritative backend application.
 2. The API owns authoritative mutations; the feed aggregator owns high-volume Timeline read composition.
-3. Fastify routes remain thin transport adapters.
-4. Domain aggregates do not depend on Fastify or persistence clients.
-5. Feature organization is primary.
-6. No global controller/service/repository hierarchy defines the application.
-7. Commands represent intentions to change authoritative state.
-8. Queries do not mutate authoritative state.
-9. Event-sourced aggregate writes use expected-version concurrency.
-10. Domain Events represent accepted past-tense facts.
-11. Persisted Domain Events are durable schemas and must evolve carefully.
-12. Sensitive data should not be copied unnecessarily into immutable events.
-13. Event handlers and projection consumers must tolerate duplicate delivery.
-14. Projections produce derived state; they do not become authoritative state.
-15. Projection rebuilds must honor current privacy, deletion, and moderation constraints.
-16. Workflows coordinate multi-boundary operations; they do not replace feature domain behavior.
-17. Distributed transactions across infrastructure systems are avoided.
-18. Long-running work uses explicit recoverable state.
-19. External integrations are adapters, not domain authorities.
-20. API-side ClickHouse access must remain narrowly justified and must not bypass the feed aggregator's read boundary.
-21. A Moment is the fundamental historical unit and is never equated with a single media object.
-22. The Moment model contains no recursive Sub-Moment hierarchy.
-23. A Moment may contain unlimited media at the product level.
-24. Per-video duration is limited to 90 seconds.
-25. Occurrence time remains distinct from operational timestamps.
-26. Authentication and authorization are separate concerns.
-27. Administrative authority is backend-enforced through roles/permissions.
-28. There is no separate admin application.
-29. Client-side role checks are presentation convenience, not security.
-30. Cross-application implementation imports are prohibited.
-31. Cross-runtime contracts are explicit and validated.
-32. API-local implementation types should not leak into shared contract packages without a boundary reason.
-33. Runtime validation is required at trust boundaries.
-34. Errors map from domain/application semantics to HTTP at the transport boundary.
-35. Retryable command boundaries must be safe against duplicate execution where required.
-36. Authoritative commit does not wait for every derived projection to converge unless a product guarantee explicitly requires it.
-37. A committed authoritative event must not be permanently lost to required downstream processing.
-38. Observability must trace authoritative changes through downstream publication.
-39. Tests are colocated with implementation by default.
-40. Architecture documentation must be amended when implementation intentionally changes these boundaries.
+3. PostgreSQL holds authoritative state for every feature. There is no second write store.
+4. Fastify routes remain thin transport adapters, and there is no controller layer.
+5. Within a feature, the layering is route to service to repository, with pure policy modules holding the rules.
+6. Feature organization is primary; layers exist inside a feature, never as application-wide buckets.
+7. Commands are not separated from queries.
+8. Policy modules are pure and must not import Fastify, a database client, or anything with a side effect.
+9. Services own the transactions their writes commit in.
+10. Repositories own SQL. Reads take the pool; writes take a transaction.
+11. Concurrent state transitions are guarded by conditional updates, never by read-then-write.
+12. A unique constraint decides who wins a race for a claimed name; the application does not.
+13. The first revocation of a Session is the one that stands.
+14. Integration Events are immutable, deliberately versioned, and constructed explicitly by the service that publishes them.
+15. An Integration Event reaches Kafka only through the transactional outbox, enqueued in the same transaction as the change it describes.
+16. Nothing is published as a side effect of persistence.
+17. Erasable personal data must not be written anywhere append-only, including the outbox and Kafka.
+18. Consumers must be idempotent wherever delivery can repeat.
+19. Projections produce derived state; they do not become authoritative state.
+20. Projection rebuilds must honor current privacy, deletion, and moderation constraints.
+21. Unsafe dual writes are prohibited; distributed transactions across infrastructure systems are avoided.
+22. Long-running work uses explicit, stored, recoverable state.
+23. External integrations are adapters, not domain authorities.
+24. API-side ClickHouse access must remain narrowly justified and must not bypass the feed aggregator's read boundary.
+25. A Moment is the fundamental historical unit and is never equated with a single media object.
+26. The Moment model contains no recursive Sub-Moment hierarchy.
+27. A Moment may contain unlimited media at the product level.
+28. Per-video duration is limited to 90 seconds and enforced server-side.
+29. Occurrence time remains distinct from operational timestamps.
+30. Authentication and authorization are separate concerns.
+31. Session validity is decided from the `sessions` table, which is written synchronously.
+32. Administrative authority is backend-enforced through roles and permissions, read per request rather than taken from a token.
+33. There is no separate admin application.
+34. Client-side role checks are presentation convenience, not security.
+35. Cross-application implementation imports are prohibited.
+36. Cross-runtime contracts are explicit, validated, and shared through `packages/contracts`.
+37. Runtime validation is required at trust boundaries.
+38. Errors map from domain semantics to HTTP at the transport boundary.
+39. Authoritative commit does not wait for every derived read model to converge unless a product guarantee explicitly requires it.
+40. A committed authoritative change must not be permanently lost to required downstream processing.
+41. Observability must trace authoritative changes through downstream publication.
+42. Rules live in pure policy modules and are unit tested exhaustively; services are proven by integration tests against real infrastructure.
+43. Tests are colocated with implementation by default.
+44. Architecture documentation must be amended when implementation intentionally changes these boundaries.
 
 ---
 

@@ -1006,7 +1006,7 @@ A high removal count is not inherently evidence of a good moderation system.
 45. Consequential moderation decisions should have a meaningful appeal path where appropriate.
 46. Appeals should allow relevant historical context to be reconsidered.
 47. Restored content returns according to normal historical and privacy semantics rather than receiving artificial ranking compensation.
-48. Append-only or event-sourced architecture must not prevent enforceable moderation, deletion, redaction, or erasure.
+48. Append-only storage must not prevent enforceable moderation, deletion, redaction, or erasure.
 49. Internal moderation provenance should support auditability and appeals without becoming public historical metadata by default.
 50. Automated moderation is assistive and fallible.
 51. AI moderation must not silently determine historical truth, significance, Person identity, Event membership, or causality.
@@ -1076,6 +1076,44 @@ The initial release does not require:
 - or a complex multi-tier enforcement ladder beyond what launch safety actually requires.
 
 Chronologity should launch with a smaller enforceable policy system rather than an elaborate moderation taxonomy that the team cannot operate consistently.
+
+## Established Moderation Decisions
+
+These were open questions. Implementation settled them, and they are requirements now rather than possibilities (ADR-116).
+
+**All seven states ship**, and two of them hide nothing. `warned` carries a warning and restricts no access; `restricted_from_amplification` leaves a Moment reachable directly and keeps it out of Discovery, broad Search, and recommendation, which the surfaces that amplify enforce.
+
+**Moderation withholds and never deletes.** An author always reads their own, whatever has been decided about it — including while suspended. Somebody who cannot see what was hidden cannot meaningfully appeal it, and reversing an appeal restores what was restricted exactly.
+
+**Report volume orders the queue and establishes nothing.** Review priority is computed from how many separate people reported a subject and how severe the reason is; one credible threat outranks fifty spam reports. A burst of reports arriving together is flagged for a reviewer and is deliberately not an escalation.
+
+**One person may report one subject once**, enforced by the database. This removes the crudest form of manufactured volume. It does not stop a coordinated group and nothing here pretends to; what it stops is one account inflating a count by itself.
+
+**Automation is triage only.** It orders a queue and never decides an outcome. There is no classifier and no AI adjudication, and every action records whether a person or a program produced it.
+
+**Safety reports and accuracy reports are separate tables with separate queues.** Nothing filed as an accuracy report can reach a moderation state: a wrong date is something to fix, not something to enforce against.
+
+**Report status is `Submitted`, `Under review`, `Resolved`, or `Closed`,** and the last two are terminal. A report may be closed with nothing done, because no violation is a real outcome. Acting on a subject resolves the open reports about it, so no reporter is left watching a report that was acted on days ago.
+
+**A reporter sees status and nothing else** — no reviewer identity, no priority, no burst flag, and nothing about the person reported. The person reported never learns who reported them.
+
+**Media is a moderatable subject, and moderating a Moment's last remaining medium makes the Moment itself unavailable.** A Moment without media could not have been created, so one whose last medium has gone cannot stay readable. The rule falls out of that existing constraint rather than being chosen here.
+
+**A tombstone appears where moderation took the far end of a relationship, and nowhere else.** A chain running `Moment A → [unavailable] → Moment C` keeps its shape rather than silently becoming two unrelated pairs, and the tombstone carries no title, author, place, Event, or media. A far end hidden by *privacy* is omitted entirely rather than marked: `privacy.md:158` forbids using a visible relationship to reveal an inaccessible Moment, and a marker where somebody's private history sits would announce that it exists. Chronologity admitting its own act discloses nothing about anybody else; a person's privacy choice is not Chronologity's to admit.
+
+**Somebody may read what was done to their own content, and nobody else's.** Attempts that were refused are excluded from that view — those are evidence for a security review rather than something that happened to them.
+
+**Every moderation attempt is recorded, including refused ones.** Somebody probing whether they can suspend an account leaves the same kind of evidence as an attempted privilege escalation.
+
+**Four moderator capabilities exist rather than one:** reviewing reports, deciding what is distributed, suspending accounts, and judging appeals. An administrator inherits none of them. Somebody who needs both roles gets both, explicitly.
+
+**One open appeal per decision.** Otherwise the same decision can be contested indefinitely and the appeal queue becomes the pressure surface the report queue was protected from.
+
+### What is deliberately not built
+
+**A public transparency dashboard is documentation, not an endpoint.** Explaining what is prohibited, what restrictions exist, how reporting works, and whether appeals exist is a page to write. Publishing removal volume would publish exactly the numbers this document warns are not evidence of a good system.
+
+**No Integration Event is published.** There is no consumer until the Timeline projections exist. Removal reaches significance in-process, which is the one place it must reach today.
 
 ## Open Product Questions
 
@@ -1200,7 +1238,7 @@ The following questions require deliberate resolution:
 - How quickly to Timeline/zoom projections?
 - How quickly to media CDN caches?
 - What user-facing guarantee can realistically be made?
-- How should moderation state interact with EventStoreDB's append-only history?
+- How should moderation state interact with append-only surfaces such as published Integration Events?
 - Which event payloads may contain content that later requires erasure?
 - Should sensitive content be stored outside immutable event payloads with references from events?
 - This is primarily an architecture decision, but the product requires enforceable removal and erasure.
@@ -1385,7 +1423,7 @@ Moderation actions must be idempotent and traceable enough to support retries, a
 
 Restoration must be possible without rewriting historical occurrence timestamps or treating restored content as newly occurring history.
 
-Event sourcing and append-only logs must not make prohibited content permanently retrievable through ordinary product paths.
+Append-only logs must not make prohibited content permanently retrievable through ordinary product paths.
 
 Where immutable records contain references to content that must later be erased, architecture must permit the sensitive payload itself to become inaccessible while preserving only legally and product-appropriate structural history.
 

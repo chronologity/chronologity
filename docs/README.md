@@ -36,7 +36,7 @@ Documentation should explain **why a constraint exists**, define the invariants 
 4.  Open questions should remain explicit rather than being answered accidentally during implementation.
 5.  Resolved decisions should be removed from open-question lists and stated as invariants or requirements.
 6.  Documentation should distinguish conceptual models from required persistence models.
-7.  A domain concept does not automatically require a dedicated service, database, aggregate, table, topic, or API.
+7.  A domain concept does not automatically require a dedicated service, database, table, topic, or API.
 8.  Derived data must preserve the semantics, privacy, and integrity of its source information.
 9.  Documentation should be updated when a product or architecture decision changes.
 10. Architectural decisions with meaningful alternatives or long-term consequences should be captured in ADRs.
@@ -54,8 +54,10 @@ docs/
 │   ├── vision.md
 │   ├── concepts.md
 │   ├── moments.md
+│   ├── participation.md
 │   ├── timelines.md
 │   ├── timeline.md
+│   ├── timeline-first-curation-and-discovery.md
 │   ├── causality.md
 │   ├── historical-significance.md
 │   ├── users.md
@@ -67,6 +69,7 @@ docs/
 │   ├── locations.md
 │   ├── feed.md
 │   ├── discovery.md
+│   ├── saved-views.md
 │   ├── search.md
 │   ├── notifications.md
 │   ├── media.md
@@ -81,8 +84,6 @@ docs/
     ├── api.md
     ├── authentication.md
     ├── authorization.md
-    ├── cqrs.md
-    ├── event-sourcing.md
     ├── events.md
     ├── messaging.md
     ├── projections.md
@@ -118,7 +119,7 @@ It defines the documentation taxonomy, responsibilities of each documentation ar
 
 Defines canonical Chronologity terminology used across product and engineering documentation.
 
-It should resolve ambiguous terms such as Moment, Timeline, Feed, Event, occurrence time, creation time, context, historical jump, temporal zoom, projection, aggregate, domain event, and read model.
+It should resolve ambiguous terms such as Moment, Timeline, Feed, Event, occurrence time, creation time, context, historical jump, temporal zoom, projection, domain event, integration event, and read model.
 
 The glossary should describe terminology rather than replace the deeper specifications that define each concept.
 
@@ -149,6 +150,10 @@ It provides a common semantic foundation for more detailed product specification
 Defines Moment identity, occurrence semantics, media behavior, lifecycle, editing, historical integrity, and product invariants.
 
 A Moment represents an experience rather than a file or social-media post. A Moment may contain an unlimited number of images and videos at the product-model level, while each individual video has a maximum duration of 90 seconds.
+
+## `product/participation.md`
+
+What it means for somebody to be part of a Moment they did not record. Defines participation as the one relationship Chronologity represents between a person and another person's history, the propose-and-accept consent model, withdrawal, erasure, and what an accepted participation does to a Timeline. Canonical for a question `moments.md`, `identity.md` and `privacy.md` each deferred.
 
 ## `product/timelines.md`
 
@@ -276,7 +281,7 @@ These documents should describe boundaries, flows, guarantees, tradeoffs, and ar
 
 Provides the authoritative high-level architecture of Chronologity.
 
-It should describe the API, EventStoreDB, PostgreSQL, Kafka, ClickHouse, media infrastructure, Feed Aggregator, mobile application, web application, shared packages, and major data flows.
+It should describe the API, PostgreSQL, Kafka, ClickHouse, media infrastructure, Feed Aggregator, mobile application, web application, shared packages, and major data flows.
 
 ## `architecture/principles.md`
 
@@ -308,23 +313,11 @@ Defines how Chronologity decides whether an authenticated actor may perform an o
 
 It should address source data and derived views, including Timeline projections, ClickHouse, search, media, historical jumps, and contextual aggregates.
 
-## `architecture/cqrs.md`
-
-Defines Chronologity's CQRS model and the boundary between commands and queries.
-
-It should explain why CQRS is used, where it applies, where it does not, and how consistency expectations differ between write state and read models.
-
-## `architecture/event-sourcing.md`
-
-Defines the use of Event Sourcing within Chronologity.
-
-It should establish aggregate persistence semantics, event append behavior, concurrency, replay, snapshots if used, deletion/privacy constraints, and boundaries where event sourcing is intentionally not used.
-
 ## `architecture/events.md`
 
 Explains the architectural role of domain and integration events.
 
-It should distinguish event-store events from Kafka messages and from the product concept of real-world Events.
+It should distinguish the Integration Events that cross service boundaries from the product concept of real-world Events, and say what belongs in a published payload.
 
 ## `architecture/messaging.md`
 
@@ -370,7 +363,7 @@ It should cover event triggers, projection/state requirements, deduplication, ag
 
 ## `architecture/data-storage.md`
 
-Provides the high-level allocation of data responsibilities across EventStoreDB, PostgreSQL, ClickHouse, object storage, caches, and any future stores.
+Provides the high-level allocation of data responsibilities across PostgreSQL, ClickHouse, object storage, caches, and any future stores.
 
 It should explain why each store exists and prohibit casual duplication of authoritative responsibilities.
 
@@ -384,7 +377,7 @@ It should cover cache eligibility, invalidation, authorization-sensitive data, m
 
 Translates `product/privacy.md` into cross-system technical guarantees.
 
-It should address authorization-aware projections, deletion, revocation, caches, Kafka, EventStoreDB, PostgreSQL, ClickHouse, media storage, logs, analytics, and derived data.
+It should address authorization-aware projections, deletion, revocation, caches, Kafka, PostgreSQL, ClickHouse, media storage, logs, analytics, and derived data.
 
 ## `architecture/security.md`
 
@@ -654,7 +647,7 @@ Privacy applies to source and derived data.
 Timeline context cannot bypass Moment privacy.
 Temporal zoom cannot bypass privacy.
 Historical jumps cannot bypass privacy.
-Event sourcing does not override deletion or erasure requirements.
+Append-only storage does not override deletion or erasure requirements.
 ```
 
 ## Historical Significance

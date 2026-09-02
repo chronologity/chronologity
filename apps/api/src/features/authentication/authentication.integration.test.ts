@@ -1,0 +1,1277 @@
+import { testAppConfig } from "../../testing/app-config.js";
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { afterAll, beforeAll, beforeEach, describe, it } from "vitest";
+import type { FastifyInstance } from "fastify";
+import { readAuthAudit } from "../../lib/auth/audit.js";
+import { migrate } from "../../lib/database/migrations.js";
+import { connectDatabase, createDatabase, type Database } from "../../lib/database/postgres.js";
+import { buildApp } from "../../server/app.js";
+import {
+  createTestAuthentication,
+  type TestAuthentication,
+} from "../../testing/authentication.js";
+
+/**
+ * Authentication, end to end against real infrastructure.
+ *
+ * The magic-link flow is driven through the HTTP surface and the link is read
+ * back out of Mailpit over SMTP, so nothing about delivery is stubbed. A test
+ * that fabricated the token would prove the parts work while leaving the seam
+ * between them — the part that actually breaks — untested.
+ *
+ * Nothing here substitutes the database either. Every rule that matters is a
+ * conditional write, and a fake repository would test the substitute rather
+ * than the rule.
+ *
+ * Requires `pnpm infra:up`. Run with `pnpm test:integration`.
+ */
+
+const MAILPIT = `http://127.0.0.1:${process.env.MAILPIT_UI_PORT ?? "8025"}`;
+
+const config = testAppConfig("auth-integration");
+
+/** Read the most recent link Mailpit received for an address. */
+async function readMagicLinkFor(email: string, timeoutMs = 10_000): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const response = await fetch(
+      `${MAILPIT}/api/v1/search?query=${encodeURIComponent(`to:${email}`)}`,
+    );
+    const body = (await response.json()) as { messages?: { ID: string }[] };
+    const id = body.messages?.[0]?.ID;
+
+    if (id !== undefined) {
+      const message = await fetch(`${MAILPIT}/api/v1/message/${id}`);
+      const detail = (await message.json()) as { Text?: string };
+      const token = /[?&]token=([A-Za-z0-9_-]+)/.exec(detail.Text ?? "")?.[1];
+
+      if (token !== undefined) {
+        return token;
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+
+  throw new Error(`No sign-in link arrived for ${email}`);
+}
+
+/** Read the subject lines Mailpit received for an address, newest first. */
+async function readSubjectsFor(email: string, timeoutMs = 10_000): Promise<string[]> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const response = await fetch(
+      `${MAILPIT}/api/v1/search?query=${encodeURIComponent(`to:${email}`)}`,
+    );
+    const body = (await response.json()) as { messages?: { Subject: string }[] };
+    const subjects = body.messages?.map((message) => message.Subject) ?? [];
+
+    if (subjects.length > 0) {
+      return subjects;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+
+  return [];
+}
+
+const uniqueEmail = () => `person-${randomUUID()}@example.test`;
+
+describe("authentication", () => {
+  let app: FastifyInstance;
+  let database: Database;
+  let authentication: TestAuthentication;
+  let clock = () => new Date();
+
+  beforeAll(async () => {
+    database = createDatabase(config.database);
+    await connectDatabase(database);
+    await migrate(database.dataSource);
+
+    authentication = createTestAuthentication(database.dataSource, config.auth, config.email, () =>
+      clock(),
+    );
+
+    app = await buildApp({ config, dependencies: [], authentication });
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await authentication.close();
+    await database.close();
+  });
+
+  beforeEach(() => {
+    clock = () => new Date();
+  });
+
+  const requestLink = async (email: string) =>
+    app.inject({ method: "POST", url: "/auth/magic-link", payload: { email } });
+
+  const signIn = async (email: string) => {
+    await requestLink(email);
+    const token = await readMagicLinkFor(email);
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/sessions",
+      payload: { token },
+    });
+
+    assert.equal(response.statusCode, 201, response.body);
+    return { token, credentials: response.json() };
+  };
+
+  it("signs a new person in: link requested, delivered, redeemed", async () => {
+    const email = uniqueEmail();
+    const { credentials } = await signIn(email);
+
+    assert.match(credentials.sessionId, /^[0-9a-f-]{36}$/);
+    assert.ok(credentials.accessToken.length > 0);
+    assert.ok(credentials.refreshToken.length > 0);
+  });
+
+  it("returns the same response whether or not the address is known", async () => {
+    const known = uniqueEmail();
+    await signIn(known);
+
+    const first = await requestLink(known);
+    const second = await requestLink(uniqueEmail());
+
+    // Different responses here would let anyone test whether an address has an
+    // account, one request at a time.
+    assert.equal(first.statusCode, second.statusCode);
+    assert.deepEqual(first.json(), second.json());
+  });
+
+  it("gives a returning person the same identity", async () => {
+    const email = uniqueEmail();
+    const first = await signIn(email);
+    const second = await signIn(email);
+
+    assert.notEqual(first.credentials.sessionId, second.credentials.sessionId);
+
+    const audit = await readAuthAudit(database.dataSource, await identityIdFor(email));
+    assert.ok(audit.filter((entry) => entry.eventType === "session_created").length >= 2);
+  });
+
+  it("records the identity itself, not only the address pointing at it", async () => {
+    const email = uniqueEmail();
+    await signIn(email);
+    const identityId = await identityIdFor(email);
+
+    const rows: { identity_id: string }[] = await database.dataSource.query(
+      `SELECT identity_id FROM identities WHERE identity_id = $1`,
+      [identityId],
+    );
+
+    // Written in the same transaction as the claim, so an Identity is never an
+    // address pointing at nothing.
+    assert.equal(rows.length, 1);
+  });
+
+  it("refuses a link that has already been used", async () => {
+    const email = uniqueEmail();
+    const { token } = await signIn(email);
+
+    const replay = await app.inject({ method: "POST", url: "/auth/sessions", payload: { token } });
+
+    assert.equal(replay.statusCode, 401);
+  });
+
+  it("refuses an expired link", async () => {
+    const email = uniqueEmail();
+    await requestLink(email);
+    const token = await readMagicLinkFor(email);
+
+    // Past the fifteen-minute lifetime, without waiting fifteen minutes.
+    clock = () => new Date(Date.now() + 16 * 60 * 1000);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/sessions",
+      payload: { token },
+    });
+
+    assert.equal(response.statusCode, 401);
+  });
+
+  it("refuses a link that was never issued", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/sessions",
+      payload: { token: "definitely-not-a-real-token" },
+    });
+
+    assert.equal(response.statusCode, 401);
+  });
+
+  it("authenticates a request with the access token", async () => {
+    const { credentials } = await signIn(uniqueEmail());
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/auth/sessions",
+      headers: { authorization: `Bearer ${credentials.accessToken}` },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().sessions.length, 1);
+    assert.equal(response.json().sessions[0].current, true);
+  });
+
+  it("refuses a request with no token, a malformed token, or a forged one", async () => {
+    for (const headers of [
+      {},
+      { authorization: "Bearer nonsense" },
+      { authorization: "Basic abc" },
+    ]) {
+      const response = await app.inject({ method: "GET", url: "/auth/sessions", headers });
+      assert.equal(response.statusCode, 401);
+    }
+  });
+
+  describe("refresh", () => {
+    it("rotates the credential and invalidates its predecessor", async () => {
+      const { credentials } = await signIn(uniqueEmail());
+
+      const refreshed = await app.inject({
+        method: "POST",
+        url: "/auth/sessions/refresh",
+        payload: { sessionId: credentials.sessionId, refreshToken: credentials.refreshToken },
+      });
+
+      assert.equal(refreshed.statusCode, 200);
+      assert.notEqual(refreshed.json().refreshToken, credentials.refreshToken);
+    });
+
+    it("revokes the session when a rotated credential is replayed", async () => {
+      const { credentials } = await signIn(uniqueEmail());
+
+      const refreshed = await app.inject({
+        method: "POST",
+        url: "/auth/sessions/refresh",
+        payload: { sessionId: credentials.sessionId, refreshToken: credentials.refreshToken },
+      });
+      assert.equal(refreshed.statusCode, 200);
+
+      // The original credential is now stale. Presenting it means a copy is in
+      // circulation, and the session cannot be trusted.
+      const replayed = await app.inject({
+        method: "POST",
+        url: "/auth/sessions/refresh",
+        payload: { sessionId: credentials.sessionId, refreshToken: credentials.refreshToken },
+      });
+      assert.equal(replayed.statusCode, 401);
+
+      // The rotated credential is dead too: the whole session went, not just
+      // the credential that was replayed.
+      const afterRevocation = await app.inject({
+        method: "POST",
+        url: "/auth/sessions/refresh",
+        payload: {
+          sessionId: credentials.sessionId,
+          refreshToken: refreshed.json().refreshToken,
+        },
+      });
+      assert.equal(afterRevocation.statusCode, 401);
+
+      const stillAuthenticated = await app.inject({
+        method: "GET",
+        url: "/auth/sessions",
+        headers: { authorization: `Bearer ${refreshed.json().accessToken}` },
+      });
+      assert.equal(stillAuthenticated.statusCode, 401);
+    });
+
+    it("refuses a refresh for an unknown session", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/auth/sessions/refresh",
+        payload: { sessionId: randomUUID(), refreshToken: "whatever" },
+      });
+
+      assert.equal(response.statusCode, 401);
+    });
+
+    it("lets exactly one of two simultaneous refreshes win", async () => {
+      const { credentials } = await signIn(uniqueEmail());
+
+      const refresh = () =>
+        app.inject({
+          method: "POST",
+          url: "/auth/sessions/refresh",
+          payload: { sessionId: credentials.sessionId, refreshToken: credentials.refreshToken },
+        });
+
+      const [first, second] = await Promise.all([refresh(), refresh()]);
+
+      // Both present the same valid credential at the same moment. The
+      // rotation is one conditional update, so the database decides: the loser
+      // matches nothing rather than minting a second replacement.
+      const statuses = [first.statusCode, second.statusCode].sort();
+      assert.deepEqual(statuses, [200, 401]);
+
+      const rows: { refresh_generation: number }[] = await database.dataSource.query(
+        `SELECT refresh_generation FROM sessions WHERE session_id = $1`,
+        [credentials.sessionId],
+      );
+      assert.equal(rows[0]?.refresh_generation, 1, "the credential rotated exactly once");
+    });
+
+    it("lets revocation win over a refresh racing it", async () => {
+      const { credentials } = await signIn(uniqueEmail());
+
+      const [revoked, refreshed] = await Promise.all([
+        app.inject({
+          method: "DELETE",
+          url: `/auth/sessions/${credentials.sessionId}`,
+          headers: { authorization: `Bearer ${credentials.accessToken}` },
+        }),
+        app.inject({
+          method: "POST",
+          url: "/auth/sessions/refresh",
+          payload: { sessionId: credentials.sessionId, refreshToken: credentials.refreshToken },
+        }),
+      ]);
+
+      assert.equal(revoked.statusCode, 204);
+
+      // Whichever order they landed in, the session is gone afterwards: the
+      // rotation requires the session to be unrevoked, and revocation keeps
+      // whichever reason arrived first.
+      const after = await app.inject({
+        method: "GET",
+        url: "/auth/sessions",
+        headers: { authorization: `Bearer ${credentials.accessToken}` },
+      });
+      assert.equal(after.statusCode, 401);
+
+      if (refreshed.statusCode === 200) {
+        const withNewCredential = await app.inject({
+          method: "POST",
+          url: "/auth/sessions/refresh",
+          payload: {
+            sessionId: credentials.sessionId,
+            refreshToken: refreshed.json().refreshToken,
+          },
+        });
+        assert.equal(withNewCredential.statusCode, 401);
+      }
+    });
+
+    it("refuses to refresh a session whose credential was never recorded", async () => {
+      // What a session created before credentials were stored looks like. A
+      // null must not match a presented hash, or such a session would refresh
+      // for anyone who named it.
+      const { credentials } = await signIn(uniqueEmail());
+
+      await database.dataSource.query(
+        `UPDATE sessions SET refresh_token_hash = NULL WHERE session_id = $1`,
+        [credentials.sessionId],
+      );
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/auth/sessions/refresh",
+        payload: { sessionId: credentials.sessionId, refreshToken: credentials.refreshToken },
+      });
+
+      assert.equal(response.statusCode, 401);
+    });
+  });
+
+  describe("revocation", () => {
+    it("stops an access token working immediately, without waiting for expiry", async () => {
+      const { credentials } = await signIn(uniqueEmail());
+
+      const revoked = await app.inject({
+        method: "DELETE",
+        url: `/auth/sessions/${credentials.sessionId}`,
+        headers: { authorization: `Bearer ${credentials.accessToken}` },
+      });
+      assert.equal(revoked.statusCode, 204);
+
+      // The token is still signed and still unexpired. Validity is decided by
+      // the Session, which is the point.
+      const afterRevocation = await app.inject({
+        method: "GET",
+        url: "/auth/sessions",
+        headers: { authorization: `Bearer ${credentials.accessToken}` },
+      });
+      assert.equal(afterRevocation.statusCode, 401);
+    });
+
+    it("will not let one person revoke another's session", async () => {
+      const mine = await signIn(uniqueEmail());
+      const theirs = await signIn(uniqueEmail());
+
+      const response = await app.inject({
+        method: "DELETE",
+        url: `/auth/sessions/${theirs.credentials.sessionId}`,
+        headers: { authorization: `Bearer ${mine.credentials.accessToken}` },
+      });
+
+      assert.equal(response.statusCode, 401);
+
+      // Theirs still works.
+      const unaffected = await app.inject({
+        method: "GET",
+        url: "/auth/sessions",
+        headers: { authorization: `Bearer ${theirs.credentials.accessToken}` },
+      });
+      assert.equal(unaffected.statusCode, 200);
+    });
+
+    it("logs out everywhere", async () => {
+      const email = uniqueEmail();
+      const first = await signIn(email);
+      const second = await signIn(email);
+
+      const response = await app.inject({
+        method: "DELETE",
+        url: "/auth/sessions",
+        headers: { authorization: `Bearer ${first.credentials.accessToken}` },
+      });
+
+      assert.equal(response.statusCode, 200);
+      assert.ok(response.json().revoked >= 2);
+
+      for (const credentials of [first.credentials, second.credentials]) {
+        const check = await app.inject({
+          method: "GET",
+          url: "/auth/sessions",
+          headers: { authorization: `Bearer ${credentials.accessToken}` },
+        });
+        assert.equal(check.statusCode, 401);
+      }
+    });
+  });
+
+  it("records security events without recording credentials", async () => {
+    const email = uniqueEmail();
+    const { credentials } = await signIn(email);
+    const identityId = await identityIdFor(email);
+
+    const audit = await readAuthAudit(database.dataSource, identityId);
+    const types = audit.map((entry) => entry.eventType);
+
+    assert.ok(types.includes("session_created"));
+    assert.ok(types.includes("magic_link_consumed"));
+
+    const rows: { context: unknown; reason: string | null }[] = await database.dataSource.query(
+      `SELECT context, reason FROM auth_audit_events WHERE identity_id = $1`,
+      [identityId],
+    );
+    const serialized = JSON.stringify(rows);
+
+    assert.ok(
+      !serialized.includes(credentials.refreshToken),
+      "a refresh token reached the audit log",
+    );
+    assert.ok(
+      !serialized.includes(credentials.accessToken),
+      "an access token reached the audit log",
+    );
+  });
+
+  it("stores no magic-link token in recoverable form", async () => {
+    const email = uniqueEmail();
+    await requestLink(email);
+    const token = await readMagicLinkFor(email);
+
+    const rows: { token_hash: string }[] = await database.dataSource.query(
+      `SELECT token_hash FROM magic_link_tokens`,
+    );
+
+    // A database leak must not hand over working sign-in links.
+    assert.ok(!rows.some((row) => row.token_hash === token));
+  });
+
+  it("stops a burst of sign-in link requests", async () => {
+    const limited = await buildApp({
+      config,
+      dependencies: [],
+      authentication: {
+        ...authentication,
+        rateLimits: {
+          magicLinkRequestsPerWindow: 3,
+          sessionCreationsPerWindow: 10,
+          passwordAttemptsPerWindow: 3,
+          registrationsPerWindow: 10,
+          phoneCodeRequestsPerWindow: 3,
+          phoneCodeAttemptsPerWindow: 10,
+          windowMinutes: 15,
+        },
+      },
+    });
+
+    try {
+      const email = uniqueEmail();
+      const statuses: number[] = [];
+
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const response = await limited.inject({
+          method: "POST",
+          url: "/auth/magic-link",
+          payload: { email },
+        });
+        statuses.push(response.statusCode);
+      }
+
+      assert.deepEqual(statuses.slice(0, 3), [202, 202, 202]);
+      assert.deepEqual(statuses.slice(3), [429, 429]);
+    } finally {
+      await limited.close();
+    }
+  });
+
+  it("protects the endpoints with default limits when none are configured", async () => {
+    // Every other application in this suite raises the limits so the tests do
+    // not trip them. Nothing obliges a deployment to configure any, and an
+    // unconfigured endpoint must still be bounded.
+    const { rateLimits: _unused, ...unconfigured } = authentication;
+    const app = await buildApp({ config, dependencies: [], authentication: unconfigured });
+
+    try {
+      const email = uniqueEmail();
+      const statuses: number[] = [];
+
+      for (let attempt = 0; attempt < 7; attempt += 1) {
+        const response = await app.inject({
+          method: "POST",
+          url: "/auth/magic-link",
+          payload: { email },
+        });
+        statuses.push(response.statusCode);
+      }
+
+      assert.ok(
+        statuses.includes(429),
+        `an unconfigured endpoint accepted every request: ${statuses.join(", ")}`,
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  describe("password authentication", () => {
+    const strongPassword = "a perfectly reasonable passphrase";
+
+    const register = async (email: string, password = strongPassword) =>
+      app.inject({ method: "POST", url: "/auth/registrations", payload: { email, password } });
+
+    const signInWithPassword = async (email: string, password = strongPassword) =>
+      app.inject({
+        method: "POST",
+        url: "/auth/sessions/password",
+        payload: { email, password },
+      });
+
+    const registerAndVerify = async (email: string, password = strongPassword) => {
+      const registration = await register(email, password);
+      assert.equal(registration.statusCode, 202, registration.body);
+
+      const token = await readMagicLinkFor(email);
+      const verified = await app.inject({
+        method: "POST",
+        url: "/auth/email-verifications",
+        payload: { token },
+      });
+      assert.equal(verified.statusCode, 204, verified.body);
+
+      return token;
+    };
+
+    it("registers, verifies by mail, and signs in", async () => {
+      const email = uniqueEmail();
+      await registerAndVerify(email);
+
+      const signedIn = await signInWithPassword(email);
+
+      assert.equal(signedIn.statusCode, 201, signedIn.body);
+      assert.ok(signedIn.json().accessToken.length > 0);
+    });
+
+    it("refuses a password sign-in before the address is verified", async () => {
+      // Anyone can type any address. Until control is proven, a password on it
+      // means nothing (authentication.md:240).
+      const email = uniqueEmail();
+      const registration = await register(email);
+      assert.equal(registration.statusCode, 202);
+
+      const signedIn = await signInWithPassword(email);
+
+      assert.equal(signedIn.statusCode, 401);
+    });
+
+    it("answers identically for a wrong password and an unknown address", async () => {
+      const email = uniqueEmail();
+      await registerAndVerify(email);
+
+      const wrongPassword = await signInWithPassword(email, "some other passphrase entirely");
+      const unknownAddress = await signInWithPassword(uniqueEmail());
+
+      assert.equal(wrongPassword.statusCode, unknownAddress.statusCode);
+      assert.deepEqual(wrongPassword.json().code, unknownAddress.json().code);
+      assert.deepEqual(wrongPassword.json().message, unknownAddress.json().message);
+    });
+
+    it("answers identically when an address is already registered", async () => {
+      const email = uniqueEmail();
+      const first = await register(email);
+      const second = await register(email);
+
+      assert.equal(first.statusCode, second.statusCode);
+      assert.deepEqual(first.json(), second.json());
+
+      // The owner is told instead of the caller.
+      const notice = await readMailSubjectsFor(email);
+      assert.ok(
+        notice.some((subject) => subject.includes("tried to register")),
+        `expected a notice to the owner, saw ${JSON.stringify(notice)}`,
+      );
+    });
+
+    it("refuses a password the policy rejects, and says why", async () => {
+      // The one thing worth explaining plainly: refusing without a reason
+      // leaves someone guessing at rules they cannot see.
+      const response = await register(uniqueEmail(), "password123");
+
+      assert.equal(response.statusCode, 400);
+      assert.equal(response.json().code, "VALIDATION_FAILED");
+    });
+
+    it("refuses a password that has appeared in a breach", async () => {
+      // Long and unpatterned, so only the corpus catches it. This is what an
+      // attacker replays rather than guesses.
+      const response = await register(uniqueEmail(), "PE#5GZ29PTZMSE");
+
+      assert.equal(response.statusCode, 400);
+      assert.match(response.json().message, /data breach/);
+    });
+
+    it("resets a password and ends every existing session", async () => {
+      const email = uniqueEmail();
+      await registerAndVerify(email);
+
+      const before = await signInWithPassword(email);
+      assert.equal(before.statusCode, 201);
+
+      const requested = await app.inject({
+        method: "POST",
+        url: "/auth/password-resets",
+        payload: { email },
+      });
+      assert.equal(requested.statusCode, 202);
+
+      const token = await readMagicLinkFor(email);
+      const completed = await app.inject({
+        method: "POST",
+        url: "/auth/password-resets/complete",
+        payload: { token, password: "an entirely different passphrase" },
+      });
+      assert.equal(completed.statusCode, 204, completed.body);
+
+      // A reset is what someone does when they may have lost control, so every
+      // session goes with it.
+      const stillValid = await app.inject({
+        method: "GET",
+        url: "/auth/sessions",
+        headers: { authorization: `Bearer ${before.json().accessToken}` },
+      });
+      assert.equal(stillValid.statusCode, 401);
+
+      assert.equal((await signInWithPassword(email)).statusCode, 401);
+      assert.equal(
+        (await signInWithPassword(email, "an entirely different passphrase")).statusCode,
+        201,
+      );
+    });
+
+    it("changes a password, keeping the current session and ending the others", async () => {
+      const email = uniqueEmail();
+      await registerAndVerify(email);
+
+      const current = await signInWithPassword(email);
+      const other = await signInWithPassword(email);
+      assert.equal(current.statusCode, 201);
+      assert.equal(other.statusCode, 201);
+
+      const changed = await app.inject({
+        method: "PUT",
+        url: "/auth/password",
+        headers: { authorization: `Bearer ${current.json().accessToken}` },
+        payload: {
+          currentPassword: strongPassword,
+          newPassword: "yet another reasonable passphrase",
+        },
+      });
+
+      assert.equal(changed.statusCode, 200, changed.body);
+      assert.ok(changed.json().otherSessionsRevoked >= 1);
+
+      // The device doing the changing stays signed in; the others do not.
+      const currentStillWorks = await app.inject({
+        method: "GET",
+        url: "/auth/sessions",
+        headers: { authorization: `Bearer ${current.json().accessToken}` },
+      });
+      assert.equal(currentStillWorks.statusCode, 200);
+
+      const otherIsDead = await app.inject({
+        method: "GET",
+        url: "/auth/sessions",
+        headers: { authorization: `Bearer ${other.json().accessToken}` },
+      });
+      assert.equal(otherIsDead.statusCode, 401);
+    });
+
+    it("requires the current password to change it", async () => {
+      // An access token left on a shared device must not be enough to take an
+      // account over.
+      const email = uniqueEmail();
+      await registerAndVerify(email);
+      const session = await signInWithPassword(email);
+
+      const changed = await app.inject({
+        method: "PUT",
+        url: "/auth/password",
+        headers: { authorization: `Bearer ${session.json().accessToken}` },
+        payload: { currentPassword: "not the password", newPassword: "a fine new passphrase" },
+      });
+
+      assert.equal(changed.statusCode, 401);
+      assert.equal(
+        (await signInWithPassword(email)).statusCode,
+        201,
+        "password should be unchanged",
+      );
+    });
+
+    it("will not let one kind of link do another's job", async () => {
+      const email = uniqueEmail();
+      const registration = await register(email);
+      assert.equal(registration.statusCode, 202);
+      const verificationToken = await readMagicLinkFor(email);
+
+      // A verification link is not a reset link, and not a sign-in link.
+      const asReset = await app.inject({
+        method: "POST",
+        url: "/auth/password-resets/complete",
+        payload: { token: verificationToken, password: "a fine new passphrase" },
+      });
+      assert.equal(asReset.statusCode, 401);
+
+      const asSignIn = await app.inject({
+        method: "POST",
+        url: "/auth/sessions",
+        payload: { token: verificationToken },
+      });
+      assert.equal(asSignIn.statusCode, 401);
+
+      // And it still works for what it was issued for.
+      const asVerification = await app.inject({
+        method: "POST",
+        url: "/auth/email-verifications",
+        payload: { token: verificationToken },
+      });
+      assert.equal(asVerification.statusCode, 204);
+    });
+
+    it("keeps magic-link sign-in working for an account that has a password", async () => {
+      const email = uniqueEmail();
+      await registerAndVerify(email);
+
+      await app.inject({ method: "POST", url: "/auth/magic-link", payload: { email } });
+      const linkToken = await readMagicLinkFor(email);
+      const linkSignIn = await app.inject({
+        method: "POST",
+        url: "/auth/sessions",
+        payload: { token: linkToken },
+      });
+
+      assert.equal(linkSignIn.statusCode, 201, linkSignIn.body);
+
+      // Both methods lead to the same account.
+      const passwordSignIn = await signInWithPassword(email);
+      assert.equal(passwordSignIn.statusCode, 201);
+      assert.notEqual(linkSignIn.json().sessionId, passwordSignIn.json().sessionId);
+    });
+
+    it("stores no password in recoverable form, and none in the audit trail or outbox", async () => {
+      const email = uniqueEmail();
+      await registerAndVerify(email);
+      const identityId = await identityIdFor(email);
+
+      const stored = await database.dataSource.query(
+        `SELECT password_hash FROM identity_passwords WHERE identity_id = $1`,
+        [identityId],
+      );
+
+      assert.match(stored[0]?.password_hash ?? "", /^\$argon2id\$/);
+      assert.ok(!(stored[0]?.password_hash ?? "").includes(strongPassword));
+
+      const audit = await database.dataSource.query(
+        `SELECT context, reason FROM auth_audit_events WHERE identity_id = $1`,
+        [identityId],
+      );
+      assert.ok(!JSON.stringify(audit).includes(strongPassword));
+      assert.ok(!JSON.stringify(audit).includes(stored[0]?.password_hash ?? "never"));
+
+      // The outbox is append-only and feeds Kafka, so nothing erasable and no
+      // secret may reach it (ADR-095). Authentication publishes only that
+      // something about this account's security changed — identifiers and the
+      // fact of a change, which is precisely what that ADR permits.
+      const published: { event_type: string; payload: unknown; metadata: unknown }[] =
+        await database.dataSource.query(
+          `SELECT event_type, payload, metadata FROM outbox_messages WHERE aggregate_id = $1`,
+          [identityId],
+        );
+
+      assert.deepEqual(
+        [...new Set(published.map((one) => one.event_type))],
+        ["AccountSecurityChanged"],
+      );
+
+      const outbound = JSON.stringify(published);
+
+      assert.ok(!outbound.includes(strongPassword), "no password");
+      assert.ok(!outbound.includes(stored[0]?.password_hash ?? "never"), "no hash");
+      assert.ok(!outbound.includes(email), "no address");
+
+      // That a password was set is recorded; what it is, is not.
+      assert.ok(audit.length > 0);
+    });
+
+    it("stops a burst of password attempts", async () => {
+      const limited = await buildApp({
+        config,
+        dependencies: [],
+        authentication: {
+          ...authentication,
+          rateLimits: {
+            magicLinkRequestsPerWindow: 100,
+            sessionCreationsPerWindow: 100,
+            passwordAttemptsPerWindow: 3,
+            registrationsPerWindow: 100,
+          phoneCodeRequestsPerWindow: 3,
+          phoneCodeAttemptsPerWindow: 10,
+            windowMinutes: 15,
+          },
+        },
+      });
+
+      try {
+        const email = uniqueEmail();
+        const statuses: number[] = [];
+
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          const response = await limited.inject({
+            method: "POST",
+            url: "/auth/sessions/password",
+            payload: { email, password: "guessing repeatedly here" },
+          });
+          statuses.push(response.statusCode);
+        }
+
+        assert.deepEqual(statuses.slice(0, 3), [401, 401, 401]);
+        assert.deepEqual(statuses.slice(3), [429, 429]);
+      } finally {
+        await limited.close();
+      }
+    });
+  });
+
+  /** Subjects of everything Mailpit holds for an address. */
+  async function readMailSubjectsFor(email: string): Promise<string[]> {
+    const response = await fetch(
+      `${MAILPIT}/api/v1/search?query=${encodeURIComponent(`to:${email}`)}`,
+    );
+    const body = (await response.json()) as { messages?: { Subject: string }[] };
+
+    return (body.messages ?? []).map((message) => message.Subject);
+  }
+
+  async function identityIdFor(email: string): Promise<string> {
+    const rows: { identity_id: string }[] = await database.dataSource.query(
+      `SELECT identity_id FROM identity_emails WHERE normalized_email = $1`,
+      [email.toLowerCase()],
+    );
+
+    const id = rows[0]?.identity_id;
+    assert.ok(id !== undefined, `no identity for ${email}`);
+    return id;
+  }
+
+  describe("signing in with a phone number", () => {
+    /**
+     * A valid number nobody has claimed.
+     *
+     * Random rather than counted, because the database outlives the suite: a
+     * counter starting from the same place would collide with whatever the
+     * previous run left behind, and the collision would surface as a confusing
+     * failure in an unrelated test.
+     */
+    const uniquePhone = () => {
+      const exchange = 200 + Math.floor(Math.random() * 800);
+      const line = String(Math.floor(Math.random() * 10_000)).padStart(4, "0");
+
+      return `+1212${exchange}${line}`;
+    };
+
+    const authed = (accessToken: string) => ({ authorization: `Bearer ${accessToken}` });
+
+    const claim = async (accessToken: string, phone: string) =>
+      app.inject({
+        method: "POST",
+        url: "/auth/phone",
+        headers: authed(accessToken),
+        payload: { phone },
+      });
+
+    /** The most recent code texted to a number. */
+    const codeFor = (phone: string): string => {
+      const sent = authentication.textsSent.filter((text) => text.to === phone);
+      const last = sent[sent.length - 1];
+
+      assert.notEqual(last, undefined, `no code was texted to ${phone}`);
+
+      return /\b(\d{6})\b/.exec(last?.text ?? "")?.[1] ?? "";
+    };
+
+    const confirm = async (accessToken: string, code: string) =>
+      app.inject({
+        method: "POST",
+        url: "/auth/phone/verify",
+        headers: authed(accessToken),
+        payload: { code },
+      });
+
+    /** Somebody with an account and a proven number. */
+    const withAPhone = async () => {
+      const email = uniqueEmail();
+      const { credentials } = await signIn(email);
+      const phone = uniquePhone();
+
+      assert.equal((await claim(credentials.accessToken, phone)).statusCode, 202);
+      assert.equal((await confirm(credentials.accessToken, codeFor(phone))).statusCode, 204);
+
+      return { email, phone, credentials };
+    };
+
+    const askForCode = async (phone: string) =>
+      app.inject({ method: "POST", url: "/auth/phone/codes", payload: { phone } });
+
+    const signInWith = async (phone: string, code: string) =>
+      app.inject({ method: "POST", url: "/auth/sessions/phone", payload: { phone, code } });
+
+    /** Push a number's last use into the past, as a quiet year would. */
+    const goQuiet = async (phone: string, daysAgo: number) => {
+      await database.dataSource.query(
+        `UPDATE identity_phones
+            SET last_signed_in_at = now() - ($2 || ' days')::interval,
+                verified_at = now() - ($2 || ' days')::interval
+          WHERE normalized_phone = $1`,
+        [phone, String(daysAgo)],
+      );
+    };
+
+    it("claims a number, proves it, and signs in with it", async () => {
+      const { phone } = await withAPhone();
+
+      assert.equal((await askForCode(phone)).statusCode, 202);
+      const response = await signInWith(phone, codeFor(phone));
+
+      assert.equal(response.statusCode, 201, response.body);
+      assert.ok(response.json().accessToken.length > 0);
+    });
+
+    it("treats two spellings of one number as one number", async () => {
+      const email = uniqueEmail();
+      const { credentials } = await signIn(email);
+      const phone = uniquePhone();
+
+      const asTyped = `+1 (${phone.slice(2, 5)}) ${phone.slice(5, 8)}-${phone.slice(8)}`;
+
+      await claim(credentials.accessToken, asTyped);
+
+      // Sent to the canonical form, not to what was typed. Two spellings
+      // reaching two rows would be one person with two accounts.
+      assert.equal(authentication.textsSent.at(-1)?.to, phone);
+    });
+
+    it("refuses a number somebody else already holds", async () => {
+      const { phone } = await withAPhone();
+      const other = await signIn(uniqueEmail());
+
+      const response = await claim(other.credentials.accessToken, phone);
+
+      // The caller is already signed in, so saying so enumerates nothing they
+      // could not learn by trying to use it.
+      assert.equal(response.statusCode, 400, response.body);
+    });
+
+    it("leaves exactly one number when a replacement is claimed", async () => {
+      const { credentials } = await withAPhone();
+      const replacement = uniquePhone();
+
+      await claim(credentials.accessToken, replacement);
+
+      const held = await app.inject({
+        method: "GET",
+        url: "/auth/phone",
+        headers: authed(credentials.accessToken),
+      });
+
+      assert.equal(held.json().phone, replacement);
+      // Replacing is a claim, not a proof: the new number starts unverified.
+      assert.equal(held.json().verified, false);
+    });
+
+    it("refuses a wrong code", async () => {
+      const { phone } = await withAPhone();
+      await askForCode(phone);
+
+      const response = await signInWith(phone, "000000");
+
+      assert.equal(response.statusCode, 401, response.body);
+    });
+
+    it("spends a code after enough wrong guesses, right one or not", async () => {
+      const { phone } = await withAPhone();
+      await askForCode(phone);
+      const right = codeFor(phone);
+
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await signInWith(phone, "000000");
+      }
+
+      const response = await signInWith(phone, right);
+
+      // Six digits is one in a million, which is guessable. The attempt counter
+      // is what makes it not worth trying.
+      assert.equal(response.statusCode, 401, response.body);
+    });
+
+    it("refuses a code that has expired", async () => {
+      const { phone } = await withAPhone();
+      await askForCode(phone);
+      const code = codeFor(phone);
+
+      await database.dataSource.query(
+        `UPDATE phone_sign_in_codes SET expires_at = now() - interval '1 minute'
+          WHERE normalized_phone = $1`,
+        [phone],
+      );
+
+      assert.equal((await signInWith(phone, code)).statusCode, 401);
+    });
+
+    it("refuses a code the second time it is used", async () => {
+      const { phone } = await withAPhone();
+      await askForCode(phone);
+      const code = codeFor(phone);
+
+      assert.equal((await signInWith(phone, code)).statusCode, 201);
+      assert.equal((await signInWith(phone, code)).statusCode, 401);
+    });
+
+    it("refuses a code issued for a different number", async () => {
+      const mine = await withAPhone();
+      const theirs = await withAPhone();
+      await askForCode(theirs.phone);
+      const theirCode = codeFor(theirs.phone);
+
+      const response = await signInWith(mine.phone, theirCode);
+
+      // A six-digit secret is short enough that binding it to one telephone is
+      // what stops a guessed code opening somebody else's account.
+      assert.equal(response.statusCode, 401, response.body);
+    });
+
+    it("refuses a claim code used to sign in", async () => {
+      const email = uniqueEmail();
+      const { credentials } = await signIn(email);
+      const phone = uniquePhone();
+      await claim(credentials.accessToken, phone);
+
+      const response = await signInWith(phone, codeFor(phone));
+
+      // Purpose is bound into the record. Without it, claiming a number would
+      // hand over a working sign-in code.
+      assert.equal(response.statusCode, 401, response.body);
+    });
+
+    it("refuses an unproven number", async () => {
+      const email = uniqueEmail();
+      const { credentials } = await signIn(email);
+      const phone = uniquePhone();
+      await claim(credentials.accessToken, phone);
+      const before = authentication.textsSent.length;
+
+      await askForCode(phone);
+
+      assert.equal(authentication.textsSent.length, before, "a code was sent anyway");
+    });
+
+    it("answers identically for a number it knows and one it does not", async () => {
+      const { phone } = await withAPhone();
+      const stranger = uniquePhone();
+
+      const known = await askForCode(phone);
+      const unknown = await askForCode(stranger);
+
+      // ADR-081: no authentication surface may disclose whether an account
+      // exists. Compared whole, not by status code.
+      assert.equal(known.statusCode, unknown.statusCode);
+      assert.deepEqual(known.json(), unknown.json());
+    });
+
+    it("sends no code to a number that has gone quiet", async () => {
+      const { phone } = await withAPhone();
+      await goQuiet(phone, 61);
+      const before = authentication.textsSent.length;
+
+      await askForCode(phone);
+
+      // The whole recycled-number defence. Whoever holds the telephone now gets
+      // nothing at all.
+      assert.equal(authentication.textsSent.length, before, "a code went to a quiet number");
+    });
+
+    it("answers identically for a quiet number as for an unknown one", async () => {
+      const { phone } = await withAPhone();
+      await goQuiet(phone, 61);
+
+      const quiet = await askForCode(phone);
+      const unknown = await askForCode(uniquePhone());
+
+      assert.deepEqual(quiet.json(), unknown.json());
+    });
+
+    it("emails the account when its number has gone quiet", async () => {
+      const { email, phone } = await withAPhone();
+      await goQuiet(phone, 61);
+
+      await askForCode(phone);
+
+      // The other half: the stranger holding the number learns nothing, and the
+      // person holding the address learns what to do.
+      const subjects = await readSubjectsFor(email);
+      assert.ok(
+        subjects.some((subject) => /confirm your phone number/i.test(subject)),
+        `no notice arrived; subjects were ${JSON.stringify(subjects)}`,
+      );
+    });
+
+    it("refuses to sign in with a quiet number even given a valid code", async () => {
+      const { phone } = await withAPhone();
+      await askForCode(phone);
+      const code = codeFor(phone);
+      await goQuiet(phone, 61);
+
+      const response = await signInWith(phone, code);
+
+      // A code issued before the number went quiet must not outlive it.
+      assert.equal(response.statusCode, 401, response.body);
+    });
+
+    it("works again once a quiet number is re-confirmed", async () => {
+      const { phone, credentials } = await withAPhone();
+      await goQuiet(phone, 61);
+
+      await claim(credentials.accessToken, phone);
+      await confirm(credentials.accessToken, codeFor(phone));
+      await askForCode(phone);
+
+      assert.equal((await signInWith(phone, codeFor(phone))).statusCode, 201);
+    });
+
+    it("emails the account whenever its number is used to sign in", async () => {
+      const { email, phone } = await withAPhone();
+      await askForCode(phone);
+
+      await signInWith(phone, codeFor(phone));
+
+      // Dormancy cannot see a SIM swap. This is what makes one visible, through
+      // a channel the attacker does not hold.
+      const subjects = await readSubjectsFor(email);
+      assert.ok(
+        subjects.some((subject) => /used to sign in/i.test(subject)),
+        `no notice arrived; subjects were ${JSON.stringify(subjects)}`,
+      );
+    });
+
+    it("stops a removed number signing in", async () => {
+      const { phone, credentials } = await withAPhone();
+
+      await app.inject({
+        method: "DELETE",
+        url: "/auth/phone",
+        headers: authed(credentials.accessToken),
+      });
+
+      const before = authentication.textsSent.length;
+      await askForCode(phone);
+
+      assert.equal(authentication.textsSent.length, before);
+    });
+
+    it("treats removing a number nobody holds as already done", async () => {
+      const { credentials } = await signIn(uniqueEmail());
+
+      const response = await app.inject({
+        method: "DELETE",
+        url: "/auth/phone",
+        headers: authed(credentials.accessToken),
+      });
+
+      assert.equal(response.statusCode, 204, response.body);
+    });
+
+    it("refuses a number that could not be dialled", async () => {
+      const { credentials } = await signIn(uniqueEmail());
+
+      const response = await claim(credentials.accessToken, "+1 212 555");
+
+      assert.equal(response.statusCode, 400, response.body);
+    });
+
+    it("refuses a number with no country", async () => {
+      const { credentials } = await signIn(uniqueEmail());
+
+      const response = await claim(credentials.accessToken, "212 555 0184");
+
+      assert.equal(response.statusCode, 400, response.body);
+    });
+
+    it("tells somebody their own number has gone quiet", async () => {
+      const { phone, credentials } = await withAPhone();
+      await goQuiet(phone, 61);
+
+      const held = await app.inject({
+        method: "GET",
+        url: "/auth/phone",
+        headers: authed(credentials.accessToken),
+      });
+
+      // Told to its holder deliberately: they are the only person who can act
+      // on it, and it discloses nothing about anybody else.
+      assert.equal(held.json().dormant, true);
+    });
+
+    it("refuses claiming a number without a caller", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/auth/phone",
+        payload: { phone: uniquePhone() },
+      });
+
+      assert.equal(response.statusCode, 401, response.body);
+    });
+  });
+});

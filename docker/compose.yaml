@@ -1,0 +1,228 @@
+# Chronologity local development infrastructure.
+#
+# Start with `pnpm infra:up` from the repository root, which waits for every
+# service to report healthy before returning.
+#
+# These services are for local development only. Credentials are deliberately
+# weak and non-secret, TLS is disabled, and no production vendor is implied by
+# anything here — production hosting is a Phase 16 decision.
+#
+# Every image is pinned to an exact patch version so a rebuild produces the
+# same infrastructure. Defaults below mirror .env.example; a root .env
+# overrides them.
+
+name: chronologity
+
+services:
+  # ───────────────────────────────────────────────────────────────
+  # PostgreSQL — relational and operational authoritative state.
+  # ───────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:18.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-chronologity}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chronologity}
+      POSTGRES_DB: ${POSTGRES_DATABASE:-chronologity}
+      # Pinned explicitly so the data location does not depend on an image default.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-chronologity} -d ${POSTGRES_DATABASE:-chronologity}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  # ───────────────────────────────────────────────────────────────
+  # Kafka — asynchronous transport. Never a source of truth (ADR-013).
+  #
+  # KRaft mode, single combined broker/controller node. Two listeners:
+  # `kafka:29092` for containers on this network, `localhost:9092` for the
+  # host. Workers added in later phases use the internal listener.
+  # ───────────────────────────────────────────────────────────────
+  kafka:
+    image: apache/kafka:4.3.1
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:29092,HOST://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      # Single-node development settings. Production replication is a Phase 16 concern.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    ports:
+      - "${KAFKA_PORT:-9092}:9092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1",
+        ]
+      # Generous because this check starts a JVM. Ten seconds was enough on an
+      # idle machine and not enough on a busy one, which made a working broker
+      # report unhealthy — the check was measuring JVM startup rather than
+      # Kafka. Asking the broker for its API versions is still the right
+      # question; it just needs room to answer.
+      interval: 15s
+      timeout: 30s
+      retries: 20
+      start_period: 20s
+
+  # ───────────────────────────────────────────────────────────────
+  # ClickHouse — derived read models, rebuildable (ADR-012).
+  #
+  # Only the HTTP interface is published. The native port is deliberately
+  # unpublished: nothing uses it yet, and 9000 is where object storage will
+  # want to live when the media subsystem arrives in Phase 5E.
+  # ───────────────────────────────────────────────────────────────
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.4.5-alpine
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USERNAME:-chronologity}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-chronologity}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-chronologity}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports:
+      - "${CLICKHOUSE_HTTP_PORT:-8123}:8123"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - clickhouse-logs:/var/log/clickhouse-server
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      # 127.0.0.1 rather than localhost: inside the container localhost resolves
+      # to ::1, and ClickHouse's default configuration listens on IPv4 only.
+      test:
+        ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  # ───────────────────────────────────────────────────────────────
+  # Mailpit — local SMTP sink.
+  #
+  # Magic-link authentication is only meaningfully tested if a message
+  # actually leaves the application. Mailpit accepts real SMTP and exposes an
+  # HTTP API the integration tests read the message back from, so the login
+  # flow is proven end to end rather than stubbed at the boundary.
+  #
+  # Development only. Nothing here implies a production email provider.
+  # ───────────────────────────────────────────────────────────────
+  mailpit:
+    image: axllent/mailpit:v1.30.7
+    restart: unless-stopped
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    ports:
+      - "${SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  # ───────────────────────────────────────────────────────────────
+  # SeaweedFS — S3-compatible object storage for media (Phase 5E).
+  #
+  # Media uploads go directly from the client to object storage rather than
+  # through the API (`media.md:184`), so what this service must get right is
+  # presigned-URL fidelity: a signature that authorises exactly one PUT to
+  # exactly one key.
+  #
+  # Pinned to 3.95 deliberately. 3.97's master never binds its gRPC listener,
+  # so raft elects no leader and the S3 gateway never starts. 3.95 was verified
+  # end to end before anything was built on it: presigned PUT, HEAD returning
+  # size and content type, deletion, and — the property that matters — a
+  # tampered key refused with 403.
+  #
+  # MinIO is deliberately absent: its repository was archived in February 2026
+  # and it stopped publishing images in October 2025.
+  #
+  # Development only. Production object storage is a later decision, and
+  # nothing above `integrations/storage/` knows which implementation is running.
+  # ───────────────────────────────────────────────────────────────
+  storage:
+    image: chrislusf/seaweedfs:3.95
+    restart: unless-stopped
+    command:
+      - server
+      - -s3
+      - -s3.config=/etc/seaweedfs/s3.json
+      - -dir=/data
+      # Sized for a laptop rather than a deployment. Left at its defaults,
+      # SeaweedFS lets each volume grow toward 30GB and `-volume.max`
+      # auto-configures from free disk space — so a handful of test buckets
+      # filled this machine's Docker disk and took Kafka down with it. Test
+      # media is a few kilobytes.
+      #
+      # Two separate limits, and they bound different things. The size limit
+      # bounds the disk; the count bounds how many *collections* can exist at
+      # once, because every bucket becomes a collection and each one claims
+      # volumes of its own. Too low a count and a new bucket cannot allocate at
+      # all, failing with "Not enough data nodes found" — which reads like a
+      # clustering problem and is really a quota.
+      #
+      # SeaweedFS grows a collection seven volumes at a time, so the count has
+      # to be a multiple of seven per collection rather than a round number.
+      # Three collections exist here — the filer's own, the application's
+      # bucket, and the one `infra:validate` writes to — which needs twenty-one.
+      # Twenty-four leaves a little room and still costs at most 768MB, since
+      # nothing preallocates and local fixtures are a few kilobytes each.
+      - -master.volumeSizeLimitMB=32
+      - -volume.max=24
+      # Explicit rather than assumed: never reserve a volume's space up front.
+      # A local volume should cost what it holds.
+      - -master.volumePreallocate=false
+    ports:
+      - "${S3_PORT:-8333}:8333"
+    volumes:
+      - storage-data:/data
+      - ./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+    healthcheck:
+      # An unsigned request to the S3 endpoint answers 403 once the gateway is
+      # serving, which is a stronger signal than a TCP connect: it means the
+      # master elected a leader, the filer connected, and S3 is authenticating.
+      test:
+        [
+          "CMD-SHELL",
+          "wget --no-verbose --tries=1 --spider http://127.0.0.1:8333/ 2>&1 | grep -q '403' || exit 1",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      # Startup involves master election and filer connection, which takes
+      # about thirty seconds locally — far longer than the other services.
+      start_period: 40s
+
+volumes:
+  postgres-data:
+  kafka-data:
+  clickhouse-data:
+  clickhouse-logs:
+  storage-data:

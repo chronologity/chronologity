@@ -88,13 +88,25 @@ The initial model should not require first-class reactions to:
 
 Reactions to Comments may be considered separately, but they should not be assumed merely because Moment reactions exist.
 
+## What Is Settled
+
+**Four reaction kinds ship** (ADR-113): **loved**, **amused**, **astonished**, and **saddened**. Each describes the reader's own response, so none of them can be mistaken for confirming that a Moment happened as represented.
+
+**They are stored as names, never as icons.** The artwork a client renders may change freely; what a reaction meant when somebody left it may not.
+
+**Counts are shown, identities are not.** A list of who reacted to a restricted Moment would reveal that Moment's audience to everybody on it. Whoever is asking sees their own reaction, and nobody else's.
+
+**An author may turn reactions off on a Moment.** Doing so hides the existing counts as well as refusing new ones, and deletes nothing — turning them back on brings the same counts back. A Moment with reactions off says so, rather than reporting that nobody has reacted; those are different facts.
+
+**Blocking removes what two people left on each other's Moments**, alongside the follows and requests a Block already severs. A refusal to react never says a block is the reason.
+
+**Counts are aggregated, never accumulated in a column.** There is no running total to contend on, which is what the roadmap requires of high-volume interactions.
+
 ## Reaction Types
 
 Chronologity should support a **small, explicit set of reaction types** rather than an unbounded or user-defined reaction vocabulary.
 
 The reaction set should be expressive enough to support lightweight human response while remaining understandable, accessible, stable across clients, and suitable for aggregation.
-
-The exact day-one reaction set remains an open product decision.
 
 Chronologity should avoid choosing reaction types that imply unsupported historical claims. For example, a reaction should not mean that the reacting User confirms the Moment occurred exactly as represented unless the product explicitly introduces a separate verification capability.
 
@@ -404,6 +416,12 @@ A User may react without commenting, comment without reacting, do both, or do ne
 Neither interaction should automatically create the other.
 
 ## Reactions to Comments
+
+**Comment reactions shipped, overriding the caution below** (ADR-114). It was a product decision taken with this section read, and no further justification is claimed — recording that plainly is better than inventing a rationale this document would not recognise.
+
+They use the same four kinds a Moment takes. A Moment's own reaction setting does not reach the discussion underneath it: silencing reactions to a photograph should not silence agreement between other people talking about it.
+
+The original caution follows, unchanged, because the decisions it warns about — types, counts, notifications, moderation, thread presentation, engagement incentives — remain live as those capabilities arrive.
 
 The initial Moment Reaction model does not require reactions to Comments.
 
@@ -735,6 +753,14 @@ The initial release does not require:
 - a universal engagement score; or
 - public down-ranking or dislike mechanics.
 
+## Established Reaction Decisions
+
+**A suspended account's reactions stop counting, and come back on reinstatement** (ADR-116). This answers what suspension does to reactions, beyond the obvious refusal to accept new ones. Counts are aggregated live rather than stored, so the exclusion is a clause in one query and nothing is deleted.
+
+It matters beyond tidiness: significance scoring reads reaction volume, so an account whose reactions kept counting would go on amplifying content it can no longer see. The person still sees their own reaction, as they see the rest of their own history.
+
+**Reactions are not a moderatable subject.** A reaction is a count of one with no content to judge; what moderation acts on is the Moment or comment being reacted to, or the account doing it.
+
 ## Open Product Questions
 
 The following questions require deliberate resolution:
@@ -809,7 +835,7 @@ Authorization and privacy revocation must propagate to every derived surface tha
 
 The system must support Moments with very large Reaction counts without requiring synchronous work proportional to all reactors for an individual Reaction operation.
 
-If Reaction state is event sourced, retained historical events must not force previous Reaction states to remain publicly visible or prevent privacy-compliant deletion and suppression behavior.
+Whatever Chronologity retains internally about previous Reaction states must not force those states to remain publicly visible, and must not prevent privacy-compliant deletion and suppression.
 
 ## Guiding Principle
 

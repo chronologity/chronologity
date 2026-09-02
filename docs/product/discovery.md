@@ -1386,6 +1386,65 @@ The initial release does not require:
 
 A simple, principled Discovery system is preferable to a sophisticated attention-optimization system that undermines Chronologity's historical identity.
 
+## Established Discovery Decisions
+
+These were open questions. Implementation settled them (ADR-120).
+
+**Discoverability is a state of its own.** A public Moment is discoverable by
+default and its author can unlist it: reachable by anybody holding the link,
+never offered to anybody who does not. The two states are separately
+controllable, which is what keeps public accessibility from *being*
+recommendation consent even where the default aligns them.
+
+**Three floors no default can lift.** Nothing age-restricted, nothing moderation
+has kept out of amplification, and nothing authored by an account under
+eighteen. A restricted Moment is never recommended either — not even to somebody
+on its list, because being invited to see something is not the same as asking to
+be shown it — and a private Moment is never recommended, including to its own
+author.
+
+**Discovery eligibility is the Search rule, narrowed.** The same predicate,
+reused rather than copied, with the floors above applied on top. A Discovery
+path with its own version of the access rule is how Discovery becomes the way
+around privacy that Search already closes.
+
+**Explore is ordered by significance with diversity caps**, and no author,
+place, or Event may occupy more than a small share of a page. Significance is
+read as contextual data, never as a universal rank, and no score is ever
+returned.
+
+**Engagement cannot reach the ranking.** Not as policy — the ranking code
+imports nothing at all, so there is no path from a reaction count to what gets
+recommended.
+
+**Every recommendation says why it was offered.** Each reason names a property
+of the recommendation itself, which is already eligible for whoever is reading
+it, so no explanation can disclose anything the recommendation does not.
+
+### Deferred, with where each goes
+
+**People Discovery** needs an eligibility model of its own. Recommending
+somebody because of a shared Event *is* the disclosure that they attended it:
+the leak is in the suggestion rather than in what it links to, which is a
+different problem from recommending content whose eligibility is settled.
+
+**Anniversary and temporal Discovery** wait on the controls over sensitive
+anniversaries this document asks for but does not define. The query itself is
+cheap; resurfacing a bereavement unasked is not, and the surface should not
+precede the control. It also mostly resurfaces somebody's own history, which the
+public-only rule above deliberately excludes — a different eligibility model
+rather than an extension of this one.
+
+**Personalisation and recommendation feedback** wait on privacy and deletion
+deciding how a profile of somebody's interests, and a record of what they chose
+not to see, are erased.
+
+**Timeline Discovery** ships under other names: surfacing a coherent historical
+scope rather than an isolated Moment is what the Event and Location surfaces do.
+
+**Trending, popularity, and social proof** are excluded from launch and are
+structurally unavailable rather than merely unbuilt.
+
 ## Open Product Questions
 
 The following questions require deliberate resolution:

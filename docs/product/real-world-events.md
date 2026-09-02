@@ -10,7 +10,7 @@ The central question is:
 
 > **When should multiple Moments be understood as perspectives on the same real-world occurrence, and what does that shared Event mean?**
 
-This document concerns historical real-world Events. It does not define software, domain, integration, or event-sourcing events.
+This document concerns historical real-world Events. It does not define software, domain, or integration events.
 
 ## Definition
 
@@ -1461,46 +1461,65 @@ The initial release does not require:
 - AI-authored authoritative Event descriptions; or
 - exhaustive external Event-data integrations.
 
+## Established Event Decisions
+
+These were open questions. Implementation settled them, and they are requirements now rather than possibilities. Several are answers about the initial product specifically, and say nothing about whether the capability should exist later.
+
+**Recording an Event requires a name and an occurrence.** Nothing else. Other names it goes by and the places it happened are optional.
+
+**Every Event has a name.** It is a useful label rather than a canonical historical name, and it is never identity: two Events may carry the same name, and one Event may carry several through its aliases.
+
+**An Event's time is one bounded interval with the precision it is actually known at** — `instant`, `day`, `month`, or `year` (ADR-100). The interval is what carries approximation, so "sometime in 1969" is that year at year precision rather than an invented timestamp. A known day with an unknown clock time is `day` precision, which is exactly what the model exists to express.
+
+**An Event may have any number of Locations, including none.** The model does not assume one geographic point. They are unordered: ordering would describe a route, and how routes are represented is not settled.
+
+**What the first Event implementation built is identity, names and aliases, occurrence, Locations, and creator provenance — and nothing else.** Descriptions, types, hierarchy, series, recurrence, suggestions, participants, merging, splitting, and correction were left out because the questions governing them are unanswered, not because they were decided against. Their absence records the state of the questions below; it decides none of them.
+
+One piece of context for whoever answers the hierarchy question: `timeline-first-curation-and-discovery.md` describes `parent_of` and `child_of` as relationships between *Timelines*, while this document describes containment as a property of Events. Whether it belongs to Events, to Timelines, or to both should be settled once, across both documents, rather than separately in each.
+
+**One Moment may belong to several Events** (ADR-102). A photograph at a wedding that is also part of a family reunion is genuinely both, and the two occurrences do not conflict. When that is redundant rather than legitimate is left to judgement rather than to a constraint.
+
+**Duplicate Events are permitted and expected.** Nothing prevents two people recording the same occurrence separately, because identity is the identifier rather than the name and reconciliation does not exist yet. Refusing the second would refuse real history to protect a guess.
+
+**An Event may be followed** (ADR-105). Anybody may ask to hear about Moments that become associated with it, and no approval is involved: an Event is shared history, and whoever recorded it first holds provenance rather than authority over who may watch it. Following grants no access to Moments that are not otherwise visible.
+
+**Recording an Event confers no ownership of the occurrence.** The creator is stored as provenance only.
+
 ## Open Product Questions
 
 The following questions require deliberate resolution:
 
-- What minimum information is required to create an Event?
-- Must every Event have a name?
+- Does Chronologity need an explicit Event-description field on day one?
+- Should Event hierarchy ship on day one?
+- Should Event Series become a first-class product concept now or remain future-compatible only?
+- Should automatic Event suggestions ship on day one?
+- Should Event participant lists exist at all in the initial product?
 - How should unnamed personal Events be represented?
 - Can Event names be changed by Users other than the creator?
 - What Event metadata may the original creator edit?
 - Which Event metadata may other participants propose corrections to?
-- Does Chronologity need an explicit Event-description field on day one?
 - Who may edit an Event description?
 - Should Event descriptions support multiple competing perspectives?
 - Which Event types, if any, should ship as a predefined taxonomy?
 - Should Users be able to assign multiple Event categories?
-- What precision model should represent approximate Event times?
 - Can an Event have an unknown start or end?
-- Can an Event have a known date but unknown clock time?
 - How should ongoing Events be represented?
 - How should historical Events with disputed dates be represented?
 - How should Event time zones be established?
 - Can one Event explicitly span multiple time zones?
 - What exact location semantics must an Event support before `locations.md` is finalized?
-- Can a day-one Event have multiple locations?
 - How should route-based Events such as races, marches, and trips be represented?
-- Should Event hierarchy ship on day one?
 - If so, how many hierarchy levels should the product support?
 - Can one child Event belong to multiple parent Events?
-- Should Event Series become a first-class product concept now or remain future-compatible only?
 - How should recurring Events be created efficiently without collapsing occurrence identity?
 - Who may associate a Moment with an existing Event?
 - Can a User associate another User's Moment with an Event, or only propose the association?
 - Can an Event creator remove another User's Moment association?
 - Who can dispute an Event association?
 - What happens while an Event association is disputed?
-- Can one Moment belong to multiple Events?
 - If yes, when is that historically legitimate rather than redundant?
 - Should parent-Event association be derived when a Moment belongs to a child Event?
 - What exact provenance should be visible for Event associations?
-- Should automatic Event suggestions ship on day one?
 - Which signals may power Event suggestions?
 - What confidence is required before Chronologity shows a suggestion?
 - Should Users be able to disable Event suggestions?
@@ -1516,7 +1535,6 @@ The following questions require deliberate resolution:
 - If attendance exists, is it historical metadata, social metadata, or both?
 - Can Users hide attendance while leaving their Event-associated Moments visible?
 - How should non-User participants be represented?
-- Should Event participant lists exist at all in the initial product?
 - What constitutes sufficient evidence that two Event records are duplicates?
 - Who may confirm an Event merge?
 - Can Users challenge a merge?

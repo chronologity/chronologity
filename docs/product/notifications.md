@@ -910,12 +910,108 @@ The initial release does not require:
 
 A smaller, predictable notification system is preferable to a broad engagement system that trains Users to ignore Chronologity.
 
+## Established Notification Decisions
+
+These were open questions. Implementation settled them (ADR-121).
+
+**A notification stores identifiers and nothing else.** No name, no caption, no
+comment, no thumbnail — and no column that could hold one. The wording is
+composed when somebody reads it, from what they may see then.
+
+**A notification about something you can no longer see is simply absent** —
+gone from the list and from the unread count, rather than blanked. Nothing has
+to propagate for that to happen, because nothing sensitive was ever copied out.
+
+**The unread count covers what you can see, not what exists.** A count that
+outran the list would itself say that something was there.
+
+**Unread activity of one kind on one thing is one entry.** Three people reacting
+is one notification, not three. Reading it starts a fresh one, so "what happened
+since I last looked" is what an entry means.
+
+**People are named only where you may know who they are**, at most two, and
+anybody else is counted. Somebody blocked or suspended after the fact stops
+being named without anything having to be rewritten.
+
+**Nobody is notified about their own activity.**
+
+**Whether you are entitled to know is decided before whether you want to hear
+about it.** A preference can never produce a notification you were not owed.
+
+**Moderation and security cannot be switched off**, and they are the only two
+categories that cannot. Being told what was done to your content is what makes
+appealing it possible, and a preference that could silence "your password was
+changed" would be the first thing somebody taking over an account turned off.
+
+**A moderation notification never names the moderator.** It says what happened
+to your content, which is what you need in order to answer it.
+
+**Opening a notification reauthorizes.** A deep link is a pointer, never a
+permission.
+
+### How a notification leaves the application
+
+**A delivery is a row with a due time.** The service that causes a notification
+opens one per channel in the same transaction, then returns. A separate
+dispatcher sends them, so no provider can delay or fail a Reaction, a Moment, a
+moderation decision, or a session revocation.
+
+**Quiet hours and digests are settled when the delivery is created**, in the
+account's own time zone, and stored as an instant. They affect delivery time
+only, as this document requires: the latest any setting can say is "later".
+
+**Security ignores quiet hours; moderation waits them out.** Neither can be
+switched off, and that is the only way they differ. A password changed at three
+in the morning is worth waking somebody for, because by morning the account may
+be gone. A moderation decision will still be there at eight, and waking somebody
+for it teaches them to silence the device — which silences the security alert.
+
+**Neither required category aggregates.** A second password change collapsing
+into a standing unread entry would be announced to nobody, because the first
+message has already gone.
+
+**Email names people; push counts them.** External push assumes a lock screen is
+visible to whoever is standing nearby, so it says what kind of thing happened and
+never who was involved. The application shows the names once it is opened.
+
+**The words are composed when the message is sent**, from what the recipient may
+see at that instant. A notification whose subject became private while the email
+sat in the queue is not sent. An email cannot be unsent.
+
+**Device tokens are credentials.** They are stored in one table, never logged,
+never returned by any read, and retired rather than deleted. Registering a token
+another account holds moves it, and that account stops receiving.
+
+**Switching a category off in the application silences its email and push too**,
+because the in-app entry is the notification and the other channels carry it.
+The reverse does not hold.
+
+### Not yet built
+
+**A real push provider.** Registration, tokens, retirement, scheduling, and
+retries are all real; the adapter records what it would have sent. A provider
+needs credentials and a physical device, and a test for one would have to stand
+in for the boundary being tested.
+
+**New-device sign-in alerts**, which need a notion of a recognised device that
+does not exist. Without one every sign-in looks new, and an alert that fires
+every time is one people learn to ignore.
+
+**Localisation and template versioning**, which want a template system. There is
+one locale.
+
+**Historical and context notifications**, which this document warns require
+particular care because they concern the historical model itself and must not
+imply more certainty than the underlying relationship supports.
+
+**Retention and expiry**, which belong with privacy and deletion — and which now
+have to reach delivery records and device tokens as well.
+
 ## Open Product Questions
 
 The following questions require deliberate resolution:
 
 - Which notification categories ship on day one?
-- Does push notification delivery ship on day one, or only in-app notifications?
 - Which social activities generate notifications?
 - Does every Reaction generate an in-app notification before aggregation?
 - What aggregation threshold or behavior should apply to Reactions?
@@ -982,11 +1078,11 @@ The following questions require deliberate resolution:
 - Should unread counts include mandatory system notifications?
 - How quickly must unread state synchronize across devices?
 - Should notification preferences synchronize across devices? The recommended answer is yes because they are account preferences.
-- Should quiet hours exist at launch?
-- If not, should Chronologity rely on operating-system notification controls initially?
 - Should notification batching happen only for push or also in-app?
 - Should low-priority push notifications be delayed?
 - Should Chronologity ever optimize send time algorithmically? The recommended default is not for day one.
+- Should a digest be per channel only, or per category as well? Per channel is what ships; per category would multiply a settings screen this document asks to keep understandable.
+- Should a notification already read in the application still be delivered by email when its digest hour arrives?
 - Should Chronologity send re-engagement notifications when there is no new direct activity? The recommended default is no.
 - Should Discovery recommendations ever appear as notifications? The recommended default is no unless Users explicitly opt into a future recommendation category.
 - Should "historical anniversary" notifications exist eventually?

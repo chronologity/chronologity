@@ -9,7 +9,7 @@ Chronologity uses events in multiple contexts, and those contexts must remain di
 The term **event** can refer to:
 
 - a **Real-World Event** in the product domain;
-- a persisted **Domain Event** produced by an authoritative aggregate;
+- a **Domain Event**, meaning a past-tense fact the API has accepted;
 - an **Integration Event** published across application or subsystem boundaries;
 - an external provider/webhook event;
 - an operational event used for observability.
@@ -23,7 +23,6 @@ This document focuses on software events and defines:
 - envelopes;
 - metadata;
 - schema versioning;
-- Domain Event rules;
 - Integration Event rules;
 - transformation boundaries;
 - serialization;
@@ -40,9 +39,7 @@ This document is grounded in:
 
 - `docs/architecture/overview.md`;
 - `docs/architecture/principles.md`;
-- `docs/architecture/api.md`;
-- `docs/architecture/cqrs.md`;
-- `docs/architecture/event-sourcing.md`.
+- `docs/architecture/api.md`.
 
 ---
 
@@ -68,20 +65,16 @@ Architecture documentation should use the full term **Real-World Event** wheneve
 
 ## Domain Event
 
-A **Domain Event** represents an accepted authoritative fact within a domain model.
+A **Domain Event** is a past-tense fact accepted inside the API: a Session was
+revoked, a role was assigned, content was restricted.
 
-Examples:
+It is a way of describing what happened, not a stored artifact. Chronologity does
+not persist a separate log of domain events, and there is no event type to
+implement (ADR-092). Where a past-tense fact must survive for accountability, it
+is an audit row written in the same transaction as the change it describes.
 
-```text
-MomentCreated
-SessionRevoked
-UserRoleAssigned
-ContentRestricted
-```
-
-Domain Events are usually produced by aggregates or authoritative command handling.
-
-Where Event Sourcing applies, Domain Events are persisted to EventStoreDB.
+The word remains useful when reasoning about what changed and what downstream
+systems might care about. It does not name a file, a table, or a schema.
 
 ## Integration Event
 
@@ -95,11 +88,15 @@ NotificationCandidateCreated
 MediaProcessingRequested
 ```
 
-An Integration Event may be derived from one or more Domain Events.
+An Integration Event is constructed explicitly by the service that publishes it,
+enqueued to the transactional outbox in the same transaction as the change it
+describes, and delivered to Kafka by the outbox publisher (ADR-093, ADR-096).
 
-Integration Events are transport contracts.
+Nothing is published automatically. A service decides what crosses the boundary
+and builds that payload deliberately, which is what keeps the external contract
+from drifting with every internal change.
 
-They are not automatically authoritative domain history.
+Integration Events are transport contracts. They are not authoritative history.
 
 ## External Event
 
@@ -124,11 +121,12 @@ An **Operational Event** is used for observability and operations.
 Examples:
 
 - projection lag alert;
+- outbox publication falling behind;
 - worker retry exhausted;
 - cache miss;
 - deployment health event.
 
-Operational Events must not be confused with Domain Events.
+Operational Events must not be confused with Integration Events.
 
 ---
 
@@ -138,11 +136,10 @@ The central rule is:
 
 > **Events are contracts with specific ownership and semantics. Do not use one event type to mean several different things merely because all of them are asynchronous messages.**
 
-A persisted Domain Event is not automatically the same thing as a Kafka message.
+A Kafka message is not authoritative. The authoritative record is the row the
+API committed, and the message is a notification that it happened.
 
-A Kafka message is not automatically authoritative.
-
-A Real-World Event is not a Domain Event.
+A Real-World Event is not a software event of any kind.
 
 ---
 
@@ -152,19 +149,19 @@ Chronologity uses the following high-level taxonomy:
 
 ```text
 Product Domain
-    └── Real-World Event
+    └── Real-World Event          a historical occurrence
 
 Authoritative Domain
-    └── Domain Event
+    └── Domain Event              a past-tense fact; a row, or an audit row
 
 Cross-Boundary Integration
-    └── Integration Event
+    └── Integration Event         published, versioned, via the outbox
 
 External Systems
-    └── External Event
+    └── External Event            untrusted until validated
 
 Operations
-    └── Operational Event
+    └── Operational Event         observability, never domain truth
 ```
 
 Each type has different durability, ownership, privacy, and compatibility requirements.
@@ -173,7 +170,8 @@ Each type has different durability, ownership, privacy, and compatibility requir
 
 # Domain Event Ownership
 
-A Domain Event is owned by the feature/domain boundary that produces it.
+A Domain Event is owned by the feature that produces it. Ownership is about who
+defines the meaning of the change, not about who stores a record of it.
 
 Examples:
 
@@ -200,8 +198,7 @@ Ownership matters because the owning feature defines:
 - semantics;
 - invariants;
 - schema evolution;
-- source of truth;
-- replay behavior.
+- what is safe to expose beyond the boundary.
 
 ---
 
@@ -209,19 +206,19 @@ Ownership matters because the owning feature defines:
 
 An Integration Event is owned by the application/subsystem boundary responsible for publishing the cross-boundary contract.
 
-It may be:
+The publishing service constructs it explicitly. It is not a serialized copy of
+an internal state change, and it should carry what a consumer needs rather than
+everything the producer happens to know.
 
-- published directly from a Domain Event;
-- transformed from a Domain Event;
-- composed from several authoritative facts.
-
-Integration Events should optimize for consumer stability, not aggregate-internal convenience.
+Integration Events optimize for consumer stability, not for the producer's
+convenience. A field is added because a consumer needs it, and removed only by
+publishing a new version.
 
 ---
 
-# Domain Event Naming
+# Event Naming
 
-Domain Events use:
+Event names use:
 
 ```text
 PascalCase
@@ -249,9 +246,7 @@ MomentRowInserted
 ProcessUserRole
 ```
 
-Commands express intent.
-
-Events express accepted fact.
+A request expresses intent. An event expresses accepted fact.
 
 ---
 
@@ -268,7 +263,7 @@ MediaProcessingRequested
 NotificationDeliveryRequested
 ```
 
-Integration Event names may intentionally differ from Domain Event names when consumer semantics differ.
+An Integration Event's name may intentionally differ from how the change is described internally, when consumer semantics differ.
 
 ---
 
@@ -321,7 +316,7 @@ Conceptually:
   "eventType": "...",
   "eventVersion": 1,
   "occurredAt": "...",
-  "aggregate": {
+  "subject": {
     "type": "...",
     "id": "...",
     "version": 42
@@ -357,7 +352,7 @@ The Event ID supports:
 
 The Event ID identifies the event occurrence.
 
-It is not the aggregate ID.
+It identifies the message, not the thing the message is about.
 
 ---
 
@@ -379,7 +374,7 @@ Avoid:
 
 ```text
 KafkaMomentCreated
-EventStoreMomentCreated
+OutboxMomentCreated
 ```
 
 ---
@@ -395,26 +390,23 @@ MomentCreated v1
 MomentCreated v2
 ```
 
-This is separate from aggregate stream version.
+This is separate from any internal versioning.
 
 ---
 
-# Aggregate Metadata
+# Subject Metadata
 
-For aggregate-originated Domain Events, metadata should identify:
+An Integration Event identifies what it is about:
 
-- aggregate type;
-- aggregate ID;
-- aggregate stream version.
+- the kind of thing that changed;
+- its identifier;
+- the version of that thing, where the consumer needs ordering.
 
-This supports:
+This supports auditing, debugging, and consumer partitioning: messages about one
+subject should reach one partition so that a consumer sees them in order.
 
-- reconstruction;
-- auditing;
-- debugging;
-- consumer partitioning where appropriate.
-
-Integration Events may omit aggregate metadata if it is not meaningful to consumers.
+The subject is not the message's own identity. A message has its own identifier
+for deduplication; the subject says what the message concerns.
 
 ---
 
@@ -422,13 +414,11 @@ Integration Events may omit aggregate metadata if it is not meaningful to consum
 
 Software event time must be named carefully.
 
-For Domain Events:
-
 ```text
 occurredAt
 ```
 
-means when the domain transition was accepted/recorded by Chronologity.
+means when Chronologity accepted the change.
 
 It does **not** mean the historical occurrence time of a Moment.
 
@@ -453,9 +443,9 @@ A Correlation ID groups events/messages belonging to the same broader operation.
 Example:
 
 ```text
-CreateMoment request
+POST /moments
     ↓
-MomentCreated
+authoritative write, with its outbox message
     ↓
 TimelineMomentChanged
     ↓
@@ -530,35 +520,13 @@ The `payload` contains event-specific data.
 
 It should contain only what is necessary to represent the accepted fact or integration contract.
 
-Avoid full aggregate snapshots.
-
----
-
-# Domain Event Payload Example
-
-Conceptually:
-
-```json
-{
-  "eventType": "MomentCreated",
-  "eventVersion": 1,
-  "payload": {
-    "momentId": "...",
-    "creatorUserId": "...",
-    "occurrenceTime": "...",
-    "visibility": "...",
-    "mediaIds": ["..."]
-  }
-}
-```
-
-The exact schema belongs in event-contract documentation.
+Avoid publishing a whole record where a consumer needs a fact.
 
 ---
 
 # Integration Event Payload Example
 
-A Timeline-oriented Integration Event might instead be:
+A Timeline-oriented Integration Event:
 
 ```json
 {
@@ -571,25 +539,13 @@ A Timeline-oriented Integration Event might instead be:
 }
 ```
 
-The consumer can obtain or project only the data required for its read model.
+The consumer obtains or projects only the data its read model requires. This
+decouples Timeline consumers from the API's internal schema, and it keeps
+erasable data out of a topic nothing can edit.
 
-This decouples Timeline consumers from internal Moment aggregate schema.
-
----
-
-# Domain Events Are Authoritative Facts
-
-Where Event Sourcing applies, persisted Domain Events are authoritative aggregate history.
-
-They must therefore be:
-
-- valid;
-- durable;
-- versioned;
-- replayable;
-- privacy-safe.
-
-A Domain Event should never be emitted merely to make an external integration easier if it does not represent a domain fact.
+The upload pipeline's only published event follows the same shape: it carries
+the upload's identifier, its owner, where the bytes are, and what the uploader
+claimed — enough for a checker to open the file, and nothing more.
 
 ---
 
@@ -601,68 +557,57 @@ They may:
 
 - combine data;
 - rename fields;
-- omit aggregate internals;
+- omit internals;
 - flatten structures;
 - carry consumer-relevant routing information.
 
-They must not silently change domain truth.
+They must not silently change domain truth. A consumer that disagrees with the
+API about what happened is a bug in the consumer or in the contract, never a
+second opinion.
 
 ---
 
-# Publishing Domain Events Directly
+# What Is Published, and What Is Not
 
-Publishing a Domain Event directly to Kafka is acceptable when:
+Publishing is deliberate. A service publishes an Integration Event because
+something outside this application needs to act on the change — not because the
+change occurred.
 
-- consumers genuinely need that semantic contract;
-- the payload is privacy-safe;
-- compatibility expectations are appropriate;
-- aggregate internals are not leaked unnecessarily.
+Publish when:
 
-Do not transform events merely for ceremony.
+- a consumer genuinely needs that semantic contract;
+- the payload is privacy-safe and carries nothing that must later be erased;
+- the compatibility expectation is understood and versioned.
 
----
+Do not publish:
 
-# Transforming Domain Events
+- an internal state change nothing consumes;
+- a field a consumer might want someday;
+- anything whose only justification is symmetry with another event.
 
-Transformation is appropriate when:
-
-- consumers need a more stable contract;
-- several internal events map to one external event;
-- privacy requires removing data;
-- consumer routing needs differ;
-- internal event schemas evolve more rapidly.
-
-Example:
-
-```text
-IdentityEmailVerified
-        ↓
-integration transformation
-        ↓
-UserAuthenticationStatusChanged
-```
+Most of what happens in the API is published nowhere. Authentication, for
+instance, publishes nothing at all: its accountability requirement is met by the
+relational audit trail, which is both queryable and erasable.
 
 ---
 
-# Domain Event Schema Location
+# Constructing the Payload
 
-Canonical persisted Domain Event schemas should have one clear owner.
-
-Possible locations:
+The publishing service builds the external payload explicitly (ADR-096).
 
 ```text
-apps/api/src/features/<feature>/events/
+service decides the change is worth announcing
+    ↓
+service constructs the payload, field by field
+    ↓
+enqueueOutboxMessage(tx, ...)   same transaction as the change
+    ↓
+commit
 ```
 
-for internal persistence contracts, and/or:
-
-```text
-packages/contracts
-```
-
-when the same serialized event contract crosses application boundaries.
-
-Do not maintain two independent schemas for the same event.
+There is no automatic mapping from internal state to published message. A
+mapping layer would mean every internal change silently reshaped an external
+contract, and the first time a column was renamed the consumers would find out.
 
 ---
 
@@ -703,22 +648,14 @@ Serialized events must be validated at trust boundaries.
 
 Validation should occur:
 
-- before append where applicable;
-- when reading persisted events into current code;
 - when consuming Kafka events;
 - when accepting external events.
 
+An Integration Event arrives from another process and may have been published by
+an older or newer deployment. Treat it as untrusted input, exactly like an HTTP
+body.
+
 TypeScript compile-time types are insufficient.
-
----
-
-# Invalid Persisted Events
-
-An invalid persisted Domain Event represents a severe integrity problem.
-
-Aggregate reconstruction should fail loudly.
-
-Do not silently drop or coerce an authoritative event.
 
 ---
 
@@ -735,18 +672,6 @@ Consumers must not silently accept malformed data.
 ---
 
 # Unknown Event Type
-
-For authoritative reconstruction:
-
-```text
-unknown Domain Event
-        ↓
-fail
-```
-
-Skipping unknown authoritative history is unsafe.
-
-For integration consumers:
 
 ```text
 unknown Integration Event
@@ -813,7 +738,7 @@ Examples:
 
 # Event Upcasters
 
-Persisted Domain Event readers may use upcasters to translate old schemas into current internal representation.
+A consumer reading an older Integration Event version may translate it into the shape current code expects.
 
 Upcasters must:
 
@@ -879,6 +804,14 @@ operational
 
 The registry can be code-driven rather than a separate runtime service.
 
+It is: `packages/contracts/src/event-registry.ts`. `EVENT_REGISTRY` holds one
+entry per event — type, version, envelope schema, payload schema, boundary,
+owner, classification, and a payload the schema accepts — and is the only place
+that knows the mapping.
+
+Being data rather than prose is the point. A property asserted over the table
+holds for every event, including the ones added after the assertion was written.
+
 ---
 
 # Event Registry Benefits
@@ -890,6 +823,21 @@ A registry helps prevent:
 - missing runtime validation;
 - unclear ownership;
 - undocumented event proliferation.
+
+Each of those is a test over the registry rather than a hope. Uniqueness and
+version collision are checked directly. Runtime validation cannot be missing,
+because registration is what supplies the schema. Ownership is a required field.
+Proliferation is caught from the other side, by an integration test that reads
+every event type the outbox has ever held and refuses one that is not registered
+— an event added without registering it fails the first time anything publishes
+one.
+
+Two further properties are held there, which the list above does not name.
+Removing a field from a payload, or adding a required one, is refused: every
+field of every documented example is dropped in turn and must be rejected.
+And no registered payload may carry a property whose name suggests a secret or
+erasable personal data, following ADR-095, asserted over every schema rather
+than per event.
 
 ---
 
@@ -955,7 +903,7 @@ UserDeactivated
 SessionsRevocationRequested
 ```
 
-depending on aggregate/workflow boundaries.
+depending on where the responsibility for each change sits.
 
 ---
 
@@ -966,20 +914,23 @@ An event may trigger another command asynchronously.
 Example:
 
 ```text
-UploadProcessingCompleted
+UploadReceived
     ↓
-FinalizeMomentMedia command
+the media worker opens the file and settles what it is
 ```
 
 This should be explicit.
 
-Do not let event handlers mutate aggregate state directly without going through the appropriate domain command/aggregate boundary where invariants matter.
+A consumer acting on an event calls the owning service, exactly as a route
+would. It does not reach into another feature's repository, because the
+invariants live in the service and a consumer that bypasses them is writing
+state nothing validated.
 
 ---
 
 # Event Handlers
 
-Event handlers respond to Domain or Integration Events.
+Event handlers respond to Integration Events.
 
 They may:
 
@@ -1009,14 +960,6 @@ The mechanism depends on the side effect.
 
 Chronologity guarantees ordering only where explicitly defined.
 
-For event-sourced aggregates:
-
-```text
-stream order
-```
-
-is authoritative.
-
 For Kafka:
 
 ```text
@@ -1036,7 +979,7 @@ Integration Events should use a partition key aligned with required ordering/loc
 Potential keys:
 
 ```text
-aggregateId
+uploadId
 momentId
 userId
 timelineScopeId
@@ -1066,20 +1009,24 @@ is the architectural expectation.
 
 Committed authoritative events required downstream must not be permanently lost.
 
-Reliable publication and checkpointing are defined in `docs/architecture/messaging.md`.
+Reliable publication is the transactional outbox, defined in `docs/architecture/messaging.md`.
 
 ---
 
 # Event Replay
 
-Domain Events may be replayed for:
+Integration Events may be replayed where transport retention permits, for:
 
-- aggregate reconstruction;
 - projection rebuild;
 - debugging;
 - migrations.
 
-Integration Events may also be replayed where transport retention permits, but they are not the primary authoritative recovery source unless explicitly designed that way.
+They are not an authoritative recovery source. What recovers the system is
+PostgreSQL; what replay recovers is a derived read model.
+
+A rebuild reads current authoritative state rather than reconstructing it from a
+message log, which is what makes ADR-095 enforceable: erased data cannot
+reappear from a topic, because the rebuild never consults one for truth.
 
 ---
 
@@ -1203,7 +1150,7 @@ Where providers supply stable event IDs, Chronologity should use them for webhoo
 
 Provider event IDs remain external identifiers.
 
-They do not replace Chronologity Domain Event IDs.
+They do not replace Chronologity's own message identifiers.
 
 ---
 
@@ -1232,15 +1179,13 @@ MediaProcessingCompleted
 MediaProcessingFailed
 ```
 
-The authoritative Upload/Moment feature decides which provider callback results become Domain Events.
-
-Technical intermediate steps need not all become Domain Events.
+The Upload feature decides which results change authoritative state. Technical intermediate steps need not each become a published event: most are a column on the Upload's row.
 
 ---
 
 # Notification Events
 
-Notification creation may consume Domain Events such as:
+Notification creation may consume Integration Events such as:
 
 ```text
 ReactionAdded
@@ -1287,7 +1232,7 @@ if a more stable cross-service contract is useful.
 
 # Authentication Events
 
-Authentication Domain Events may include:
+Authentication changes worth naming include:
 
 ```text
 IdentityCreated
@@ -1308,7 +1253,7 @@ They must never contain:
 
 # Moment Events
 
-Moment Domain Events may include:
+Moment changes worth naming include:
 
 ```text
 MomentCreated
@@ -1336,15 +1281,15 @@ or equivalent Sub-Moment hierarchy semantics.
 
 Timeline events require semantic discipline.
 
-If authoritative Timeline definition/configuration exists, events may describe changes to that definition.
+There are no authoritative Timeline events of their own. The Timeline is derived, so a Timeline change is always a consequence of some other event — a Moment created, its occurrence corrected, its visibility changed, or the account behind it deactivated (ADR-084).
 
-High-volume Timeline read-model changes should be Integration/derived events, not authoritative Timeline Domain Events.
+High-volume Timeline read-model changes are Integration/derived events.
 
 ---
 
 # Moderation Events
 
-Moderation Domain Events may include:
+Moderation changes worth naming include:
 
 ```text
 ReportSubmitted
@@ -1362,7 +1307,7 @@ Events should reference sensitive evidence rather than embed it.
 
 # User Events
 
-Potential User Domain Events:
+Potential User changes:
 
 ```text
 UserCreated
@@ -1387,17 +1332,14 @@ ReactionRemoved
 ReactionUpdated
 ```
 
-If Reaction is not event sourced, these may still be published as Domain/Integration Events from relational authoritative state.
-
-Event Sourcing is not required to have events.
+These are published as Integration Events from authoritative relational state,
+if and only if something outside the API needs them.
 
 ---
 
-# Event Sourcing Is Not Required for Event Publication
+# Event-Driven Is Not Event-Sourced
 
-A PostgreSQL transaction may produce an Integration Event through an outbox or equivalent reliable publication mechanism.
-
-Therefore:
+Publishing events does not require storing them as the source of truth.
 
 ```text
 event-driven
@@ -1405,45 +1347,36 @@ event-driven
 event-sourced
 ```
 
-Chronologity should preserve this distinction.
+Chronologity is the first and not the second (ADR-092). A PostgreSQL transaction
+produces an Integration Event through the outbox, and the row it wrote remains
+the authority.
 
 ---
 
 # Transactional Outbox
 
-For relational authoritative features, an outbox pattern may be appropriate:
+Every Integration Event is published this way (ADR-093):
 
 ```text
 PostgreSQL transaction
-    ├── authoritative row update
+    ├── authoritative row change
     └── outbox record
           ↓
-publisher
+publisher            claims a batch with FOR UPDATE SKIP LOCKED
           ↓
 Kafka
+          ↓
+mark published       in the transaction that claimed it
 ```
 
-For EventStoreDB-backed features, EventStoreDB subscriptions may provide the reliable publication source.
+There is one mechanism, not several. A single publication path is what makes
+"a committed change is never lost downstream" a property rather than an
+aspiration, and it is why several publisher instances can run without
+coordinating.
 
-The messaging architecture should support both patterns if both authoritative models exist.
-
----
-
-# Domain Event Persistence Envelope
-
-Persisted EventStoreDB records should use a canonical representation.
-
-At minimum:
-
-```text
-event ID
-event type
-event version
-payload
-metadata
-```
-
-Aggregate identity may be derived from the stream but may also appear in metadata for portability.
+A message that fails to publish has its failure recorded and is retried. The
+claiming transaction has already rolled back by then, so the failure is recorded
+in a separate one — otherwise the record of the failure would roll back with it.
 
 ---
 
@@ -1469,23 +1402,18 @@ Do not expose Kafka offset/partition as business semantics.
 
 ---
 
-# Message ID Versus Event ID
+# Message ID Versus Subject
 
-If a Domain Event is published directly:
+A message's identifier is its own. It exists so a consumer can recognise a
+message it has already handled.
 
-```text
-messageId may equal eventId
-```
-
-If transformed:
+It is not the identifier of the thing the message is about. That is the subject,
+and several messages may share one subject over time:
 
 ```text
-Domain Event eventId
-        ↓
-Integration Event messageId
+messageId     identifies this delivery
+subject.id    identifies the upload, Moment, or account it concerns
 ```
-
-should be distinct, with causation metadata linking them.
 
 ---
 
@@ -1684,7 +1612,7 @@ This classification can inform:
 
 # Events and Encryption
 
-Kafka/EventStoreDB transport and storage should be encrypted according to infrastructure/security policy.
+Kafka transport and storage should be encrypted according to infrastructure and security policy.
 
 Field-level encryption may be used for selected sensitive data, but the preferred strategy is often not to include unnecessary sensitive values at all.
 
@@ -1753,7 +1681,7 @@ HTTP
   ↓
 command
   ↓
-Domain Event
+authoritative write + outbox record
   ↓
 Integration Event
   ↓
@@ -1774,8 +1702,8 @@ Good:
 
 ```text
 eventType=MomentCreated
-eventId=...
-aggregateId=...
+messageId=...
+subjectId=...
 eventVersion=1
 ```
 
@@ -1791,7 +1719,7 @@ fullEventPayload={...private data...}
 
 Useful metrics include:
 
-- events appended by type;
+- outbox depth, by topic;
 - integration events published;
 - publish failures;
 - consumer lag;
@@ -1801,29 +1729,24 @@ Useful metrics include:
 - unsupported event versions;
 - processing latency.
 
-Avoid high-cardinality labels such as aggregate IDs in metrics.
+Avoid high-cardinality labels such as subject identifiers in metrics.
 
 ---
 
 # Event Testing Strategy
 
-## Domain Event tests
-
-Verify:
-
-- aggregate emits expected event;
-- event payload schema;
-- old version compatibility;
-- no prohibited secrets/PII.
-
 ## Integration Event tests
 
 Verify:
 
-- transformation from Domain Event;
+- the payload a service actually enqueues, read back from the outbox rather
+  than from the function that built it;
 - contract schema;
-- routing/partition key;
-- consumer compatibility.
+- routing and partition key;
+- consumer compatibility;
+- that nothing prohibited — a secret, a credential, erasable personal data —
+  reached the outbox. This is best asserted directly against the table, because
+  it is a claim about what was written rather than about what was intended.
 
 ## Consumer tests
 
@@ -1840,11 +1763,13 @@ Verify:
 Verify:
 
 ```text
-command
+request
   ↓
-Domain Event
+authoritative write + outbox record, one transaction
   ↓
-Integration Event
+outbox publisher
+  ↓
+Integration Event on Kafka
   ↓
 consumer
   ↓
@@ -1901,7 +1826,7 @@ Before launch, Chronologity must define:
 
 ## Event Type Naming
 
-- Do persisted event type strings include version?
+- Do published event type strings include version?
 - Example:
   - `MomentCreated` + `eventVersion: 1`
   - versus `MomentCreated.v1`
@@ -1909,10 +1834,10 @@ Before launch, Chronologity must define:
 
 ## Integration Events
 
-- Which Domain Events can be published directly?
-- Which require transformed Integration Events?
-- Do Timeline projections consume internal Domain Events directly or a Timeline-specific Integration contract?
-- How much domain detail should Kafka consumers receive?
+- Which changes are worth publishing at all?
+- What Timeline-specific contract do projections consume?
+- How much domain detail should Kafka consumers receive, given that anything
+  published becomes difficult to erase?
 
 ## Actor Metadata
 
@@ -1931,7 +1856,7 @@ Before launch, Chronologity must define:
 
 - How are Integration Events grouped into Kafka topics?
 - Feature topics?
-- Aggregate topics?
+- One topic per subject type?
 - Consumer-purpose topics?
 - How are ordering and throughput balanced?
 
@@ -1945,8 +1870,10 @@ Before launch, Chronologity must define:
 
 - How do live side-effect consumers distinguish replay?
 - Is replay routed through separate topics?
-- Are projection rebuilds fed from EventStoreDB directly rather than Kafka?
-- Recommended default: projection rebuilds should favor authoritative EventStoreDB rather than replaying live side-effect topics.
+- Are projection rebuilds fed from authoritative PostgreSQL state rather than
+  replaying live side-effect topics?
+- Recommended default: yes. Reading current state is what keeps a rebuild from
+  resurrecting something since erased.
 
 ## Privacy
 
@@ -1961,38 +1888,38 @@ Before launch, Chronologity must define:
 
 1. Real-World Events, Domain Events, Integration Events, External Events, and Operational Events are distinct concepts.
 2. Architecture documentation uses explicit event terminology when ambiguity is possible.
-3. Domain Events represent accepted authoritative facts.
+3. A Domain Event is a past-tense fact the API accepted, recorded as a row rather than as an entry in an event log.
 4. Integration Events represent cross-boundary communication contracts.
 5. External Events are untrusted until validated.
 6. Operational Events do not become domain truth.
-7. Domain Event ownership belongs to the producing feature.
+7. Ownership of a change's meaning belongs to the feature that produces it.
 8. Integration Event ownership belongs to the publishing boundary.
-9. Domain Event names are stable, past-tense, and domain-oriented.
+9. Event names are stable, past-tense, and domain-oriented.
 10. Generic event names are prohibited.
 11. Persisted/published event names are durable contracts.
 12. Events use globally unique IDs.
-13. Event schema version is distinct from aggregate stream version.
+13. An event's schema version is distinct from the version of the subject it describes.
 14. Software event time is distinct from Moment occurrence time.
 15. Correlation and causation identifiers are distinct.
 16. Actor metadata is minimal and privacy-aware.
 17. Actor metadata is not the historical Person model.
 18. Event payloads are minimal and purpose-specific.
-19. Domain Events must not be created solely for integration convenience when no domain fact exists.
-20. Integration Events may transform Domain Events.
-21. Direct Domain Event publication is acceptable only when the contract is appropriate for consumers.
+19. An Integration Event is published because a consumer needs it, never because a change occurred.
+20. The publishing service constructs the external payload explicitly; nothing is published as a side effect of persistence.
+21. Every Integration Event reaches Kafka through the transactional outbox, enqueued in the same transaction as the change it describes.
 22. Shared serialized event contracts have one canonical schema.
 23. Runtime validation is required.
-24. Invalid authoritative events fail loudly.
-25. Invalid integration messages are quarantined/rejected.
-26. Unknown authoritative event types are never silently skipped.
+24. Invalid integration messages are quarantined or rejected, never silently accepted.
+25. A consumer that claims a type but cannot decode its version fails visibly.
+26. Erasable personal data must never be written to the outbox or to Kafka.
 27. Event contracts evolve independently.
 28. Backward-compatible additive evolution is preferred.
 29. Breaking changes require a new version/migration strategy.
 30. Upcasters preserve semantics and do not invent facts.
 31. Producer/consumer version skew is expected.
 32. Event classification/ownership should be registered canonically.
-33. Commands express intent; events express accepted outcome.
-34. Event-triggered aggregate mutations re-enter through command/domain boundaries where invariants matter.
+33. A request expresses intent; an event expresses accepted outcome.
+34. A consumer acting on an event calls the owning service rather than writing another feature's state directly.
 35. Event handlers are idempotent.
 36. Global event ordering is not assumed.
 37. Partition keys follow the smallest meaningful ordering boundary.
@@ -2003,16 +1930,16 @@ Before launch, Chronologity must define:
 42. Derived algorithm outputs remain clearly derived.
 43. AI suggestions do not silently become authoritative facts.
 44. Provider events are translated after authentication/validation.
-45. Media technical callbacks do not automatically become Domain Events.
+45. Media technical callbacks do not automatically become published events.
 46. Notification delivery requests are Integration Events or equivalent side-effect messages, not authoritative notification truth.
-47. Authorization role changes are authoritative Domain Events when event sourced.
+47. Authorization role changes are authoritative rows, with an audit row written in the same transaction.
 48. Authentication events never contain raw credentials.
 49. Moment events must not reintroduce Sub-Moment hierarchy semantics.
-50. Timeline read-model updates are not authoritative Timeline Domain Events.
+50. Timeline read-model updates are derived; the Timeline has no authoritative events of its own.
 51. Moderation events reference sensitive evidence rather than embedding it.
-52. Event-driven architecture does not imply Event Sourcing.
-53. Relational authoritative state may use an outbox for reliable events.
-54. EventStoreDB-backed authority may use durable subscriptions for publication.
+52. Event-driven architecture does not imply event sourcing, and Chronologity is the first only.
+53. There is exactly one publication mechanism: the transactional outbox.
+54. A rebuild reads current authoritative state rather than replaying a message log.
 55. Kafka transport metadata never becomes business semantics.
 56. Event schemas receive contract and privacy tests.
 57. Event creation requires explicit ownership and consumer need.
@@ -2026,6 +1953,6 @@ Before launch, Chronologity must define:
 
 When creating or consuming an event, ask:
 
-> **What exact fact or cross-boundary change does this message represent, who owns that meaning, how durable is the contract, and what must remain true if the event is replayed years later?**
+> **What exact cross-boundary change does this message represent, who owns that meaning, how durable is the contract, and what must remain true if it is read years from now — including whether anything in it would by then need to have been erased?**
 
 If those questions cannot be answered clearly, the event boundary is not ready to become canonical.

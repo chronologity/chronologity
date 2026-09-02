@@ -10,7 +10,6 @@ It is an architectural constraint that affects:
 
 - authoritative state;
 - authorization;
-- Event Sourcing;
 - projections;
 - Timeline composition;
 - Search and Discovery;
@@ -45,7 +44,6 @@ This document defines:
 - historical privacy semantics;
 - data minimization;
 - PII handling;
-- Event Sourcing constraints;
 - projections and read models;
 - media privacy;
 - notification privacy;
@@ -67,7 +65,6 @@ This document is grounded in:
 - `docs/architecture/api.md`;
 - `docs/architecture/authentication.md`;
 - `docs/architecture/authorization.md`;
-- `docs/architecture/event-sourcing.md`;
 - `docs/architecture/events.md`;
 - `docs/architecture/messaging.md`;
 - `docs/architecture/projections.md`;
@@ -195,7 +192,7 @@ Raw:
 
 must never appear in:
 
-- Domain Events;
+- Integration Events;
 - Kafka;
 - logs;
 - analytics;
@@ -348,6 +345,11 @@ hidden
 
 The exact precision model belongs in product/location specifications.
 
+Precision attaches to a Moment's association with a place rather than to the
+place itself (ADR-098). A Location is shared reference data with no audience of
+its own, so there is nothing on it to reduce precision for; what varies by
+viewer is one person's assertion that something happened somewhere.
+
 ---
 
 # Precision-Aware Authorization
@@ -456,23 +458,36 @@ It must not emerge accidentally from event replay.
 
 ---
 
-# Event Sourcing and Privacy
+# Append-Only Storage and Privacy
 
-Event Sourcing creates a privacy challenge because events are append-only.
+Anything append-only creates a privacy challenge, because what is written cannot
+be corrected. Chronologity has two such surfaces: the transactional outbox and
+Kafka topics (ADR-095).
 
-The architecture must minimize sensitive immutable content.
+The architecture must keep erasable content out of both.
 
 Prefer:
 
 ```text
-event references sensitive record ID
+message references the record by identifier
 ```
 
 over:
 
 ```text
-event contains raw sensitive value
+message contains the raw sensitive value
 ```
+
+The consumer then reads what it needs from PostgreSQL, which can be corrected,
+erased, or refused.
+
+Authentication follows this rather than being exempt from it. It publishes one
+event — that something about an account's security changed — carrying the
+Identity, the account, which change, and when. No password, no hash, no token,
+no phone number, and no address: anything a consumer needs in order to reach
+somebody is read from authoritative state, where erasure can still reach it.
+The accountability requirement is met by a relational audit trail, which the
+event does not duplicate.
 
 where erasure may be required.
 
@@ -1028,6 +1043,28 @@ Examples:
 
 # Retention Is Not One Global TTL
 
+It is a schedule, held as data in `features/privacy/retention.policy.ts` and run
+by a worker that owns every periodic sweep. Each rule names a table, the
+timestamp that decides whether a row has aged, which rows it applies to, and
+which configured period governs it.
+
+A sweep is deliberately not the claim-lease-retry shape the queue-driven workers
+use. There is no lease, no attempt count, and no per-row state, because a sweep
+that fails simply runs again on the next pass — which is `sweepPublishedOutbox`'s
+shape rather than the erasure worker's.
+
+Two properties matter more than the periods themselves.
+
+**Nothing anybody recorded is in the schedule.** No Moment, comment, reaction,
+Location, Event, or moderation record, asserted by counting them across a sweep
+with every period set to zero.
+
+**Every sweep is bounded.** A batch at a time, ordered oldest-first, with
+`FOR UPDATE SKIP LOCKED`, so a table nobody has swept in a year drains over many
+passes rather than in one statement holding locks the application needs.
+
+
+
 Different data has different value and risk.
 
 Do not apply one blanket retention period to all stores.
@@ -1052,6 +1089,21 @@ The required operation depends on the data.
 # User-Initiated Account Deletion
 
 Account deletion is a cross-system privacy workflow.
+
+It is also two steps rather than one. The first sends a confirmation link to the
+verified address; the second consumes it. A session proves somebody signed in
+once; consuming a link proves they can read the mailbox now, which is the
+strengthening `changePassword` gets from demanding the current password and is
+available to every account rather than only those that have one. The mail
+arriving is a control in its own right: an account that has been taken over
+cannot be quietly deleted.
+
+The synchronous half is only what must be immediate — the account stops working
+and its credentials go. Erasing what it recorded is unbounded work and is
+written down as an erasure request instead, handled by the same worker and the
+same ledger a single deleted Moment uses. Erasing an account is a coordinator:
+it hands its Moments to that path in bounded batches, and sweeps its own rows
+only once none remain.
 
 Potential steps:
 
@@ -1091,6 +1143,21 @@ only if this is explicitly allowed by product/privacy policy.
 
 It must not be assumed.
 
+It is not assumed here, and the decision went the other way for content: a
+deleted account's Moments, media, comments, and reactions are erased rather than
+kept under anonymous attribution.
+
+What survives is narrower than that, and structural. The `users` row is
+tombstoned — no handle, no display name, no biography, a `deleted` status — so
+that the thirty-nine references pointing at it stay valid. Two of those are the
+reason: `locations.recorded_by_user_id` and `real_world_events.created_by_user_id`
+are shared reference data other people's Moments name, and both columns are
+`NOT NULL`. Removing the row would mean either loosening shared attribution or
+destroying history belonging to everybody else.
+
+The tombstone preserves no content and no attribution. It preserves the ability
+of other people's history to keep working.
+
 ---
 
 # Hard Delete Versus Tombstone
@@ -1107,13 +1174,22 @@ A hard delete physically removes data.
 
 Both may be required in different stores.
 
+Deleting a Moment uses both, in that order. Marking it deleted is synchronous
+and is what makes it vanish from every surface at once; it also blanks the
+caption and the body of every comment on it, so that what waits in the erasure
+queue is structure rather than anybody's words. The row itself is then hard
+deleted by the erasure worker, cascading the twelve tables that reference it.
+
+Moderation records are not among those twelve. They name their subject
+polymorphically with no foreign key and survive deliberately: an appeal against
+a decision whose record vanished with the content is not one.
+
 ---
 
 # Deletion Propagation
 
 Deletion must reach:
 
-- EventStoreDB-sensitive external records/redactions;
 - PostgreSQL;
 - ClickHouse;
 - Search;
@@ -1122,6 +1198,22 @@ Deletion must reach:
 - caches;
 - notification snapshots;
 - analytics where required.
+
+Erasure reaches Search and object storage directly rather than waiting to be
+told. The Search document is removed in the same transaction as the row, so
+deletion never queues behind a reindex — which is what *restriction and deletion
+propagate at higher priority than ordinary indexing* means in practice. The
+event-driven indexer remains the backstop and converges on the same answer, so
+the two cannot disagree.
+
+Notifications need no propagation at all. They store identifiers and compose
+their wording at read time from what the reader may currently see, so a
+notification about an erased Moment stops rendering, and leaves the unread
+count, without anything having to reach it.
+
+ClickHouse is absent from this path because there are no Timeline projections
+yet. When they arrive they must join it: a projection that erasure cannot reach
+is not ready to hold personal history.
 
 ---
 
@@ -1221,6 +1313,24 @@ If Chronologity provides User data export, the export should include data the Us
 - internal moderation evidence;
 - secrets;
 - operational-only identifiers.
+
+Those four exclusions are enforced in two places rather than one, because a leak
+can be introduced in either. The shaping is a set of pure builders that
+construct every field explicitly and never spread a row, tested by handing them
+records full of addresses and identifiers and searching the output. The reads
+are keyed on the account and select only what may travel, tested by fetching a
+prepared export through its own signed links and searching the artefact for
+every address and Identity in the database.
+
+The queries are the isolation story. Nothing selects by anything but the
+account, so no result can belong to somebody else; the one place other people
+appear is as the authors of comments and reactions on the account's own Moments,
+joined for a handle and a display name and nothing more.
+
+An export is prepared asynchronously and written in parts. Media is never
+copied: the manifest points at the originals, signed for minutes at the moment
+somebody asks, so the only new copy preparing an export creates is the data
+itself — and that copy expires.
 
 ---
 
@@ -1713,7 +1823,7 @@ Sensitive values that may require erasure should remain outside immutable event 
 2. Privacy is a backend authorization concern.
 3. Privacy is broader than visibility.
 4. Data minimization applies at collection, storage, replication, and logging.
-5. Authentication secrets never enter Domain Events, Kafka, logs, analytics, or read models.
+5. Authentication secrets never enter the outbox, Kafka, logs, analytics, or read models.
 6. Moment visibility is authoritative state.
 7. Current privacy state governs current access.
 8. Past public visibility does not imply permanent future access.
@@ -1723,7 +1833,7 @@ Sensitive values that may require erasure should remain outside immutable event 
 12. Location access may be precision-based.
 13. Exact Location is minimized and tightly controlled.
 14. Embedded GPS does not automatically become public Location.
-15. Event Sourcing does not permit indefinite retention of erasable PII.
+15. Append-only storage does not permit indefinite retention of erasable personal data.
 16. Sensitive values should be externalized from immutable events where practical.
 17. Event metadata follows the same privacy rules as payloads.
 18. Event redaction is exceptional but possible.

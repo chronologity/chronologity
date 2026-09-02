@@ -1,0 +1,26 @@
+[
+  {
+    "place_id": 272194102,
+    "licence": "Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+    "osm_type": "relation",
+    "osm_id": 2580605,
+    "lat": "64.1459810",
+    "lon": "-21.9422367",
+    "category": "boundary",
+    "type": "administrative",
+    "place_rank": 11,
+    "importance": 0.6785002244505651,
+    "addresstype": "city",
+    "name": "Reykjavíkurborg",
+    "display_name": "Reykjavíkurborg, Höfuðborgarsvæðið, Ísland",
+    "address": {
+      "city": "Reykjavíkurborg",
+      "ISO3166-2-lvl6": "IS-RKV",
+      "state_district": "Höfuðborgarsvæðið",
+      "ISO3166-2-lvl5": "IS-1",
+      "country": "Ísland",
+      "country_code": "is"
+    },
+    "boundingbox": ["64.0404021", "64.3153711", "-21.9838299", "-21.4019991"]
+  }
+]

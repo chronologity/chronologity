@@ -59,7 +59,7 @@ apps/api ── search read path ──▶ search index
    │                                  ▲
    │                              Kafka topics
    │                                  ▲
-   └── authoritative writes ──▶ EventStoreDB / PostgreSQL
+   └── authoritative writes ──▶ PostgreSQL
 ```
 
 `apps/feed-aggregator` does not own Search. It resolves a selected Search result into Timeline context, as established in `architecture/feed.md`. Search ranking stops at entry-point selection; Timeline chronology resumes after entry.
@@ -582,6 +582,82 @@ The retrieval interface is the seam that keeps the eventual engine decision chea
 These should be resolved before the Search subsystem hardens privacy, identity, or ranking assumptions that are expensive to reverse.
 
 ---
+
+# Settled by Implementation
+
+These were open questions above. 5O-1 settled them, and they are decisions now
+rather than possibilities (ADR-117). The rest of the list stands.
+
+**Search documents are built from authoritative state, not from event
+payloads.** An event carries the entity and the nature of the change; the
+indexer reads the database for everything else. This is what makes a replayed
+message produce a current document rather than a stale one, and it keeps a
+schema change from becoming an event-version change.
+
+**There is no `timeline` document type.** The Document Model above lists one and
+`glossary.md:477` says a Timeline "is never stored, owned, or followed
+directly" — it has no identity to key a document on. Timeline Search is served
+by Event and Location documents plus the handoff into temporal position. The
+day-one types are `moment`, `user`, `event`, and `location`; Person has no table
+yet.
+
+**Coarse geography uses truncated geohash columns**, PostGIS not being
+installed. Three tiers, and a tier finer than the author's disclosure permits is
+never stored.
+
+**Index versions live side by side in one table**, keyed on `(index_version,
+entity_type, entity_id)`, rather than in a table per version.
+
+**A rebuild walks authoritative state rather than replaying the log.** Because
+documents are built by reading, the two produce the same result, and walking
+does not require the broker to have retained every message since the platform
+began.
+
+**Eligibility is a single SQL fragment inside the retrieval query**, never a
+filter applied to results afterwards. The Viewer is a required argument to
+retrieval, so there is no code path that retrieves without it.
+
+**Searchability and visibility stay separate.** The index records what
+moderation permits; visibility, suspension, audience, and age are resolved
+against the Viewer at query time. Folding them together would filter an author
+out of their own private history before anybody knew who was asking.
+
+**Ranking produces the SQL that orders candidates** rather than scoring them
+afterwards, because ordering has to happen in the query for pagination to be
+correct. It still imports nothing, which is what keeps engagement unreachable.
+
+**Proximity search matches indexed cells**, with the radius choosing a tier and
+a ring count, and the response reporting the tier that answered. Rings are
+sized by the shorter side of a cell — a geohash rectangle is markedly taller
+than it is wide at the finest tier, and sizing by the longer side leaves the
+shorter one uncovered.
+
+**A Search cursor carries a query fingerprint and a ranking version**, and one
+matching neither is refused explicitly rather than silently restarted or
+re-ranked.
+
+**Autocomplete uses the same eligibility fragment as retrieval**, and covers
+accounts, Events, and Locations only. Suggestions carry a name and an identifier
+and nothing further.
+
+**Corrections are drawn after eligibility and at a lower similarity threshold
+than retrieval uses.** Drawn with the same threshold they could only ever name
+something already returned, which made the feature unreachable.
+
+## Still open
+
+Everything else in the list above, and these in particular are now closer:
+
+- the acceptable indexing-lag budget, which is measured per message but has no
+  agreed threshold;
+- what an authorization-policy change requires, which is now concretely a
+  scoped rebuild but not yet a decided procedure;
+- whether Comments are indexed, which stayed unanswered because no comment
+  document type was needed to satisfy anything day-one;
+- whether a dedicated Search engine is introduced, which the retrieval interface
+  now makes a second implementation rather than a rewrite;
+- whether facet counts are computed at all, which stayed unbuilt: the leakage
+  surface is real and nothing day-one needs them.
 
 # Architectural Invariants
 

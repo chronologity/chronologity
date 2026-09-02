@@ -8,7 +8,6 @@ Chronologity must scale across very different workload classes:
 
 - authoritative API commands;
 - authentication and authorization;
-- EventStoreDB aggregate streams;
 - Kafka messaging;
 - projection workers;
 - PostgreSQL operational state;
@@ -30,7 +29,6 @@ This document defines:
 - horizontal versus vertical scaling;
 - stateless application scaling;
 - workload isolation;
-- EventStoreDB scale;
 - Kafka scale;
 - PostgreSQL scale;
 - ClickHouse scale;
@@ -54,8 +52,6 @@ This document is grounded in:
 - `docs/architecture/overview.md`;
 - `docs/architecture/principles.md`;
 - `docs/architecture/api.md`;
-- `docs/architecture/cqrs.md`;
-- `docs/architecture/event-sourcing.md`;
 - `docs/architecture/events.md`;
 - `docs/architecture/messaging.md`;
 - `docs/architecture/projections.md`;
@@ -198,7 +194,6 @@ Backend HTTP services should be stateless.
 
 State belongs in:
 
-- EventStoreDB;
 - PostgreSQL;
 - ClickHouse;
 - object storage;
@@ -246,7 +241,6 @@ Appropriate targets:
 
 - PostgreSQL;
 - ClickHouse;
-- EventStoreDB;
 - media workers;
 - API instances.
 
@@ -286,8 +280,7 @@ Isolation may use:
 
 Primary constraints may include:
 
-- EventStoreDB latency;
-- PostgreSQL connections;
+- PostgreSQL latency and connection limits;
 - authentication crypto;
 - external provider calls;
 - command contention.
@@ -320,49 +313,50 @@ When downstream authoritative stores are saturated, API should:
 
 ---
 
-# Command Throughput
+# Write Throughput
 
-Command throughput is primarily limited by:
+Write throughput is primarily limited by:
 
-- aggregate contention;
+- row contention;
 - authoritative datastore latency;
 - synchronous validation/external dependencies.
 
-Avoid synchronous external calls in command paths unless required.
+Avoid synchronous external calls in write paths unless required.
 
 ---
 
-# Aggregate Hotspots
+# Row Hotspots
 
-Event-sourced aggregate design must avoid unnecessary shared streams.
+Contention concentrates wherever many writers touch one row.
 
 Bad:
 
 ```text
-all Moments in one stream
-all Reactions for popular Moment in one mutable aggregate
-all Users in one authorization stream
+one counter row incremented by every Reaction on a popular Moment
+one row recording activity for every User
 ```
 
 Good:
 
 ```text
-independent aggregate streams
+rows that are independent by design, aggregated when read
 ```
 
 where invariants permit.
 
 ---
 
-# Optimistic Concurrency Hotspots
+# Conditional-Update Conflict Rate
 
-A high concurrency-conflict rate indicates:
+A conditional update that frequently matches nothing indicates:
 
-- aggregate too broad;
-- command pattern too contentious;
-- retry strategy too aggressive.
+- a boundary drawn too broadly, so unrelated writers contend;
+- an operation shaped so that callers routinely race;
+- a retry strategy too aggressive.
 
-This should be measured.
+This should be measured. Some rate is expected and healthy — it is what
+correctness under concurrency looks like — but a rising rate means the shape is
+wrong rather than the guard.
 
 ---
 
@@ -370,17 +364,13 @@ This should be measured.
 
 Reactions can be extremely high-volume.
 
-If event sourced, use a partitionable aggregate model.
-
-Do not serialize all Reactions for a popular Moment through one stream/version.
-
-A relational authoritative model may ultimately be simpler if Event Sourcing adds no meaningful benefit.
+Do not serialize all Reactions for a popular Moment through one contended row. Insert independent rows and aggregate them when read.
 
 ---
 
 # Comment Scale
 
-Comments should avoid loading entire comment trees into one aggregate.
+Comments should avoid loading entire comment trees to answer one request.
 
 Use bounded/thread-specific ownership where possible.
 
@@ -406,232 +396,38 @@ This is a classic read/write asymmetry.
 
 ---
 
-# EventStoreDB Scaling
-
-EventStoreDB scale should preserve:
-
-- per-stream ordering;
-- expected-version semantics;
-- subscription durability.
-
-Scaling methods may include:
-
-- stronger nodes;
-- clustering;
-- partitioning/sharding according to provider capabilities;
-- stream-distribution strategies.
-
-Exact topology belongs in infrastructure design.
-
----
-
-# EventStoreDB Stream Distribution
-
-Application-generated aggregate IDs should distribute naturally.
-
-Avoid stream keys that create one physical hotspot by design.
-
----
-
-# EventStoreDB Read Scale
-
-Aggregate reconstruction reads are command-side and scoped.
-
-Do not use EventStoreDB for broad Timeline queries.
-
-This avoids unnecessary read-scaling pressure.
-
----
-
-# EventStoreDB Snapshot Scale
-
-Snapshots may reduce reconstruction cost for long-lived streams.
-
-Use them only when measured stream replay latency warrants it.
-
----
-
-# Kafka Scaling
-
-Kafka scales primarily through:
-
-```text
-partitions
-consumer groups
-parallel consumers
-```
-
-Partition counts should support expected throughput without creating unnecessary operational overhead.
-
----
-
-# Kafka Partitioning
-
-Partition keys must preserve required ordering without creating hot partitions.
-
-Examples:
-
-```text
-aggregateId
-userId
-momentId
-```
-
-A globally popular key can become a hotspot.
-
----
-
-# Kafka Hot Partitions
-
-Potential hot keys include:
-
-- a viral Moment;
-- one high-volume Real-World Event;
-- one global routing key.
-
-Avoid partition strategies that funnel unrelated traffic through those keys.
-
----
-
-# Kafka Partition Count
-
-Partition count should be chosen with headroom.
-
-Increasing partitions later can affect ordering assumptions for key-distribution strategies.
-
-Do not hard-code consumer logic to a fixed partition count.
-
----
-
-# Kafka Consumer Scaling
-
-A consumer group can scale up to available partitions.
-
-If:
-
-```text
-consumer instances > partitions
-```
-
-extra instances sit idle.
-
-Capacity planning must account for this.
-
----
-
-# Consumer Isolation
-
-Different workloads should use separate consumer groups.
-
-Example:
-
-```text
-timeline projection
-notification generation
-Search indexing
-```
-
-A slow notification consumer must not hold back Timeline projection.
-
----
-
-# Security-Critical Consumer Isolation
-
-Authorization/privacy/moderation consumers may deserve separate resources because their lag has higher consequence.
-
----
-
-# Kafka Backpressure
-
-If consumers fall behind:
-
-- lag increases;
-- producers continue until retention/capacity limits.
-
-Consumers should scale horizontally and control downstream write concurrency.
-
----
-
 # PostgreSQL Scaling
 
-PostgreSQL should scale conservatively.
+PostgreSQL is the single authority, which makes its scale the system's write
+scale.
 
-Initial progression:
+Scaling approaches, in the order they should be reached for:
 
-```text
-schema/index optimization
-connection pooling
-vertical scaling
-read replicas
-partitioning
-targeted denormalization
-sharding only if necessary
-```
+- indexes and better queries;
+- read replicas for reads that tolerate replica lag, which authoritative
+  decisions do not;
+- connection pooling that keeps projection and worker workloads from exhausting
+  what the API needs;
+- partitioning of genuinely large tables;
+- sharding only when measured scale justifies it.
 
----
-
-# PostgreSQL Connection Scaling
-
-Connection count is finite.
-
-Use:
-
-- bounded pools;
-- possibly PgBouncer or provider pooling;
-- separate pools for HTTP and workers.
+Do not use PostgreSQL for broad Timeline reads. Those belong to ClickHouse
+through the feed aggregator, and the point of the split is that write-side
+scaling and read-side scaling are then independent problems.
 
 ---
 
-# PostgreSQL Read Replicas
+# Outbox Scaling
 
-Read replicas may serve stale-tolerant operational reads.
+The outbox sits on the write path, so its cost is part of every publishing
+write. Enqueuing is one insert in a transaction that was already open.
 
-They should not serve:
+Draining scales horizontally without coordination: publishers claim batches with
+`FOR UPDATE SKIP LOCKED`, so adding instances adds throughput. What must be
+watched is depth and lag rather than publisher count.
 
-- critical role revocation;
-- Session revocation checks;
-- high-risk authorization state
-
-if replica lag creates unsafe decisions.
-
----
-
-# PostgreSQL Partitioning
-
-Partition large tables when:
-
-- retention management;
-- query pruning;
-- write scale
-
-justify it.
-
-Examples may eventually include:
-
-- notifications;
-- audit records;
-- outbox;
-- operational event tables.
-
-Do not partition every table by default.
-
----
-
-# PostgreSQL Sharding
-
-Sharding should be introduced only when one PostgreSQL cluster cannot meet requirements with simpler techniques.
-
-A sharding key must align with ownership and query patterns.
-
-Potential candidates might be:
-
-```text
-userId
-```
-
-for some operational datasets.
-
-But cross-User product relationships make premature user sharding risky.
+Retention matters at volume. Published rows are currently never removed, and the
+table will grow without bound until something does.
 
 ---
 
@@ -837,7 +633,7 @@ Parallelism must respect ordering requirements.
 Example:
 
 ```text
-same aggregate/order key
+same subject or order key
     → sequential within partition
 
 different keys
@@ -1082,7 +878,6 @@ Lag is preferable to crash loops or datastore collapse.
 
 The API may reject or throttle work when:
 
-- EventStoreDB unavailable;
 - database pool saturated;
 - upload-registration abuse detected.
 
@@ -1439,7 +1234,6 @@ Chronologity should not begin with active-active multi-region writes unless requ
 
 This greatly complicates:
 
-- EventStoreDB ordering;
 - PostgreSQL authority;
 - Session security;
 - privacy revocation;
@@ -1788,7 +1582,6 @@ Architecture should understand failure domains:
 API
 feed
 Kafka
-EventStoreDB
 PostgreSQL
 ClickHouse
 media provider
@@ -1984,11 +1777,8 @@ Kafka
     ├── media workers
     └── notification workers
 
-EventStoreDB
-    → authoritative event-sourced writes
-
 PostgreSQL
-    → relational authority + operational/read models
+    → authoritative writes for every feature
 
 ClickHouse
     → Timeline/historical read scale
@@ -2010,13 +1800,6 @@ Scale each independently based on measured saturation.
 - Moments/day?
 - media GB/day?
 - video minutes/day?
-
-## EventStoreDB
-
-- Single cluster topology?
-- Provider?
-- Expected event throughput?
-- When are snapshots introduced?
 
 ## Kafka
 
@@ -2087,9 +1870,9 @@ Scale each independently based on measured saturation.
 10. Database connection pools are bounded per process.
 11. Adding service replicas must not accidentally exhaust PostgreSQL connections.
 12. API command paths avoid unnecessary synchronous external dependencies.
-13. Event-sourced aggregate design avoids hot shared streams.
-14. Concurrency-conflict rates are monitored for aggregate hotspots.
-15. EventStoreDB is not used for broad Timeline reads.
+13. Write paths avoid rows that every writer must contend for.
+14. The rate at which conditional updates match nothing is monitored, because a rising rate means the boundary is wrong.
+15. PostgreSQL is not used for broad Timeline reads.
 16. Kafka scales through partitions and consumer groups.
 17. Kafka partition keys preserve required ordering without global serialization.
 18. Consumer groups isolate independent workloads.

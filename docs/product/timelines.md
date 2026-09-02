@@ -73,9 +73,9 @@ Chronological structure
 
 Users record history. Chronologity organizes that history chronologically.
 
-## Timeline Is Not an Aggregate Root by Product Definition
+## Timeline Is Not a Stored Entity by Product Definition
 
-The word "Timeline" being a major product concept does not imply that it must become an independently persisted domain aggregate.
+The word "Timeline" being a major product concept does not imply that it must become an independently persisted thing.
 
 The product model does not require:
 
@@ -125,6 +125,118 @@ Chronologity may also derive chronological views for other product-defined conte
 - another explicitly defined historical context.
 
 These are derived chronological views, not independent user-created Timeline containers.
+
+## Contexts May Relate to One Another
+
+The contexts a Timeline is derived from are not isolated. One real-world Event
+may contain another, precede another, or have caused another; a Person may be
+connected to an Event; two accounts of one occurrence may contradict each other.
+
+Those relationships form a graph, and traversing it is what horizontal
+navigation is: moving from one context to another, and seeing the Timeline that
+falls out of the new one.
+
+```text
+Context A ──parent_of──▶ Context B
+    │                        │
+    ▼                        ▼
+ Timeline A              Timeline B
+```
+
+The graph connects **contexts**, never Timelines. A Timeline has no identity to
+put at either end of an edge, and giving it one would make it the stored entity
+this document says it is not. `timeline-first-curation-and-discovery.md`
+describes the relationship types, their provenance, and how they are traversed.
+
+## Following a Context
+
+A User may follow a context — a real-world Event, a Location, or another
+explicitly defined historical scope — and thereby ask to hear about Moments that
+become associated with it.
+
+What is followed is the context. A Timeline is not followed, because there is
+nothing there to follow: it is the view produced by looking at a context, and it
+already changes whenever the underlying history does.
+
+```text
+Follow a context
+      ↓
+Hear about new Moments in it
+      ↓
+Which is to say: its Timeline grew
+```
+
+An interface may reasonably present this as "follow this Timeline". The
+distinction matters in the model, not in the wording a person sees.
+
+Following never grants access. A follower hears about Moments they were already
+permitted to see, and `social-graph.md` is explicit that a Follow "must never
+bypass the visibility rules of individual Moments".
+
+## A Person's Timeline
+
+A person's Timeline is the history they **authored** together with the history
+they **participated in**.
+
+```text
+Moments they recorded
+        +
+Moments they accepted participation in
+        ▼
+   Their Timeline
+```
+
+This is what "accessible history" means above, and it is deliberately not "the
+Moments they created". Somebody who was at an occasion but did not photograph it
+was still there, and a model where only the person holding the camera owns the
+memory would make Chronologity a record of who documented history rather than of
+what happened.
+
+`participation.md` defines how somebody comes to be a participant, and the short
+answer is that only they can decide it: a creator proposes, and nothing exists
+until the named person accepts.
+
+### Whether It May Be Opened At All
+
+A person decides whether other people may open their Timeline. It is open unless
+they say otherwise, as a Moment is public unless its author says otherwise.
+
+What the choice governs is narrower than it sounds, and worth stating plainly: a
+Timeline can only ever show a Viewer Moments they could already have opened one
+at a time. Closing it hides nothing that was visible; it withholds the **walk** —
+moving through a life in order, zooming out over decades, jumping to a date.
+
+That is a real distinction rather than a technicality. Moments made public one
+by one are a different disclosure from a navigable record of where somebody was
+and when, and choosing the first is not consent to the second. Somebody who
+wants their history findable without being walkable turns theirs off.
+
+A closed Timeline answers **empty**, exactly as one belonging to somebody with
+no history does, and exactly as a Location a Viewer may see nothing in does.
+Refusing would say there was something there to refuse.
+
+Nobody's own Timeline is ever closed to them.
+
+### What Another Viewer Sees Of It
+
+A Moment reaches somebody else's reading of your Timeline only if that person
+could see the Moment anyway. The Moment's own audience still governs, and neither
+authorship nor participation widens it.
+
+```text
+On your Timeline          ──▶ you see it
+Visible to another Viewer ──▶ only if the Moment itself is
+```
+
+This follows from `privacy.md`, which forbids using a visible relationship to
+reveal an inaccessible Moment. A Timeline is a visible relationship. Were it
+otherwise, accepting a participation would publish somebody else's private
+Moment to your followers, and the person who chose that audience would not have
+agreed to it.
+
+It also means a Timeline is not one list with a filter applied afterwards.
+Nothing is assembled and then thinned: what a Viewer may see is part of what
+produces the Timeline, which the next section describes.
 
 ## Viewer-Specific Timelines
 
@@ -482,6 +594,27 @@ Authorization applies to:
 - historical jumps;
 - counts and summaries; and
 - other derived Timeline representations.
+
+## Navigation Is Not Recommendation
+
+A Timeline shows what a Viewer is authorized to access. It does not additionally
+narrow to what a Moment's author left open to being recommended.
+
+The two rules are distinct and Chronologity keeps them so. Discovery asks a
+further question — may this be *shown* to somebody who did not ask for it — and
+answers it with, among other things, whether the author left the Moment
+discoverable. A Timeline asks only whether the Viewer may see the Moment,
+because the Viewer went to that Location or that occasion deliberately. Nothing
+was surfaced to them; they navigated to it.
+
+Consequently a Moment its author kept out of recommendations still appears at
+the place it happened, to anybody entitled to see the Moment itself. Turning
+discoverability off means "do not put this in front of people", not "hide this
+from the history of the place it belongs to".
+
+A Viewer's own history is subject to the same rule for the same reason, and to
+one more besides: somebody must be able to navigate their own past whatever
+state it is in.
 
 ## Temporal Zoom
 

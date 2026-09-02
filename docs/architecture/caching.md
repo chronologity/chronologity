@@ -1128,48 +1128,21 @@ PostgreSQL remains a valid initial choice.
 
 ---
 
-# Cache and CQRS
+# Caching Reads, Not Decisions
 
-Caching primarily accelerates query-side access.
+Caching primarily accelerates reads.
 
-Command-side caching should be conservative.
+Caching on a write path should be conservative.
 
 Never use a stale cache as the only source for a domain invariant.
 
 ---
 
-# Command-Side Cache
+# Caching on a Write Path
 
-A command may use cached non-authoritative reference data.
+A write may use cached non-authoritative reference data.
 
-But before making a critical state transition, required authoritative current state must be obtained from the correct source.
-
----
-
-# Cache and Event Sourcing
-
-Event-sourced aggregate state should generally be reconstructed from EventStoreDB/snapshot.
-
-An aggregate cache may be introduced later for hot streams, but correctness must preserve expected-version semantics.
-
-Do not let an aggregate cache bypass EventStoreDB concurrency.
-
----
-
-# Aggregate Cache
-
-If introduced:
-
-```text
-aggregate ID
-    → cached snapshot + stream version
-```
-
-The command still appends with expected EventStoreDB version.
-
-Cache miss/invalidity falls back to stream reconstruction.
-
-This is a later optimization, not a day-one requirement.
+But a state transition is guarded by a conditional update against the authoritative row, so the decision is made by the database at the moment of writing rather than from anything cached. There is nothing to cache that would make that safer.
 
 ---
 
@@ -1540,7 +1513,7 @@ No distributed cache is required initially.
 52. Distributed-cache failure policies are explicit.
 53. Correctness-critical idempotency records are not stored solely in volatile cache.
 54. Command-side caches do not replace authoritative state.
-55. Aggregate caches, if introduced, preserve EventStoreDB expected-version semantics.
+55. No cache stands between a state transition and the row it is conditional on.
 56. Caches sit after projections rather than becoming undocumented projection systems.
 57. Cache observability distinguishes cache classes.
 58. Security-sensitive invalidation failures generate operational visibility.

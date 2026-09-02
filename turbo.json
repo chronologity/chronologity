@@ -2,53 +2,56 @@
   "$schema": "https://turbo.build/schema.json",
   "tasks": {
     "build": {
-      "dependsOn": [
-        "^build"
-      ],
-      "outputs": [
-        "dist/**",
-        "build/**",
-        "public/**"
-      ]
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", "build/**", "public/**"]
     },
     "dev": {
       "cache": false,
       "persistent": true
     },
     "lint": {
-      "dependsOn": [
-        "^lint"
-      ]
+      "dependsOn": ["^build"]
     },
     "lint:fix": {
-      "dependsOn": [
-        "^lint:fix"
-      ],
+      "dependsOn": ["^lint:fix"],
       "cache": false
     },
     "typecheck": {
-      "dependsOn": [
-        "^typecheck"
-      ]
+      "dependsOn": ["^build"]
     },
     "test": {
-      "dependsOn": [
-        "^build"
-      ],
-      "outputs": [
-        "coverage/**"
-      ]
+      "dependsOn": ["^build"]
     },
     "test:unit": {
-      "outputs": [
-        "coverage/**"
-      ]
+      "dependsOn": ["^build"]
     },
     "test:integration": {
-      "cache": false
+      "cache": false,
+      "dependsOn": ["^build"],
+      "env": [
+        "NODE_ENV",
+        "LOG_LEVEL",
+        "POSTGRES_*",
+        "KAFKA_*",
+        "CLICKHOUSE_*",
+        "AUTH_*",
+        "SMTP_*",
+        "MAILPIT_*"
+      ]
     },
     "clean": {
       "cache": false
+    },
+    "//#lint:root": {
+      "inputs": ["eslint.config.js", "prettier.config.js"]
+    },
+    "//#lint:root:fix": {
+      "cache": false
+    },
+    "test:watch": {
+      "cache": false,
+      "persistent": true,
+      "dependsOn": ["^build"]
     }
   }
 }

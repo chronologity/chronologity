@@ -287,7 +287,7 @@ Chronologity may retain the latest edit time separately.
 
 Chronologity does not need to expose a public Comment revision history in the initial product.
 
-Internal revision information may be retained where required for moderation, abuse investigation, legal compliance, or event-sourced correctness.
+Internal revision information may be retained where required for moderation, abuse investigation, or legal compliance.
 
 Internal retention must remain subject to privacy and retention requirements.
 
@@ -393,6 +393,24 @@ If a Moment's visibility changes, Comment access must follow the new effective a
 For example, if a formerly public Moment becomes private, its existing Comments must not remain exposed through search, notifications, cached views, direct links, or other derived surfaces to Users who no longer have access.
 
 Privacy revocation applies to discussion as well as source content.
+
+## What Is Settled
+
+**Three policies, chosen per Moment by its author** (ADR-114): `anyone` who can see it, `followers` of the author, or `disabled`. The author may always comment on their own Moment under every one.
+
+**`followers` grants no access.** A stranger who could read the Moment still can; what changes is whether they may speak. That is why it does not contradict the rule that a Follow never bypasses a visibility rule — nothing here is a visibility rule.
+
+**Closing a discussion leaves it readable.** New comments are refused; what was already said stays. This deliberately differs from disabling reactions, which hides the counts: hiding a tally erases an aggregate nobody authored, while hiding a conversation erases speech and leaves replies answering questions that are no longer there.
+
+**Blocking hides each party's comments from the other and from nobody else.** Future interaction is refused and prior conversation stands for everybody else, so nothing a third person wrote becomes incoherent. The reactions the two left on each other's comments are severed, because a count is not something anybody else took part in.
+
+**Five hundred characters**, measured after normalisation. Whitespace alone is not a comment.
+
+**A mention stores a person, never a handle**, so it survives its target renaming. Mentioning somebody a Block separates you from is refused, and a comment may name at most ten people.
+
+**A retried submission is not a duplicate.** The caller may name the submission: the same identifier twice yields one comment, while the same text twice without one yields two, because repeating yourself deliberately is allowed.
+
+**Reactions on comments ship**, using the same four kinds a Moment takes. A Moment's own reaction setting does not reach the discussion underneath it.
 
 ## Who May Comment
 
@@ -893,6 +911,14 @@ The initial release does not require:
 - direct messaging derived from Comment threads; or
 - Comment reactions unless separately justified by the reaction specification.
 
+## Established Comment Decisions
+
+**A comment is a moderatable subject in its own right** (ADR-116). It can be removed or withheld during review without touching the Moment it sits under, and its author still reads it — which is what makes an appeal possible.
+
+**A suspended account's comments are hidden from everybody else, and the count follows.** This answers what suspension does to comments. The comment count and the comment list are one predicate rather than two, because a count that exceeds the comments a Viewer can actually read is a visible lie about how many people spoke.
+
+**Nothing is deleted.** Reinstating the account restores the comments and the count exactly, the same as for Moments.
+
 ## Open Product Questions
 
 The following questions require deliberate resolution:
@@ -965,7 +991,7 @@ Authorization must be enforceable consistently across authoritative and derived 
 
 The system must also support large discussions without requiring an entire thread to be loaded or rewritten for ordinary operations.
 
-If Chronologity uses event sourcing for Comment writes, that architectural choice must not force internal historical revisions to become publicly visible or prevent privacy-compliant deletion and suppression behavior.
+Whatever Chronologity stores internally about a Comment's revisions must not force those revisions to become publicly visible, and must not prevent privacy-compliant deletion and suppression.
 
 ## Guiding Principle
 

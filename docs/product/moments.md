@@ -312,7 +312,12 @@ Chronologity must not assume that every Moment has a location, has a precise loc
 
 ## Description
 
-A Moment may include descriptive text that helps explain what happened.
+A Moment **must** include descriptive text saying what happened.
+
+Media and a timestamp alone are a photograph with a date on it. The caption is
+what makes the record be about an experience rather than about a file, which is
+the distinction this document opens with. This was decided deliberately and
+replaces an earlier statement that descriptive text was optional.
 
 Editing descriptive text should not change occurrence time or move the Moment through chronological navigation. The product should distinguish enriching the representation of history from changing the historical event itself.
 
@@ -320,9 +325,11 @@ Editing descriptive text should not change occurrence time or move the Moment th
 
 A Moment may involve people other than the creator.
 
-Chronologity may eventually represent participants, people appearing in media, contributors, or other relationships between Users and Moments. These relationships require careful product and privacy design.
-
 Being depicted in a Moment, being tagged in a Moment, contributing to a Moment, and owning a Moment are not necessarily the same relationship and should not be collapsed into one generic association.
+
+Of those, Chronologity represents one: **participation**, meaning that a person was part of the experience. A creator proposes it and only the named person can establish it. `participation.md` is canonical for what it means, how consent works, and what it does to a Timeline.
+
+The others — depiction, contribution — remain unrepresented, each for a reason `participation.md` records rather than leaves to inference.
 
 ## Moment Creation
 
@@ -565,25 +572,49 @@ Historical integrity means users should be able to trust what a Moment represent
 21. Historical integrity must coexist with correction, privacy, safety, and deletion requirements.
 22. The product should not imply temporal precision that the user does not actually know.
 
+## Established Moment Decisions
+
+These were open questions. They were decided deliberately, ahead of the implementation that depends on them, rather than being answered by accident during it.
+
+**A Moment requires an occurrence, at least one image or video, and a caption.** A Location and a real-world Event are optional. Media-less Moments are therefore not permitted in the initial product.
+
+This has a consequence `moments.md` anticipated: because the last media asset cannot be removed without leaving a Moment that could not have been created, **removing the final media asset is refused**. It does not silently delete the Moment. Deleting a media asset and deleting a Moment remain different operations, and an edit must not destroy history as a side effect. Someone who wants the Moment gone deletes the Moment.
+
+**A Moment's occurrence is an interval with the precision it is actually known at**, using the same `start`, `end`, and precision that `packages/contracts/src/time.ts` already defines and that real-world Events use (ADR-100). A Moment known only as "summer 1998" is that interval at `month` precision, and never acquires a fabricated exact timestamp. This is what lets a Moment represent an interval rather than a point.
+
+**Media within a Moment carries an explicit position**, set from the order supplied at creation and changeable afterwards. Position is presentation only: it orders media inside the depth view and never affects where the Moment sits in chronology, which is determined by occurrence time alone.
+
+**A Moment is private, restricted to people its author named, or public** (ADR-108) — the three models `privacy.md` describes, and no more. A Moment is public unless its author says otherwise, which they may do while recording rather than only afterwards. Nothing recorded before that default existed was changed by it.
+
+Every read requires a Viewer, public Moments included. That is what lets a Block take effect: a blocked person must not be able to route around it by signing out. Reading and editing are separately gated, so seeing a Moment is never enough to change one.
+
+**A Moment may be connected to another Moment by an explicit claim** (ADR-111) — `led_to`, `contributed_to`, `related_to`, `alternate_perspective`, or `contradicts`. A relationship is always something somebody said, never something derived from chronological order, and it records whose reading of history it is. One end must belong to whoever makes the claim, and a relationship is visible only when both its ends are.
+
+**A Moment's author chooses how much of its place other people are told** (ADR-109) — exact, the neighbourhood, the city, or nothing. The author always sees the exact place. New Moments disclose exactly unless their author says otherwise, and the choice can be made while recording.
+
+Below exact, the response carries no Location identifier and no coordinates, which is what stops the reduction being undone by looking the place up. Disclosure is a separate thing from a Location's precision: precision says how well the place is known and is the same for everybody, disclosure says how much of that a Viewer receives.
+
+**Media must be checked before it can represent a Moment.** An upload reaches
+`ready` only once a decoder has opened it and found it to be what it claimed
+(ADR-086), and nothing else may be attached. So a Moment cannot be committed
+while a video is still processing — a real constraint on the experience, and the
+consequence of media being mandatory: a Moment built on a file that later failed
+would be one that could not have been created.
+
+**A Moment's caption, occurrence, and media may be changed after it is recorded, and every change is kept.** `moment_edits` records what kind of change it was and what the changed thing was before, in the same transaction as the change itself (ADR-103). Correcting when something happened is its own operation, separate from correcting a caption, because the two are not the same act: one moves the Moment through chronology and the other does not.
+
+Nothing reads that history back yet. How corrections should be presented remains open, and exposing them would answer it by implementation.
+
+**Deletion is a tombstone, and erasure is separate work.** A deleted Moment is retained as a row, disappears from every read, and its stored media is left untouched. What a deletion service must erase, in what order, and what must be retained for abuse prevention or legal reasons are deliberately unresolved and listed below. Foreign keys remain `RESTRICT` (ADR-097), so nothing is removed as a silent consequence of removing something else.
+
 ## Open Product Questions
 
 The following behaviors should remain open until deliberately designed rather than answered accidentally during implementation:
 
-- What is the minimum information required to create a Moment?
-- Can a Moment exist without image or video media?
-- What determines the initial ordering of multiple media assets within a Moment?
-- Can users manually reorder media after Moment creation?
 - What should happen when some media assets succeed during upload or processing and others fail?
-- Can users commit a Moment while some associated media is still processing?
 - How should extremely large Moments be presented without making Moment depth difficult to navigate?
-- How should approximate or partially known occurrence dates work?
-- Can a Moment represent a time interval rather than a point in time?
 - How should historical corrections be presented to users?
-- How should participation, tagging, and consent work when other people appear in a Moment?
 - Can multiple users collaboratively contribute to the same Moment?
-- What visibility modes exist, and can visibility vary for location versus other Moment data?
-- What exact semantics distinguish removal, deletion, and permanent erasure?
-- Which relationships between Moments should be first-class product concepts?
 - How should Moments participate in automatically derived location and event groupings?
 
 The following questions are **resolved** and should not be reopened accidentally during implementation:
@@ -606,7 +637,7 @@ The unlimited-media decision does not weaken privacy requirements. Every media a
 
 This document defines product semantics, not implementation boundaries.
 
-A Moment does not necessarily require a dedicated microservice, database, Kafka topic, event-sourced aggregate, API shape, or storage technology.
+A Moment does not necessarily require a dedicated microservice, database, Kafka topic, API shape, or storage technology.
 
 The unlimited-media requirement does, however, impose an important architectural constraint:
 

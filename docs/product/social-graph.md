@@ -53,6 +53,28 @@ User B ──is followed by──▶ User A
 
 A following relationship does not inherently require reciprocity.
 
+## Following a User Versus Following a Context
+
+"Follow" in this document always means following a **User**. It is a
+relationship between two people, and it is the one that carries approval,
+requests, and blocking.
+
+Chronologity also lets a User follow a **historical context** — a real-world
+Event, a Location, or another explicitly defined scope — in order to hear about
+Moments that become associated with it. That is a different relationship with
+different semantics: a context is shared history rather than a person, so
+nobody approves who watches it, and there is nothing there to block.
+
+```text
+Follow a User      → their eligible Moments, subject to approval
+Follow a context   → Moments associated with it, no approval
+```
+
+`timelines.md` defines context following, and it is built: a real-world Event or
+a Location may be followed, with no approval and no access granted (ADR-105). Neither is a relationship to a
+Timeline: a Timeline is derived, and is what a viewer sees when they look at a
+context.
+
 ## Why Following Rather Than Friendship
 
 A symmetric friendship model requires both Users to agree before the relationship exists:
@@ -807,11 +829,32 @@ The initial release does not require:
 
 Those capabilities should be added only when they solve a demonstrated product problem.
 
+## Established Following Decisions
+
+These were open questions. Implementation settled them, and they are requirements now rather than possibilities.
+
+**Follow approval is a single setting, independent of profile visibility** (ADR-104). An account either requires approval to be followed or it does not, and that says nothing about what its profile shows. A broader account privacy model, if one is ever wanted, can arrive without this having guessed at its shape.
+
+**A Follow grants no access on its own.** It is a relationship, not a permission. What a follower may see is decided by the visibility rules of individual Moments, which a Follow must never bypass.
+
+**Blocking is one indivisible act** (ADR-106). Recording a Block, removing the Follow in both directions, and settling any pending Request between the two people happen together or not at all. A Block that recorded itself while the relationship it exists to end continued would tell somebody they were protected when they were not.
+
+**A severed Follow Request is cancelled, not declined.** Declining answers the question a Request asked. A Block removes the standing to ask it, which is a different thing, and recording it as a decline would put a refusal in the history that nobody gave.
+
+**A refused Follow reports differently to each side.** The blocked person is told the account does not exist, which is what this document requires — a Block may be inferred from behaviour but never announced. The blocker is told plainly, because they already know and a silence would only confuse them about their own setting.
+
+**Blocking does not touch what either person follows in the world.** Following an Event or a Location is a relationship with shared history rather than with a person, and there is nobody in it to block out.
+
+**Every Follow Request is kept.** Asking again after a refusal creates a second request rather than reusing the first, so what was asked and refused survives. That is what makes a cooldown implementable when its policy is decided; the policy itself remains open.
+
+**Suspension leaves the social graph intact** (ADR-116). Follows, follow requests, and blocks all survive a suspension untouched, and reinstatement needs no repair because nothing was undone. This answers what happens to relationship history when an account is suspended: it is still there, because the account may come back.
+
+A suspended account cannot follow, request, or block while suspended — every write is refused — but nothing it established before is removed.
+
 ## Open Product Questions
 
 The following questions require deliberate resolution:
 
-- Are accounts either public or approval-based for following, or can Follow approval be configured independently from Profile visibility?
 - What terminology should the UI use for approval-based accounts?
 - Does a private or approval-based account expose its follower and following counts publicly?
 - Are follower and following identity lists visible to everyone, followers only, mutual followers only, or according to another rule?
@@ -827,7 +870,8 @@ The following questions require deliberate resolution:
 - What happens to pending Follow Requests when an account changes from open to approval-based?
 - If a User changes privacy mode, do existing Followers remain?
 - Can a User bulk-remove Followers?
-- What exact content becomes inaccessible immediately after a Block?
+- What exact content becomes inaccessible immediately after a Block? Nothing yet, because every Moment is private to its author and a Follow grants no access. This must be answered deliberately when visibility widens rather than inherited from whatever the code then happens to do.
+- Should a Block hide the blocker's profile from the blocked person? Unresolvable while profiles may be read without signing in, since hiding one would be defeated by signing out. Worth deciding when a profile surface knows who is asking.
 - How should blocking behave when both Users are associated with the same real-world Event?
 - How should blocking affect existing comments and reactions between the Users?
 - How should blocking affect tags and identity associations?
@@ -844,6 +888,8 @@ The following questions require deliberate resolution:
 - Which social signals, if any, may be used for User recommendations?
 - Should contact-based discovery ever be supported?
 - If contact discovery is introduced, what privacy-preserving matching design is acceptable?
+- What is a curator? `timeline-first-curation-and-discovery.md` gives curators identity, assertions, annotations, publishing, and moderation, and this document does not mention them. Are they a kind of User, a role in the existing authorization model, or something else?
+- Should following a User and following a historical context share any semantics beyond the word, such as a combined list of what somebody follows?
 - Should organization accounts eventually participate in the same Follow graph?
 - Are there any circumstances in which a system or administrative actor can establish a Follow on behalf of a User?
 - How should migrated relationships behave if Chronologity ever supports account import from another service?

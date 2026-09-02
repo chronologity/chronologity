@@ -28,7 +28,6 @@ This document is grounded in:
 - `docs/architecture/principles.md`;
 - `docs/architecture/monorepo.md`;
 - `docs/architecture/api.md`;
-- `docs/architecture/cqrs.md`;
 - `docs/architecture/events.md`;
 - `docs/architecture/messaging.md`;
 - `docs/architecture/projections.md`;
@@ -113,27 +112,22 @@ The exact canonical set of Timeline scopes belongs in the product/technical Time
 
 ---
 
-# Timeline Definition Versus Timeline Read Representation
+# Timeline Scope Versus Timeline Read Representation
 
-Chronologity must distinguish:
-
-```text
-authoritative Timeline definition/scope
-```
-
-from:
+Chronologity must distinguish a Timeline's scope from the representation derived within it. A scope is a domain fact that already has an owner; the Timeline is what a particular Viewer sees of the history that falls inside it.
 
 ```text
-derived Timeline representation
+domain fact (User, Location, Real-World Event, tag, relationship)
+        │
+        ▼  derived, per Viewer
+Timeline representation
 ```
 
-Some Timeline scopes may have persisted authoritative definitions.
+The scope is authoritative. The Timeline is not, and the scope is not a Timeline.
 
-Others may be entirely derived from existing domain facts.
+Every Timeline scope shipping at launch is derived from existing domain facts; none has a persisted authoritative definition (ADR-084).
 
-The API's canonical `features/timelines/` module may own authoritative Timeline definitions where justified.
-
-It must not own the high-volume read composition itself.
+The API's canonical `features/timelines/` module owns the projections that maintain Timeline read models. It owns no Timeline service and no write operations: read composition belongs to `apps/feed-aggregator`, and defining a Timeline is not an operation the product has.
 
 ---
 
@@ -236,7 +230,6 @@ It must not use:
 
 - publication time;
 - upload time;
-- EventStoreDB position;
 - Kafka offset;
 - projection time.
 
@@ -722,7 +715,7 @@ A Timeline Moment row may include:
 - moderation state;
 - Reaction summary;
 - significance metadata;
-- source aggregate versions.
+- source record versions.
 
 The exact schema belongs in `docs/data/clickhouse.md`.
 
@@ -1005,8 +998,7 @@ Read models and DataLoaders should batch or denormalize.
 
 The feed aggregator should avoid per-Moment synchronous calls to:
 
-- EventStoreDB;
-- API;
+- the API;
 - object-storage metadata service;
 - PostgreSQL.
 
@@ -1669,7 +1661,7 @@ Before launch, Chronologity must define and implement:
 The recommended starting model is:
 
 ```text
-EventStoreDB / authoritative PostgreSQL
+authoritative PostgreSQL, through the outbox
         ↓
 Kafka
         ↓
@@ -1702,10 +1694,9 @@ The feed aggregator remains stateless/read-only apart from bounded caches and re
 
 ## Timeline Definitions
 
-- Which scopes require authoritative API-owned Timeline definitions?
-- Which are purely derived?
-- Which lifecycle commands in `features/timelines/` remain valid?
-- Should some commands be removed before implementation?
+Settled (ADR-084). No scope requires an authoritative API-owned Timeline definition, and every scope is purely derived: each one is grounded in a fact that already has an owner — a User, a Location, a Real-World Event, a tag on a Moment, a social relationship. None of the lifecycle commands remains valid, and all were removed from the canonical structure before implementation rather than deferred, since `docs/product/timelines.md` refuses the concept rather than postponing it.
+
+Still open: whether a future scope emerges that genuinely needs a persisted definition. That would be a new decision with its own record, not a revival of the removed commands.
 
 ## Ordering
 
@@ -1801,7 +1792,7 @@ The feed aggregator remains stateless/read-only apart from bounded caches and re
 3. Timeline is fundamentally chronological.
 4. Engagement does not rewrite chronology.
 5. Historical significance does not rewrite chronology.
-6. The API owns authoritative Timeline definitions where justified.
+6. No Timeline scope has an authoritative persisted definition; every scope is derived from facts owned elsewhere (ADR-084).
 7. The feed aggregator owns high-volume Timeline read composition.
 8. The feed aggregator is read-only.
 9. Timeline data is primarily served from ClickHouse-derived models.

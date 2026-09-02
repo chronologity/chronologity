@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "Chronologity Node",
+  "_comment": "Node-runtime preset. Added in Phase 2, when packages/config, packages/contracts, and packages/api-client became its first real consumers.",
+  "extends": "./base.json",
+  "compilerOptions": {
+    "target": "ES2024",
+    "lib": ["ES2024"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"]
+  }
+}

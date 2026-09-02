@@ -928,6 +928,72 @@ The initial release does not require:
 
 A reliable lexical and structured Search system with strong privacy semantics is preferable to an ambitious AI Search system that cannot distinguish inference from historical fact.
 
+## Established Search Decisions
+
+These were open questions. Implementation settled them (ADR-118).
+
+**One Search entry point**, over Moments, accounts, real-world Events, and
+Locations at once, with an optional filter to one kind. Every result says what
+it is; nothing is flattened into an undifferentiated list.
+
+**Three sort modes ship**: relevance, occurrence newest first, and occurrence
+oldest first. When a chronological mode is chosen, occurrence governs entirely
+and relevance plays no part.
+
+**No significance sort, and no score of any kind is returned.** Significance
+breaks ties between comparably good matches and never promotes a weak one. A
+number beside a result reads as a judgement about the past whatever it is
+labelled.
+
+**Engagement is not a ranking signal**, and the ranking code cannot reach one.
+
+**Typo tolerance retrieves rather than rewrites.** A near miss finds the thing
+meant; nothing silently corrects what somebody typed, because a historically
+unusual spelling may be the correct one.
+
+**Temporal filters overlap rather than contain.** A Moment known only as
+"summer 1998" is found by a search for 1998 and never acquires an invented date.
+
+**Proximity search is answered at the granularity the author disclosed**, and
+the response says which. A Moment shared only at city level is found by a
+city-sized search and not a street-sized one; a Moment with its place hidden is
+never a proximity match, for anybody including its author.
+
+**Zero results means zero results.** Nothing loosely related is substituted, and
+the result count covers only what the asker may see.
+
+**A result is not a permission.** Opening one reauthorizes against current state.
+
+**Autocomplete suggests accounts, real-world Events, and Locations — never
+Moments.** These are the things somebody navigates to. A caption is the most
+sensitive text Chronologity holds, and a surface that answers every keystroke is
+the worst place to put it; finding a Moment is what Search is for.
+
+**A suggestion obeys the same eligibility rule as a result**, decided by the
+same code rather than a second copy written for a lighter surface. A private
+name must not appear because somebody typed three letters that happen to match
+it.
+
+**A suggestion carries a name and an identifier and nothing else** — no snippet,
+no caption, no date. Where an alias matched, it says so and gives the name the
+thing normally goes by.
+
+**Fewer than two characters returns nothing rather than everything**, and
+autocomplete is rate limited more tightly than Search: walking the alphabet
+through a suggestion box is a way of asking what exists.
+
+**"Did you mean" appears only when a Search found nothing**, names only what the
+asker could have found on their own, and is a separate field from the results so
+one can never be mistaken for the other. It suggests names, never captions, and
+Chronologity never silently rewrites what somebody typed.
+
+### Not yet built
+
+**Facet counts**, whose leakage surface is real and which nothing day-one needs.
+
+**Handoff into temporal zoom and historical jumps**, which runs through the feed
+aggregator and waits on that application existing.
+
 ## Open Product Questions
 
 The following questions require deliberate resolution:

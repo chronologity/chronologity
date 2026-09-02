@@ -82,18 +82,15 @@ Authorization layers then decide whether that identity may perform the requested
 The canonical API structure includes:
 
 ```text
-features/auth/
-├── aggregates/
-│   ├── identity.aggregate.ts
-│   └── session.aggregate.ts
-├── commands/
-├── events/
-├── event-handlers/
-├── projections/
-├── queries/
-├── routes/
-├── schemas/
-└── utils/
+features/authentication/
+├── authentication.routes.ts
+├── authentication.policy.ts
+├── authentication.rate-limits.ts
+├── authentication.types.ts
+├── identity.service.ts
+├── identity.repository.ts
+├── session.service.ts
+└── session.repository.ts
 ```
 
 The architecture treats **Identity** and **Session** as separate concepts.
@@ -412,9 +409,9 @@ Conceptually:
 ```text
 verified identity
       ↓
-CreateSession command
+SessionService.issue
       ↓
-Session aggregate/state transition
+sessions row, written with its audit record
       ↓
 session ID
       ↓
@@ -772,45 +769,42 @@ Chronologity must minimize replication of:
 
 Do not include raw access or refresh tokens in:
 
-- Domain Events;
+- outbox messages;
 - Kafka messages;
 - logs;
 - traces;
 - analytics.
 
-Where historical authentication events need to reference a security artifact, use safe identifiers or hashes where appropriate.
+Where an authentication record needs to reference a security artifact, store a hash rather than the artifact. Only the SHA-256 of a refresh credential is kept, so reading the database does not confer the ability to refresh.
 
 ---
 
-# Event-Sourcing Considerations
+# Where Authentication State Lives
 
-The canonical tree contains:
+PostgreSQL, authoritatively, like every other feature (ADR-092).
 
-```text
-identity.aggregate.ts
-session.aggregate.ts
-```
+`sessions` decides whether a Session may authenticate a request (ADR-094). The
+earlier design read that from replayed history, on the reasoning that a lagging
+projection could otherwise leave a revoked Session working. There is no lagging
+projection: revocation is written synchronously in the request that causes it,
+so reading the row is fresher than replaying ever was — and it takes an extra
+store off the hot path of every authenticated request.
 
-which suggests Event Sourcing for Identity and Session.
+Auditability, which was the strongest argument for an event log, is served by
+`auth_audit_events`. It is written in the same transaction as the change it
+describes, so it records what happened rather than what was attempted and rolled
+back. It is also queryable and erasable, which an append-only log is not.
 
-That direction is reasonable because authentication lifecycle and revocation history benefit from auditability, but the decision should be confirmed in `docs/architecture/event-sourcing.md`.
-
-If Identity and Session are event sourced:
-
-- events must avoid unnecessary sensitive payloads;
-- token secrets must never appear in events;
-- provider tokens must never appear in events;
-- recovery codes must never appear in events;
-- stream reconstruction must remain deterministic;
-- deletion/privacy requirements must remain enforceable.
-
-Sensitive mutable values may require externalized storage rather than immutable event payloads.
+Refresh-token rotation is the one place where concurrency genuinely matters, and
+it is a single conditional update: the presented credential must still be the
+current one, the Session unrevoked and unexpired. Zero rows means reuse or a
+lost race, and reuse ends the Session rather than merely refusing the request.
 
 ---
 
-# Authentication Domain Events
+# Authentication Changes Worth Naming
 
-Potential canonical event categories include:
+Potential categories include:
 
 ```text
 identity-created
@@ -870,7 +864,7 @@ Handlers enforce authentication-specific invariants before producing authoritati
 
 Email verification tokens, magic-link tokens, OAuth state parameters, two-factor challenges, and similar temporary artifacts are operational secrets.
 
-They should generally not be modeled as long-lived immutable Domain Event payloads.
+They must not be modelled as durable records, and must never reach the outbox or Kafka.
 
 Appropriate storage may include:
 
@@ -1060,7 +1054,7 @@ disable authentication methods
 apply identity-data deletion/retention policy
 ```
 
-Event Sourcing must not become an excuse to retain unnecessary authentication PII forever.
+No storage strategy is an excuse to retain unnecessary authentication personal data forever.
 
 The exact deletion model belongs in privacy/data architecture.
 
@@ -1328,17 +1322,16 @@ Retention should minimize personal data while preserving necessary security/audi
 
 Authentication requires strong automated test coverage.
 
-## Identity aggregate tests
+## Policy tests
 
-Verify:
+Unit tests, exhaustive, no infrastructure:
 
-- email lifecycle invariants;
-- provider-link invariants;
-- primary-method rules;
-- two-factor transitions;
-- invalid security-state transitions.
+- address normalisation;
+- whether a Session is usable, at and either side of its expiry;
+- why a refresh was refused, and which refusal ends the Session;
+- where a link of each purpose sends someone.
 
-## Session aggregate tests
+## Identity service tests
 
 Verify:
 
@@ -1385,8 +1378,9 @@ Verify:
 
 Verify real behavior for:
 
-- EventStoreDB Session concurrency;
-- PostgreSQL temporary-token storage if used;
+- two simultaneous refreshes, where exactly one must win;
+- revocation racing a refresh;
+- PostgreSQL temporary-token storage;
 - OAuth callback validation;
 - signing-key configuration;
 - Session revocation propagation.
@@ -1472,7 +1466,6 @@ The following questions require explicit resolution before implementation harden
 
 ## Identity Model
 
-- Is `Identity` definitively event sourced?
 - Is there exactly one Identity per User?
 - Can multiple verified emails belong to one Identity?
 - Can one email belong to more than one Identity?
@@ -1481,7 +1474,6 @@ The following questions require explicit resolution before implementation harden
 
 ## Session Model
 
-- Is `Session` definitively event sourced?
 - What is the maximum Session lifetime?
 - What is the access-token lifetime?
 - What is the refresh-token lifetime?
@@ -1582,11 +1574,9 @@ The following questions require explicit resolution before implementation harden
 - How do Users view their own login history?
 - How are suspicious-login events represented?
 
-## Event Sourcing and Privacy
+## Privacy
 
-- Which Identity fields may safely appear in immutable events?
-- Should email values be externalized and events reference an email-record ID?
-- How is identity deletion/erasure implemented?
+- How is identity deletion and erasure implemented?
 - How are old provider identifiers handled after unlinking/deletion?
 - What authentication audit data may legally/security-wise be retained?
 
@@ -1609,7 +1599,7 @@ These decisions should be finalized in this architecture layer or corresponding 
 11. The feed aggregator may validate identity context but does not manage Sessions.
 12. The mobile client is not an authentication authority.
 13. Authentication secrets are never stored in ordinary client storage.
-14. Raw tokens never appear in Domain Events.
+14. Raw tokens never appear in the outbox or in Kafka.
 15. Raw tokens never appear in logs, traces, analytics, or Kafka.
 16. External provider identity does not replace Chronologity Identity.
 17. Provider linking requires explicit secure confirmation.
@@ -1624,7 +1614,7 @@ These decisions should be finalized in this architecture layer or corresponding 
 26. Verification tokens are not durable historical domain facts.
 27. Security-sensitive authentication changes are auditable.
 28. Authentication data replication is minimized.
-29. Event Sourcing must not force raw sensitive authentication data into immutable events.
+29. Authentication publishes no Integration Events; its accountability requirement is met by a relational audit trail that erasure can reach.
 30. Account deactivation/deletion must define Session consequences explicitly.
 31. Moderation suspension must define authentication behavior explicitly.
 32. Roles/permissions are not assumed permanently current solely because they appear in an access token.

@@ -1,0 +1,136 @@
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { describe, it } from "vitest";
+import { ValidationError } from "../../lib/errors/validation-error.js";
+import { decodeCursor, encodeCursor } from "./timeline.cursor.js";
+
+/**
+ * Cursors, exhaustively.
+ *
+ * Everything in Timeline navigation rests on these: a cursor is the only
+ * client-supplied value that reaches the query, and one misread would page
+ * through the wrong part of history quietly. So every way a string can arrive
+ * wrong is a case here rather than a hope.
+ */
+
+const summer1998 = new Date("1998-06-01T00:00:00.000Z");
+
+describe("carrying a position through a client", () => {
+  it("comes back as it went out", () => {
+    const position = { occurredAt: summer1998, momentId: randomUUID() };
+
+    const returned = decodeCursor(encodeCursor(position));
+
+    assert.deepEqual(returned.occurredAt, position.occurredAt);
+    assert.equal(returned.momentId, position.momentId);
+  });
+
+  it("keeps milliseconds, because the sort tuple has them", () => {
+    // Two Moments a millisecond apart are two positions. A cursor that rounded
+    // would resume on the wrong one, and only where they were that close.
+    const position = {
+      occurredAt: new Date("2004-07-13T09:15:22.837Z"),
+      momentId: randomUUID(),
+    };
+
+    assert.equal(decodeCursor(encodeCursor(position)).occurredAt.getTime(), position.occurredAt.getTime());
+  });
+
+  it("carries history from before 1970", () => {
+    // The ordinary case for a Timeline rather than an edge one: most history
+    // predates the epoch, and a negative millisecond count must survive.
+    const position = { occurredAt: new Date("1901-12-14T00:00:00.000Z"), momentId: randomUUID() };
+
+    assert.deepEqual(decodeCursor(encodeCursor(position)).occurredAt, position.occurredAt);
+  });
+
+  it("survives a query string without escaping", () => {
+    // Base64url rather than base64 for exactly this: `+` and `/` would be
+    // mangled, and a cursor that only worked sometimes is worse than one that
+    // never did.
+    const cursor = encodeCursor({ occurredAt: summer1998, momentId: randomUUID() });
+
+    assert.equal(encodeURIComponent(cursor), cursor);
+  });
+
+  it("gives two Moments at one instant different cursors", () => {
+    const first = encodeCursor({ occurredAt: summer1998, momentId: randomUUID() });
+    const second = encodeCursor({ occurredAt: summer1998, momentId: randomUUID() });
+
+    assert.notEqual(first, second);
+  });
+
+  it("says nothing a client can read at a glance", () => {
+    // Opaque rather than secret. `timeline.md:794` asks that clients not build
+    // on the contents, and an encoding that spelled out a date invites exactly
+    // that.
+    const momentId = randomUUID();
+    const cursor = encodeCursor({ occurredAt: summer1998, momentId });
+
+    assert.equal(cursor.includes(momentId), false);
+    assert.equal(cursor.includes("1998"), false);
+  });
+});
+
+describe("a cursor that cannot be trusted", () => {
+  const refused = (cursor: string, why: string) => {
+    assert.throws(
+      () => decodeCursor(cursor),
+      (error: unknown) => error instanceof ValidationError,
+      why,
+    );
+  };
+
+  it("refuses an empty string", () => {
+    refused("", "an empty cursor was accepted");
+  });
+
+  it("refuses something that is not base64 at all", () => {
+    refused("not a cursor!!", "arbitrary text was accepted");
+  });
+
+  it("refuses base64 that is not JSON", () => {
+    refused(Buffer.from("hello", "utf8").toString("base64url"), "non-JSON was accepted");
+  });
+
+  it("refuses JSON that is not an object", () => {
+    refused(Buffer.from("42", "utf8").toString("base64url"), "a bare number was accepted");
+    refused(Buffer.from("null", "utf8").toString("base64url"), "null was accepted");
+  });
+
+  it("refuses a cursor with a field missing", () => {
+    refused(Buffer.from(JSON.stringify({ v: 1, t: 0 }), "utf8").toString("base64url"), "no identifier");
+    refused(Buffer.from(JSON.stringify({ v: 1, m: "x" }), "utf8").toString("base64url"), "no time");
+  });
+
+  it("refuses a cursor whose time is not a number", () => {
+    refused(
+      Buffer.from(JSON.stringify({ v: 1, t: "1998", m: "x" }), "utf8").toString("base64url"),
+      "a string time was accepted",
+    );
+    refused(
+      Buffer.from(JSON.stringify({ v: 1, t: Number.NaN, m: "x" }), "utf8").toString("base64url"),
+      "a non-finite time was accepted",
+    );
+  });
+
+  it("refuses a cursor from an encoding this code does not know", () => {
+    // Told apart from malformed on purpose. A client holding a cursor from an
+    // older release should start again; that is a different instruction from
+    // "you sent nonsense", and only distinguishable if the version is checked
+    // before the fields are.
+    const older = Buffer.from(JSON.stringify({ v: 0, t: 0, m: "x" }), "utf8").toString("base64url");
+
+    assert.throws(() => decodeCursor(older), /older Timeline/);
+  });
+
+  it("refuses a cursor somebody edited", () => {
+    // The case that matters: a client altering the encoded position to reach
+    // history it was not given. It fails here because the payload stops being
+    // valid, and — since this sub-phase filters every query by author — would
+    // reach nothing even if it did not.
+    const cursor = encodeCursor({ occurredAt: summer1998, momentId: randomUUID() });
+
+    refused(`${cursor}tampered`, "an altered cursor was accepted");
+  });
+});

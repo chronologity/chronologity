@@ -42,8 +42,6 @@ This document is grounded in:
 - `docs/architecture/overview.md`;
 - `docs/architecture/principles.md`;
 - `docs/architecture/api.md`;
-- `docs/architecture/cqrs.md`;
-- `docs/architecture/event-sourcing.md`;
 - `docs/architecture/events.md`;
 - `docs/architecture/messaging.md`.
 
@@ -101,10 +99,8 @@ The row is not the projection.
 
 A projection may consume:
 
-- persisted Domain Events;
-- Integration Events;
-- relational authoritative changes exposed through an outbox;
-- controlled backfill inputs;
+- Integration Events, delivered over Kafka by the outbox publisher;
+- controlled backfill inputs read from authoritative PostgreSQL state;
 - another explicitly authoritative source.
 
 The input source must be clear.
@@ -228,7 +224,7 @@ A worker should:
 A worker should not:
 
 - make authoritative domain decisions;
-- append unrelated aggregate events directly;
+- write another feature's authoritative state directly;
 - own user-facing command semantics.
 
 ---
@@ -237,36 +233,17 @@ A worker should not:
 
 Projection progress must be durable.
 
-A checkpoint identifies the last safely processed source position.
+Kafka owns consumer-group offsets, so a projection reading Kafka does not
+maintain a position of its own. What it does maintain is a record of the messages
+it has already applied — `projection_processed_events` — because at-least-once
+delivery means a message will eventually arrive twice and a projection that
+double-counts silently disagrees with history.
 
-Potential checkpoint fields:
-
-```text
-projectionName
-projectionVersion
-source
-partition/shard
-position
-updatedAt
-```
-
-Checkpoint design depends on input source.
-
----
-
-# EventStoreDB Checkpoints
-
-For EventStoreDB replay/subscriptions, a checkpoint may use:
-
-- global position;
-- stream position;
-- subscription checkpoint.
-
-The choice depends on whether the projection consumes:
-
-- one aggregate stream;
-- one event category;
-- all events.
+There is deliberately no table holding a global stream position. One existed for
+the previous architecture and was removed with it: a position in a stream is
+meaningless when the source is a partitioned log whose offsets Kafka already
+tracks, and keeping the table would invite something to record the wrong kind of
+progress in it.
 
 ---
 
@@ -319,7 +296,7 @@ Possible strategies include:
 - unique Event ID column;
 - versioned upsert;
 - deterministic replacement;
-- compare-and-set on aggregate version;
+- compare-and-set on the subject's version;
 - transactional checkpoint + update.
 
 Choose per datastore and projection semantics.
@@ -332,7 +309,6 @@ A projection must document the ordering it requires.
 
 Possible requirements:
 
-- aggregate stream order;
 - per-Moment order;
 - per-User order;
 - no ordering beyond idempotency.
@@ -356,15 +332,16 @@ The rule must be explicit.
 
 ---
 
-# Aggregate Version in Read Models
+# Subject Version in Read Models
 
-Where useful, a projection row may store:
+Where useful, a projection row may store the version of the thing it describes:
 
 ```text
-sourceAggregateVersion
+sourceVersion
 ```
 
-This allows duplicate/stale events to be rejected.
+This allows duplicate or stale messages to be rejected, which matters because
+partition ordering guarantees nothing across partitions.
 
 Example:
 
@@ -442,7 +419,7 @@ Rebuilding a Timeline projection must not:
 - resend notifications;
 - trigger moderation actions;
 - create duplicate uploads;
-- mutate authoritative aggregates.
+- mutate authoritative state.
 
 Projection logic should be side-effect limited to its derived target.
 
@@ -633,7 +610,7 @@ A significance projection may store:
 - provenance;
 - computedAt.
 
-It should not become immutable Domain Event truth.
+It should not become authoritative truth, and it must remain recomputable when the algorithm changes.
 
 ---
 
@@ -836,18 +813,15 @@ Do not rely on ad hoc SQL repair as the primary recovery strategy.
 
 # Rebuild Source
 
-For event-sourced features:
+The preferred source is current authoritative state:
 
 ```text
-EventStoreDB
+PostgreSQL
 ```
 
-is the preferred source.
-
-For relational-authoritative features:
+Specifically:
 
 - authoritative tables;
-- outbox history;
 - a purpose-built backfill query
 
 may be used.
@@ -1399,7 +1373,7 @@ A projection may consume:
 
 The choice should minimize unnecessary coupling.
 
-Timeline projections may benefit from a dedicated integration contract if they would otherwise depend on many aggregate-internal events.
+Timeline projections may benefit from a dedicated integration contract if they would otherwise depend on many of the API's internal changes.
 
 ---
 
@@ -1548,7 +1522,7 @@ feed aggregator
     → read those tables only
 ```
 
-A worker should not have EventStoreDB append permission unless its role explicitly requires it.
+A worker should not hold write permission on authoritative tables unless its role explicitly requires it.
 
 ---
 
@@ -1767,7 +1741,7 @@ A separate `apps/projections/` application should not be introduced unless scale
 
 ## Search
 
-- Does Search consume Domain Events or dedicated Integration Events?
+- Does Search consume the same Integration Events as Timeline, or a dedicated contract?
 - Is Search projection code owned by API or future search application?
 - How is full reindex performed?
 
@@ -1784,7 +1758,7 @@ A separate `apps/projections/` application should not be introduced unless scale
 - PostgreSQL?
 - Target datastore?
 - Kafka offsets only?
-- Recommended: durable explicit checkpoint state for EventStoreDB/direct replay and standard offsets for Kafka consumption, with target-specific idempotency.
+- Recommended: standard consumer-group offsets for Kafka, with target-specific idempotency recorded per applied message.
 
 ## Migration
 
@@ -1807,13 +1781,13 @@ A separate `apps/projections/` application should not be introduced unless scale
 7. Heavy projection work does not execute inside HTTP request handlers.
 8. Projection workers are independently restartable.
 9. Projection progress is checkpointed durably.
-10. Checkpoints are operational state, not Domain Events.
+10. Consumer progress is operational state, never domain truth.
 11. Projection state updates and dedupe/checkpointing are atomic where practical.
 12. Duplicate events are expected.
 13. Projections are idempotent.
 14. Ordering requirements are explicit.
 15. Global ordering is not assumed.
-16. Aggregate versions may be stored to reject stale updates.
+16. A subject's version may be stored to reject stale updates.
 17. Projection logic is deterministic where practical.
 18. External calls are avoided inside core projection logic.
 19. Projection replay must not trigger unrelated side effects.

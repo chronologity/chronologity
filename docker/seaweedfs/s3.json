@@ -1,0 +1,14 @@
+{
+  "identities": [
+    {
+      "name": "chronologity",
+      "credentials": [
+        {
+          "accessKey": "chronologity",
+          "secretKey": "chronologity-local-secret"
+        }
+      ],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

@@ -77,7 +77,9 @@ A technically private resource can still create privacy problems if Chronologity
 
 Chronologity should use conservative defaults where disclosure could expose personal history unexpectedly.
 
-The exact default visibility for Moments must be decided explicitly before launch. It should not emerge accidentally from implementation convenience.
+**A Moment is public unless its author says otherwise** (ADR-108). This was decided rather than inherited from whatever the schema happened to hold, and the recording flow accepts a visibility so that choosing privacy does not mean publishing first and correcting after.
+
+Nothing recorded before that default existed was changed by it. Those Moments were recorded under a promise that they were private, and a changed default is not consent.
 
 Whatever default is chosen, the creation experience should make the resulting audience understandable.
 
@@ -94,6 +96,12 @@ Potential visibility models may include:
 - broadly visible or public.
 
 The final vocabulary and access model should remain as simple as possible.
+
+**The vocabulary is settled**: `private`, `restricted`, and `public`. A restricted Moment carries its own list of people rather than pointing at a reusable group, because editing a shared group would silently change the audience of every Moment already using it.
+
+There is deliberately no value meaning "my followers". `social-graph.md` requires that a Follow never override privacy, and a followers audience would quietly make following and being entitled to see the same thing.
+
+A Block hides two people from each other in both directions, including from each other's public Moments.
 
 Chronologity should not reproduce a complicated matrix of social-network privacy controls unless actual user needs justify it.
 
@@ -301,7 +309,7 @@ That can reveal:
 
 Chronologity should therefore treat tagging as a privacy-sensitive action.
 
-The exact consent model remains an open product decision, but the architecture should not assume that one user's decision to identify another person is sufficient to make that association universally visible.
+The consent model is now decided, and it is stricter than "tag now, remove later". Chronologity calls the relationship **participation**: a creator proposes it, the proposal is visible to nobody but the two people in it, and it exists only when the named person accepts. Removal afterwards is not consent — a claim published and then retracted has already disclosed everything listed above. `participation.md` is canonical, including what an accepted participation does and does not do to a Timeline.
 
 ## Bystanders
 
@@ -623,11 +631,11 @@ Chronologity should distinguish between concepts that may have different technic
 
 The user-facing model should be understandable even if backend deletion occurs across multiple systems.
 
-## Deletion and Event Sourcing
+## Deletion and Append-Only Storage
 
-Chronologity's architecture may use event sourcing for portions of the system.
+Chronologity's architecture uses append-only storage in places, currently the transactional outbox and Kafka topics.
 
-Event sourcing does not override privacy requirements.
+Append-only storage does not override privacy requirements.
 
 The architecture must not interpret "events are immutable" as "personal data can never be removed."
 
@@ -663,24 +671,95 @@ The precise behavior of each dependent record should be defined before implement
 
 Deleting a Moment should not silently delete unrelated Moments merely because they shared context.
 
+### What deleting a Moment does
+
+Each dependent record, answered.
+
+**Media goes with it.** The uploads it held are erased, and every derived copy
+with them, because a product cannot claim a video was deleted while continuing
+to serve a transcode. An upload another Moment still holds is spared: erasing
+one Moment must not break somebody else's.
+
+**Comments go with it, whoever wrote them.** Their text is blanked the instant
+deletion is asked for and the rows go with the Moment. A comment has no meaning
+without what it responded to and is unreachable once that is gone, so keeping
+the text would leave somebody's words in a table nobody can read but an
+operator.
+
+**Reactions, audience, contextual groupings, Location and Event associations,
+relationships, edit history, and significance go with it.** A relationship is
+severed at the join rather than at the other end: the Moment it was related to
+is untouched.
+
+**Search and Discovery documents are removed at erasure time**, not when an
+indexer next happens to look.
+
+**Notifications about it stop rendering**, and leave the unread count, because
+they store identifiers and compose their wording from what the reader may
+currently see.
+
+**Deep links stop resolving**, which they already did — a deep link is a
+pointer and never a permission.
+
+**Moderation records survive.** An appeal against a decision whose record
+vanished with the content is not one.
+
+Deletion happens in two stages. Marking is immediate and is what makes the
+Moment disappear everywhere; it also blanks the caption and the comments.
+Erasure follows as a worker, because a Moment may hold an unlimited number of
+images and videos and doing that work inside the request would time out
+half-finished.
+
 ## Account Deletion
 
 Account deletion requires its own explicit lifecycle.
 
-Chronologity must eventually define what happens to:
+### What deleting an account does
 
-- Moments created by the user;
-- media;
-- comments;
-- reactions;
-- relationships;
-- shared Event participation;
-- tags involving other users;
-- notifications;
-- security records; and
-- derived data.
+Deletion takes two steps, and the second proves current control of the address.
+A signed-in session shows somebody signed in once, which an unattended laptop
+also shows; using a fresh link shows they can read the mailbox now. The mail
+arriving is itself the protection — somebody who has taken an account over
+cannot delete it without the real owner seeing the request.
 
-This should be specified before launch rather than delegated to ad hoc cleanup code.
+Deactivation remains the reversible option. Deletion is not, and there is no
+grace period: two reversible-looking paths would make the irreversible one less
+clear rather than safer.
+
+Confirming stops the account working immediately. Every session ends, the
+addresses and password are removed, the phone is removed, the profile is erased,
+and the handle is released under the cooldown that already applies when somebody
+changes theirs.
+
+What the account recorded is removed afterwards, by the same worker that erases
+a single deleted Moment, because a history of ten thousand Moments is real work:
+
+- **Moments created by the user** are erased, each with its media, its comments,
+  its reactions, and its Search document.
+- **Media** goes with them, derived copies included.
+- **Comments** they left on other people's Moments are removed. Those Moments
+  are untouched, and the rest of their discussion stands.
+- **Reactions, mentions, audience memberships, and personal significance** are
+  removed.
+- **Relationships** — follows, follow requests, and blocks — are removed in both
+  directions.
+- **Shared Event participation** thins out, but the Event survives. A real-world
+  Event and a Location are shared history: somebody who first recorded a concert
+  did not thereby own it, and erasing it would delete other people's Moments'
+  context.
+- **Notifications**, devices, deliveries, and preferences are removed.
+- **Security records** are the one category that survives. The audit trail names
+  an Identity by an opaque identifier and records that an account was deleted,
+  which is the narrowly required retention this document allows for. Reports the
+  account filed about *other people* also survive, with the reporter erased:
+  a report is evidence about somebody who was never party to the deletion, and
+  letting a reported person destroy the complaints against them by leaving is a
+  hole rather than a privacy protection.
+- **Derived data** — Search documents — goes with the Moments it describes.
+
+The account row itself remains as a tombstone holding nothing: no name, no
+handle, no biography. It exists so that shared history other people depend on
+keeps working, and it says nothing about anybody.
 
 ## Retention
 
@@ -690,11 +769,92 @@ Different categories of data may require different retention periods.
 
 For example, committed Moments and temporary failed-upload artifacts should not automatically have the same retention semantics.
 
+### What expires, and when
+
+**Nothing anybody recorded.** No Moment, no media, no comment, no reaction, no
+Location, no Event, and no moderation record is on the list below, and a test
+asserts that by counting them across a sweep with every period set to zero — the
+most destructive configuration the system permits. A product built to preserve
+decades does not expire the decades. What expires is the exhaust.
+
+Each period is configuration rather than a constant, because a retention period
+is an operator's decision and often a legal one. The defaults:
+
+| What | When it goes | Default |
+| --- | --- | --- |
+| Consumed sign-in links and spent phone codes | after they were issued | 1 day |
+| Read or dismissed social and media notifications | after they were read | 30 days |
+| Social and media notifications, read or not | after they arrived | 180 days |
+| Moderation and security notifications | after they arrived | 2 years |
+| The record that a message was already handled | after handling | 30 days |
+| Records of what was delivered where | after delivery finished | 30 days |
+| Devices that have stopped reporting in | *retired*, not removed | 180 days |
+| Retired devices | after retirement | 30 days |
+| Finished erasure and export requests | after completion | 90 days |
+| Authentication and authorization audit events | after they occurred | 2 years |
+| Registrations that were never finished | after the window closed | immediately |
+
+**An unread notification lives longer than a read one**, because an unread
+notification is something somebody has not dealt with. **A moderation or
+security notification lives longest**, because the first carries a right of
+appeal and the second is the record that an account changed.
+
+**A device that has gone quiet is retired rather than removed.** A client
+re-registers whenever it starts, so silence is evidence that an installation has
+gone; the retired row survives a while longer because it is what distinguishes a
+dead token from one that was never registered.
+
+**Audit events are bounded rather than kept for ever.** They are the security
+records a deletion is allowed to leave behind, and retaining data only as long as
+necessary has to be true of the category most likely to be examined, or it is
+not a principle.
+
+**Expiring a notification never removes what it was about.** The Moment, the
+comment, and the reaction all stand; what goes is the record that somebody was
+told.
+
 ## Data Export
 
 Users should eventually be able to obtain a meaningful export of their Chronologity data.
 
 An export should preserve enough context to remain useful outside the application, including occurrence semantics and relationships where appropriate.
+
+### How an export works
+
+**Asking for one takes two steps.** A confirmation link is sent to the verified
+address, exactly as deletion requires, because an export is everything somebody
+has and a signed-in session only shows that somebody signed in once. The mail
+arriving is itself a protection: a stranger holding a stolen session cannot
+quietly take a copy of somebody's history.
+
+**It is prepared rather than returned.** A history may run to thousands of
+Moments, so the work happens in the background and the result is written in
+parts described by a manifest.
+
+**Media is not copied.** The manifest points at the originals, signed for
+minutes when somebody asks. Preparing an export therefore duplicates no
+photographs or videos at all — the only new copy it makes is the data itself.
+
+**Every link is signed when it is asked for and lives for minutes.** A link
+signed when the export was built would still work days later, which is the same
+as no expiry for anybody who kept the manifest.
+
+**It contains what the person could already see.** Their account and
+preferences; their Moments with occurrence, precision, place and media; comments
+and reactions, theirs and other people's, attributed by handle and display name
+as the application shows them; who they follow, who follows them, and who they
+have blocked; and the moderation decisions made about their own content.
+
+**It contains nothing they could not.** No email address, no Identity, no
+session, no device token, no storage key, no account identifier belonging to
+somebody else, and never the reporter of a report about them — reporting is safe
+only if it stays that way, and an export would be the easiest way around it.
+Who blocked *them* is absent too: that is somebody else's decision about their
+own safety.
+
+**A prepared export is removed after a few days.** It is a second copy of
+somebody's history, and the only thing that stops it being permanent is
+something deciding it should not be.
 
 The exact export formats and day-one scope remain product decisions.
 
@@ -787,7 +947,7 @@ Any future advertising model would require separate scrutiny regarding whether i
 19. Historical jumps must resolve only within information the viewer is authorized to access.
 20. Shared history does not erase individual Moment privacy.
 21. Privacy-setting changes must propagate consistently across derived product surfaces.
-22. Event sourcing does not override deletion or erasure requirements.
+22. Append-only storage does not override deletion or erasure requirements.
 23. Deleting media must account for derived copies such as thumbnails and transcodes.
 24. Logs and analytics must not become uncontrolled copies of personal history.
 25. Security does not eliminate the need for data minimization.
@@ -798,8 +958,8 @@ Any future advertising model would require separate scrutiny regarding whether i
 
 Before Chronologity launches, the product and architecture must have explicit answers for at least the following:
 
-- the default Moment visibility;
-- the initial visibility modes;
+- the default Moment visibility — public unless its author says otherwise (ADR-108);
+- the initial visibility modes — `private`, `restricted`, and `public`;
 - authorization for Timeline reads;
 - authorization for horizontal contextual groupings;
 - privacy behavior at every day-one temporal zoom level;
@@ -823,16 +983,12 @@ These are launch requirements, not post-launch hardening tasks.
 
 The following questions should be resolved deliberately:
 
-- What is the default visibility of a newly created Moment?
-- What visibility modes should exist on day one?
-- Should visibility be configurable per Moment only, or can users establish defaults?
+- Should visibility be configurable per Moment only, or can users establish defaults? A per-account default would change what happens when somebody says nothing, which is exactly the decision the public default settles for everybody. Worth deciding on evidence about how people actually record rather than in advance.
 - Can media, description, location, and other Moment dimensions have different visibility?
 - If so, which dimensions justify that complexity initially?
 - What location precision options should users have?
 - Should Chronologity retain exact coordinates when only a named place is displayed?
 - When should device or media location metadata be offered during Moment creation?
-- What is the consent model for tagging another user?
-- Can tagged users remove their identity association from another user's Moment?
 - Can users request removal or obscuring of themselves from media?
 - What privacy model applies to comments and reactions?
 - Can users see who viewed a Moment?
@@ -841,11 +997,6 @@ The following questions should be resolved deliberately:
 - How should shared Event contexts represent private participation?
 - What information, if any, should appear when a historical jump lands in a period containing only inaccessible Moments?
 - Which temporal aggregates are safe to expose at broader zoom levels?
-- What data export capabilities belong in the initial release?
-- What are the precise deletion semantics for a Moment?
-- What happens to comments authored by other users when a Moment is deleted?
-- What happens to relationships when one endpoint is deleted?
-- What happens to shared-history participation when an account is deleted?
 - Which data categories require retention for security or legal reasons?
 - Should Chronologity ever use facial recognition?
 - Which future AI processing capabilities require separate opt-in?
@@ -922,7 +1073,7 @@ The architecture must support:
 - provenance for privacy-sensitive associations where required; and
 - scalable handling of Moments containing potentially large numbers of media assets.
 
-Event sourcing, Kafka, ClickHouse, PostgreSQL, object storage, search systems, caches, and analytics systems must each participate in the privacy model. No component becomes exempt merely because it stores a projection or derivative rather than the original record.
+Kafka, ClickHouse, PostgreSQL, object storage, search systems, caches, and analytics systems must each participate in the privacy model. No component becomes exempt merely because it stores a projection or derivative rather than the original record.
 
 ## Guiding Principle
 

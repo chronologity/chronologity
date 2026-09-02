@@ -27,7 +27,7 @@ Chronologity's deployment model must support:
 - notification workers;
 - event publishers;
 - database migration jobs;
-- infrastructure dependencies such as EventStoreDB, PostgreSQL, ClickHouse, Kafka, object storage, and CDN.
+- infrastructure dependencies such as PostgreSQL, ClickHouse, Kafka, object storage, and CDN.
 
 This document defines:
 
@@ -266,7 +266,6 @@ Additional ephemeral preview environments may be introduced where useful.
 Local development should provide the required infrastructure through containerized/dev tooling where practical:
 
 - PostgreSQL;
-- EventStoreDB;
 - ClickHouse;
 - Kafka;
 - object-storage-compatible development service where needed.
@@ -297,7 +296,7 @@ Staging should resemble production architecture closely enough to validate:
 
 - deployment;
 - migrations;
-- Kafka/EventStoreDB behavior;
+- Kafka and outbox behaviour;
 - projections;
 - object-storage workflow;
 - provider integrations/sandboxes;
@@ -379,7 +378,6 @@ Examples:
 
 - DB credentials;
 - Kafka credentials;
-- EventStoreDB credentials;
 - OAuth secrets;
 - storage credentials;
 - provider keys;
@@ -646,16 +644,17 @@ rather than destructive in-place mutation.
 
 ---
 
-# EventStoreDB Migration Strategy
+# Integration Event Migration Strategy
 
-Persisted Domain Events are not migrated like tables.
+A published Integration Event cannot be migrated like a table. It has already
+been delivered, and a consumer may still be running older code.
 
 Use:
 
-- event versioning;
-- upcasters;
+- explicit event versioning;
+- upcasters on the consuming side;
 - compatibility readers;
-- exceptional controlled redaction/migration only when necessary.
+- a new version rather than a reinterpretation of an existing field.
 
 ---
 
@@ -892,7 +891,7 @@ Avoid undocumented console-only production configuration.
 
 # Stateful Infrastructure
 
-EventStoreDB, PostgreSQL, ClickHouse, and Kafka require careful deployment/upgrade planning.
+PostgreSQL, ClickHouse, and Kafka require careful deployment and upgrade planning. PostgreSQL most of all: it is the only authoritative store.
 
 Prefer managed services where operational burden reduction justifies cost.
 
@@ -916,19 +915,6 @@ It does not eliminate:
 
 ---
 
-# EventStoreDB Deployment
-
-Exact topology belongs in infrastructure documentation.
-
-Requirements include:
-
-- durable authoritative storage;
-- backup;
-- monitoring;
-- secure client access;
-- recovery procedures.
-
----
 
 # PostgreSQL Deployment
 
@@ -1112,11 +1098,10 @@ lower-priority derived systems
 
 A restored environment should verify:
 
-- EventStoreDB continuity;
 - PostgreSQL correctness;
 - object-media availability;
-- Kafka/subscription recovery;
-- projection checkpoints;
+- Kafka recovery;
+- undrained outbox messages;
 - deletion/privacy state.
 
 ---
@@ -1382,7 +1367,7 @@ Before launch, Chronologity must define and implement:
 - health/readiness;
 - PostgreSQL migration job;
 - ClickHouse projection-version migration process;
-- EventStoreDB event-version compatibility;
+- Integration Event version compatibility;
 - deployment telemetry;
 - rollback procedures;
 - worker autoscaling/resource limits;
@@ -1410,7 +1395,6 @@ Worker Deployments
     └── notification-worker
 
 Stateful / Managed Services
-    ├── EventStoreDB
     ├── PostgreSQL
     ├── Kafka
     ├── ClickHouse
@@ -1443,12 +1427,6 @@ Mobile Distribution
 - Cloud Run?
 - another managed container platform?
 - Recommended default: choose the simplest managed platform that supports independent HTTP/worker scaling and secure networking.
-
-## EventStoreDB
-
-- Managed EventStoreDB Cloud or self-hosted?
-- Region/topology?
-- Backup strategy?
 
 ## PostgreSQL
 
@@ -1559,7 +1537,7 @@ Mobile Distribution
 20. Database migrations are not raced by every application replica.
 21. PostgreSQL breaking migrations use expand/migrate/contract.
 22. ClickHouse material changes favor side-by-side projection/table versions.
-23. EventStoreDB schemas evolve through event compatibility, not table migrations.
+23. Integration Event schemas evolve through explicit versioning, because a published event cannot be migrated.
 24. Migration jobs use dedicated privileges.
 25. Large backfills/rebuilds are explicit, throttled workloads.
 26. Feature flags do not replace compatible contracts.

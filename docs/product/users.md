@@ -830,27 +830,71 @@ Before launch, Chronologity must have explicit product behavior for at least:
 
 Not every advanced account-management feature must ship on day one, but the underlying semantics must not prevent them.
 
+## Established Account Decisions
+
+These were open questions. Implementation settled them, and they are requirements now rather than possibilities. Each names where it was decided so the decision can be revisited deliberately rather than rediscovered.
+
+**Creating an account requires a handle, a display name, and a date of birth.** A biography is optional. Nothing else is asked for (`packages/contracts/src/users.ts`).
+
+**The minimum age is thirteen, and it is configuration rather than a constant.** The threshold in force when an account was created is stored alongside the birthdate, because without it nobody can say afterwards which rule an account was admitted under (`user_restricted_data.minimum_age_at_creation`, `USER_MINIMUM_AGE_YEARS`).
+
+**Three authentication methods ship: a magic link sent to an email address, a password, and a code sent to a phone number.** All three resolve to the same Identity.
+
+**An email address is required.** It is how an Identity is established and how a returning person is recognised as the same one, not merely one mechanism among several (`identity_emails`).
+
+**A phone number is a third way to sign in** (ADR-110). An account holds one, it is proven by a six-digit code sent to it, and it may be replaced or removed at any time. An email address is still required: it is the fallback that makes everything else about phone sign-in safe.
+
+**A number unused for sixty days stops working for sign-in until its holder confirms it again.** This is the answer to numbers changing hands. Carriers lease numbers rather than sell them, and a disconnected number is eventually given to somebody else — who could then receive a code sent to it. Reassignment only happens after the original holder stops using the number, so silence is the signal, and confirming again runs through the account's email address, which whoever received the number does not have.
+
+When somebody asks for a code for a number that has gone quiet, no text is sent and the account's address receives a notice explaining what to do. The caller learns nothing either way, which the account-existence rule requires; the account holder learns exactly what happened.
+
+**Every phone sign-in sends a notice to the account's email address.** Prevention can fail, and the holder should find out the same minute.
+
+**This does not stop SIM swapping**, where somebody persuades a carrier to move a live number to their own device. Nothing Chronologity can build without carrier data does. Detecting it needs a provider that can report a recent swap, and that check belongs where a code is sent.
+
+**Nothing reaches a real phone yet.** There is no messaging provider, so codes are recorded rather than delivered, exactly as local email goes to a local mail server. That is a credentials problem, not a design one.
+
+**Signing in with Google or Apple will be supported, and is deferred.** Neither is implemented. The obstacle is not design but access: both require registered applications and provider credentials that do not exist yet, and Apple's additionally requires a paid developer account. Building against credentials nobody holds would produce a path nobody could sign in through.
+
+What is settled is that a provider identity resolves to the same Identity as everything else, rather than creating a parallel kind of account. An Identity already resolves through a separate table rather than through a column, so a provider subject identifier fits the shape that exists — the same reason phone numbers will fit.
+
+What remains undecided is the substance: whether a provider address that is already registered joins the existing Identity or is refused, what happens when a provider stops asserting an address it previously asserted (Apple's private relay makes this ordinary rather than exotic), whether a provider identity alone can hold an account with no password and no verified address of its own, and whether unlinking a provider is permitted when it is the only way in.
+
+One obligation is inherited rather than open. ADR-081 requires that no authentication surface disclose whether an address is registered, and a provider path must not become the exception that undoes it everywhere else.
+
+**Registering does not prove an address; redeeming a link sent to it does.** Password sign-in is refused until the address is verified, because anyone can type an address that is not theirs. Magic-link sign-in proves the address by definition.
+
+**A handle is required, globally unique, and may be changed.** Uniqueness is decided by the database on the normalised form, so two people claiming one name at the same moment cannot both succeed. A released handle is reserved for a cooldown period and may be reclaimed by its previous holder within it. A User holds one current handle at a time, enforced by a partial unique index rather than by application code.
+
+**Five preferences ship: autoplay video, autoplay sound, locale, time zone, and reduced motion.** Autoplay is on with sound by default and can be turned off, which `docs/product/vision.md` requires. Preferences are written when the account is created rather than on first change, so reading them never has to decide what a missing row means.
+
+**Someone may list the sessions they have open, end one, or end all of them.** The session being used is marked as such. Revocation takes effect on the next request rather than at the next expiry (ADR-094).
+
+**Account recovery is a password reset by emailed link, and magic-link sign-in.** Both prove control of the address before granting anything.
+
+**An account is `active`, `deactivated`, or `suspended`, and the three are not interchangeable** (ADR-116). Deactivation is the person's own decision and suspension is not, which is why they are separate values rather than one "inactive": moderation must never quietly overwrite somebody's own choice, and reinstating an account must not undo it. Suspending a deactivated account is refused.
+
+**Moderation can restrict content without restricting an account.** This answers what restrictions exist short of suspension: the seven moderation states apply to Moments, comments, and individual media, and there is no partial account state that may read but not write. Account tiers would multiply the states every future feature has to reason about, and no product document asks for them.
+
+**A suspended account's contributions are hidden and nothing is deleted.** Their Moments and comments disappear for everybody else, their reactions stop counting, and reinstatement restores all of it exactly. Follows, blocks, and relationships are untouched throughout, because the account may come back and the history it was part of has to be there when it does.
+
+**A suspended person still reads their own history, and may appeal.** They are restricted, not erased. Every other write is refused; signing in is not, because somebody who could not sign in could not read the explanation or answer it.
+
+**Somebody is told when their own account is suspended, and only they are.** The public view of a User carries no status, and a suspended profile is simply absent to everybody else.
+
 ## Open Product Questions
 
 The following questions require deliberate resolution:
 
-- What information is required to create a Chronologity account?
-- What is the minimum age for account creation?
-- Which authentication methods are supported initially?
-- Is email required, optional, or merely one authentication mechanism?
-- Are phone numbers supported?
-- What verification is required before an account becomes fully active?
-- What profile information is required?
-- Are handles required?
-- Are handles globally unique?
-- Can handles change?
+- Does signing in with a provider whose address is already registered join that Identity, or is it refused?
+- What happens when a provider stops asserting an address it previously asserted, as Apple's private relay allows?
+- May an Identity exist with only a provider, holding no password and no address of its own?
+- Can a provider be unlinked when it is the only way into an account?
+- Should an account be able to hold more than one phone number?
+- Should a number that has gone quiet also stop receiving notifications, or only stop signing anybody in?
 - What account attributes are searchable?
 - Can a User opt out of User search or recommendations?
 - What privacy defaults are configured at account creation?
-- What User preferences ship on day one?
-- How should autoplay preferences be structured?
-- What session-management controls are exposed to Users?
-- What recovery mechanisms are available?
 - Are multiple accounts per person permitted?
 - Should account merging ever be supported?
 - What exactly happens to a User's Moments when their account is deleted?

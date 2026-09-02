@@ -51,7 +51,6 @@ This document is grounded in:
 - `docs/architecture/api.md`;
 - `docs/architecture/authentication.md`;
 - `docs/architecture/authorization.md`;
-- `docs/architecture/cqrs.md`;
 - `docs/architecture/events.md`;
 - `docs/architecture/messaging.md`;
 - `docs/architecture/projections.md`;
@@ -70,7 +69,7 @@ It does not create that fact.
 Conceptually:
 
 ```text
-Domain Event
+Integration Event
     ↓
 notification generation
     ↓
@@ -239,38 +238,14 @@ The notification merely references it.
 
 ---
 
-# Event-Sourced Versus Relational Notification State
+# Where Notification State Lives
 
-Notification is one of the features that should be evaluated pragmatically.
+PostgreSQL, authoritatively, as for every other feature (ADR-092).
 
-Two viable models exist.
-
-## Event-sourced notification
-
-Potential benefits:
-
-- lifecycle auditability;
-- clear read/dismiss state history;
-- consistent event model.
-
-Potential costs:
-
-- very high event volume;
-- limited value from full history;
-- more replay complexity.
-
-## Relational-authoritative notification
-
-Potential benefits:
-
-- simple high-volume updates;
-- natural unread/read queries;
-- easier aggregation;
-- lower EventStoreDB pressure.
-
-The recommended initial direction is:
-
-> **Use PostgreSQL as the authoritative notification store unless a concrete audit/history requirement justifies Event Sourcing.**
+Notification suits that particularly well. Volume is high, the useful queries
+are "what is unread" and "what happened recently", read and dismiss state change
+frequently, and almost nothing benefits from the full history of a notification's
+lifecycle. A relational table answers all of that directly.
 
 Notification-related Integration Events may still be published regardless.
 
@@ -305,7 +280,7 @@ Each logical notification has a stable application-generated Notification ID.
 
 It is separate from:
 
-- Domain Event ID;
+- the identifier of the Integration Event that prompted it;
 - provider message ID;
 - push token;
 - delivery-attempt ID.
@@ -354,7 +329,7 @@ eligibility/preferences/aggregation
 Notification
 ```
 
-Not every Domain Event must produce a notification.
+Not every change must produce a notification.
 
 ---
 
@@ -1070,11 +1045,9 @@ Account deletion should:
 
 # Notification Read Models
 
-If notifications are relational-authoritative, the notification table itself may directly serve API queries.
+The notification table is authoritative and serves API reads directly.
 
-If event sourced, a PostgreSQL projection serves reads.
-
-Either way, mobile should not query EventStoreDB.
+Mobile never reads a store other than through the API or the feed aggregator.
 
 ---
 
@@ -1257,7 +1230,7 @@ Important metrics include:
 A notification should be traceable:
 
 ```text
-source Domain Event
+source Integration Event
     ↓
 notification generation
     ↓
@@ -1421,11 +1394,20 @@ Do not use priority as an engagement-ranking system.
 
 # Quiet Hours
 
-User-configurable quiet hours may apply to normal push notifications.
+User-configurable quiet hours apply per channel, as local hours in the account's
+own time zone, and they affect delivery time only.
 
-Critical security notifications may bypass them according to policy.
+Security notifications bypass them. Moderation notifications do not: both are
+mandatory, and whether each waits is the only way they differ.
 
-This is a product preference decision.
+Quiet hours are resolved once, when the delivery is created, and stored as an
+instant on the delivery row. The dispatcher asks only whether that instant has
+passed, so it never reads a time zone.
+
+The opening hour is quiet and the closing hour is not. A window may run past
+midnight. A window whose ends meet is refused by the contract and by the
+database rather than interpreted, because it reads equally well as no quiet
+hours and as a whole day of them.
 
 ---
 
@@ -1485,7 +1467,7 @@ not APNs/FCM-specific operations.
 
 Verify:
 
-- expected Domain Event creates candidate;
+- the expected Integration Event creates a candidate;
 - self-action suppression;
 - privacy/blocking suppression;
 - preference handling;
@@ -1608,7 +1590,7 @@ Before launch, Chronologity must define and implement:
 # Recommended Initial Architecture
 
 ```text
-authoritative Domain Event
+authoritative change, published through the outbox
         ↓
 Kafka
         ↓
@@ -1643,10 +1625,7 @@ current Timeline context
 
 ## Authoritative Model
 
-- Confirm PostgreSQL as authoritative notification store?
-- Recommended: yes initially.
-- Is any notification lifecycle worth Event Sourcing?
-- Are security/moderation notifications stored differently?
+- Are security and moderation notifications stored differently from ordinary ones?
 
 ## Notification Types
 
@@ -1672,7 +1651,6 @@ current Timeline context
 - Which categories can Users disable?
 - Which channels can be disabled?
 - Which security/moderation types are mandatory?
-- Are quiet hours supported at launch?
 
 ## Push Provider
 
@@ -1721,9 +1699,9 @@ current Timeline context
 1. Notifications do not create the underlying domain fact.
 2. Notification state is distinct from provider delivery state.
 3. Provider success does not define notification existence.
-4. Notification IDs are distinct from Domain Event IDs and provider IDs.
+4. Notification IDs are distinct from Integration Event IDs and provider IDs.
 5. Notification generation is normally asynchronous.
-6. Not every Domain Event produces a notification.
+6. Not every change produces a notification.
 7. Eligibility is evaluated before creation/delivery.
 8. Notifications must not reveal inaccessible content.
 9. Notification deep links reauthorize destinations.

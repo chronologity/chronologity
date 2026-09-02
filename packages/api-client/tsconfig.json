@@ -1,0 +1,9 @@
+{
+  "extends": "@chronologity/tsconfig/node.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "noEmit": false
+  },
+  "include": ["src/**/*"]
+}

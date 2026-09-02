@@ -1155,7 +1155,7 @@ Deleting a Moment removes it from ordinary significance-driven product experienc
 
 Derived significance calculations must eventually stop selecting or exposing deleted content.
 
-If internal records must be retained for legal, safety, audit, or event-sourcing reasons, that retention does not imply continued product visibility.
+If internal records must be retained for legal, safety, or audit reasons, that retention does not imply continued product visibility.
 
 Deleting one Moment may also change the computed significance of other Moments if the deleted Moment participated in a derived graph calculation.
 
@@ -1353,32 +1353,42 @@ The initial release does not require:
 
 Day one does require enough of the model to make temporal zoom principled rather than engagement-driven or arbitrary.
 
+## What Is Settled
+
+**All eight dimensions ship** (ADR-115): causal, structural, temporal, personal, collective, Event, evidentiary, and retrospective.
+
+**Significance is stored per Moment, per scope, per dimension** — a person, a real-world Event, a place, or globally. There is no single value per Moment, because a family's first photograph after immigrating may be among the most consequential Moments in that family's history and globally unremarkable.
+
+**Causal significance counts everything reachable downstream**, bounded in depth, never the number of direct edges. In a chain every Moment has one outgoing edge and the whole chain descends from the first.
+
+**Retrospective significance is what recomputation reveals**, not a separate analysis. Each dimension keeps what it scored when first assessed, and the difference is what later history changed.
+
+**Personal significance is one binary mark.** Anybody may mark any Moment they can see — the last photograph of a loved one may have been taken by somebody else — and every mark is private. Nothing anywhere reports another person's mark.
+
+**A temporal boundary is inferred from position**: the earliest or latest in a record, at a place, or among those tied to an Event. Gap-based inference was rejected because it needs a threshold nobody can justify, and an arbitrary constant inside a significance algorithm is the accidental definition of importance this document warns against. What position misses, the personal mark covers.
+
+**Collective significance counts distinct people, never Moment volume** — and it is knowingly weak. Preventing coordinated posting from manufacturing convergence is unsolved; the dimension carries its own algorithm version so it can be replaced alone, and nothing consumes significance until temporal zoom exists.
+
+**Engagement cannot reach significance.** The code that computes it imports nothing from reactions or comments, and a test asserts it. Separation is enforced rather than intended.
+
+**Nothing exposes a significance score.** The only endpoints concern somebody's own mark.
+
 ## Open Product Questions
 
 The following questions require deliberate resolution:
 
-- Which significance dimensions must be implemented for the first release of temporal zoom?
-- Should personal significance ship on day one?
-- If so, what user-facing concept represents it: important, milestone, defining, favorite, or something else?
-- Can a User assign personal significance only to Moments they created, or to any Moment in which they legitimately participate?
-- Can multiple people independently assign personal significance to the same Moment?
-- Should personal significance be private by default?
 - Can Users choose to make their personal-significance attribution visible to others?
 - Should the creator of a Moment know when another participant marks it personally significant?
 - Should Users be able to remove or change personal-significance attribution?
-- Should personal significance support multiple levels or remain a binary/semantic designation?
 - How should personal significance differ from bookmarking or saving a Moment?
-- Which causal graph properties should contribute to day-one causal significance?
-- Should recursive causal significance be computed in the initial release or introduced after launch?
 - If recursive significance ships on day one, how frequently should it be recomputed?
 - How should causal confidence or disputed causal relationships affect significance?
-- What constitutes a temporal boundary for day-one temporal significance?
-- Are temporal boundaries explicitly authored, algorithmically inferred, or both?
 - Should Chronologity allow Users to explicitly mark beginnings, endings, and transitions?
 - How should significance be evaluated when occurrence time is imprecise?
 - How should significance behave for Moments spanning a period rather than a point in time?
 - Which structural graph signals are useful enough to implement initially?
 - How should collective significance distinguish independent perspectives from duplicates?
+- How should coordinated posting be prevented from manufacturing collective significance? Counting distinct authors raises the cost without closing the hole, and this remains the weakest dimension.
 - How many independent Moments are necessary before collective convergence becomes meaningful?
 - Should collective significance be normalized for the number of active Chronologity Users in a place, period, or Event?
 - How should Chronologity prevent coordinated posting from manufacturing collective significance?
@@ -1414,7 +1424,6 @@ The following questions require deliberate resolution:
 - If so, which dimensions are appropriate for those surfaces?
 - Should significance influence notifications?
 - Should significance affect storage, retention, or media quality policies? The recommended default is no.
-- Should Comment or Reaction activity ever be used as a weak contextual signal, or should engagement remain completely excluded from significance computation?
 - If engagement is ever used, what safeguards prevent popularity from dominating?
 - Should historical significance be exportable as part of User data portability?
 - Should Users be able to inspect why one Moment was selected over another during temporal zoom?

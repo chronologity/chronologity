@@ -11,23 +11,35 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
-    "lint": "turbo run lint",
-    "lint:fix": "turbo run lint:fix",
+    "lint": "turbo run lint //#lint:root",
+    "lint:fix": "turbo run lint:fix //#lint:root:fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "test:unit": "turbo run test:unit",
     "test:integration": "turbo run test:integration",
-    "clean": "turbo run clean"
+    "test:integration:clean": "pnpm db:reset && turbo run test:integration",
+    "test:watch": "turbo run test:watch",
+    "clean": "turbo run clean",
+    "lint:root": "eslint eslint.config.js prettier.config.js",
+    "lint:root:fix": "eslint eslint.config.js prettier.config.js --fix",
+    "infra:up": "bash scripts/infra-up.sh",
+    "infra:down": "bash scripts/compose.sh down",
+    "infra:reset": "bash scripts/compose.sh down --volumes",
+    "infra:ps": "bash scripts/compose.sh ps",
+    "infra:logs": "bash scripts/compose.sh logs --follow",
+    "infra:validate": "bash scripts/validate-infra.sh",
+    "db:reset": "bash scripts/reset-database.sh",
+    "load": "node scripts/load.mjs",
+    "timeline:scale": "node scripts/timeline-scale.mjs"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
+    "@chronologity/eslint-config": "workspace:*",
+    "autocannon": "^8.0.0",
     "eslint": "^10.0.1",
-    "globals": "^17.9.0",
     "prettier": "^3.9.6",
     "turbo": "^2.10.7",
-    "typescript": "^7.0.2",
-    "typescript-eslint": "^8.66.0"
+    "typescript": "^7.0.2"
   }
 }

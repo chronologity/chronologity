@@ -12,7 +12,6 @@ The architecture must validate:
 
 - domain correctness;
 - command behavior;
-- Event Sourcing semantics;
 - relational persistence;
 - projections;
 - Kafka messaging;
@@ -36,7 +35,7 @@ This document defines:
 - unit testing;
 - integration testing;
 - contract testing;
-- aggregate/Event Sourcing testing;
+- policy and service testing;
 - projection/replay testing;
 - messaging testing;
 - API testing;
@@ -63,8 +62,6 @@ This document is grounded in:
 - `docs/architecture/api.md`;
 - `docs/architecture/authentication.md`;
 - `docs/architecture/authorization.md`;
-- `docs/architecture/cqrs.md`;
-- `docs/architecture/event-sourcing.md`;
 - `docs/architecture/events.md`;
 - `docs/architecture/messaging.md`;
 - `docs/architecture/projections.md`;
@@ -92,7 +89,7 @@ The governing rule is:
 
 Mocks are useful.
 
-Mocks are not proof that EventStoreDB, Kafka, PostgreSQL, ClickHouse, object storage, or mobile runtime behavior actually works.
+Mocks are not proof that PostgreSQL, Kafka, ClickHouse, object storage, or mobile runtime behavior actually works.
 
 ---
 
@@ -140,14 +137,14 @@ Feature-local unit tests should be colocated with implementation.
 Examples:
 
 ```text
-create-moment.command.ts
-create-moment.command.test.ts
+moment.policy.ts
+moment.policy.test.ts
 
-moment.aggregate.ts
-moment.aggregate.test.ts
+moment.service.ts
+moment.service.integration.test.ts
 
-timeline-query.ts
-timeline-query.test.ts
+moment.routes.ts
+moment.integration.test.ts
 ```
 
 ---
@@ -160,7 +157,6 @@ Potential examples:
 
 ```text
 test-support/
-    eventstore/
     postgres/
     kafka/
     clickhouse/
@@ -198,7 +194,7 @@ Unit tests validate pure or narrowly scoped logic.
 
 Good unit-test targets:
 
-- aggregate decisions;
+- policy decisions;
 - authorization policies;
 - value objects;
 - schema transformation;
@@ -238,7 +234,6 @@ Integration tests validate real interactions between Chronologity code and infra
 
 Required infrastructure integration targets include:
 
-- EventStoreDB;
 - PostgreSQL;
 - Kafka;
 - ClickHouse;
@@ -254,7 +249,8 @@ Use real infrastructure where behavior matters.
 Examples:
 
 ```text
-EventStoreDB expected version
+conditional updates and what they match
+unique constraints deciding a race
 Kafka partition ordering
 PostgreSQL transaction constraints
 ClickHouse ordering/replacing semantics
@@ -294,147 +290,126 @@ adapter/store/message semantics
 
 ---
 
-# Aggregate Tests
+# Policy Tests
 
-Event-sourced aggregates should use Given/When/Then-style tests.
+A policy module is pure, so its tests are unit tests with no infrastructure.
 
-Example:
-
-```text
-Given:
-    MomentCreated
-
-When:
-    CorrectOccurrenceTime
-
-Then:
-    MomentOccurrenceTimeCorrected
-```
-
-These tests do not require EventStoreDB.
-
----
-
-# Aggregate Reconstruction Tests
-
-Every event-sourced aggregate should have tests that replay historical event sequences into current state.
-
-Verify:
-
-- event order;
-- state reconstruction;
-- old event versions;
-- deleted/inactive states;
-- invalid transitions.
-
----
-
-# Aggregate Invariant Tests
-
-Test invariants directly.
+They must be exhaustive. Every branch, every boundary, success and failure. The
+reason rules are pulled into policy modules in the first place is that a pure
+function's behaviour can be enumerated, and a branch left untested is either a
+missing case or a branch that cannot occur — the second being a defect worth
+removing rather than a line worth covering artificially.
 
 Examples:
 
-- cannot revoke already-revoked Session incorrectly;
-- cannot assign forbidden role;
-- cannot attach invalid media;
-- cannot create unsupported state transition.
+- a handle refused for length, for characters, or for being reserved;
+- a Session judged usable, revoked, or expired, including at the exact instant
+  of expiry;
+- whether a refresh failure means the credential was superseded;
+- which derivatives remain to be produced after a partial failure.
 
 ---
 
-# Event Emission Tests
+# Service Tests
 
-Command/domain tests should assert:
+Services orchestrate repositories, so they are proven by integration tests
+against real PostgreSQL, driving the service directly rather than through HTTP.
 
-- event type;
-- payload;
-- metadata where domain-relevant;
-- no event on rejected command.
+This is not a compromise. A fake repository would have to reimplement the
+semantics under test — `ON CONFLICT` deciding a race, a conditional `UPDATE`
+returning zero rows — and a fake that gets them wrong produces green tests about
+exactly the properties the architecture depends on.
 
-Avoid asserting incidental private implementation details.
-
----
-
-# Event Schema Tests
-
-Persisted and integration event schemas should validate:
-
-- valid payload;
-- invalid payload;
-- missing required field;
-- enum handling;
-- event version;
-- prohibited sensitive fields.
+Driving the service below the HTTP layer is also the only way to reach behaviour
+the transport cannot arrange: nothing makes two HTTP requests interleave inside
+one transaction on purpose.
 
 ---
 
-# Event Upcaster Tests
+# Race Tests Must Be Able to Fail
 
-Old event versions must remain readable.
+A test that names a race and cannot observe one is worse than no test, because
+it reports success either way.
 
-Each upcaster should have deterministic fixtures.
+Firing several concurrent callers does not reliably produce a collision. The
+losers' reads tend to land after the winner has committed, so they take an
+earlier and cheaper exit and the contended path never runs. The assertion still
+holds, and the test still passes.
 
-Verify that upcasting:
+Where the interleaving matters, arrange it:
 
-- preserves old semantics;
-- does not invent facts;
-- does not call external services.
+```text
+open a transaction and make the contending change, without committing
+    ↓
+start the operation under test; its read sees the old state
+    ↓
+wait until its write is actually blocked on the row
+    ↓
+commit the first transaction
+    ↓
+the operation under test now meets the state it did not expect
+```
+
+Waiting means observing the block — `pg_stat_activity` reports a backend waiting
+on a lock — not sleeping and hoping. And the wait must fail loudly if the block
+never happens, so the test cannot quietly decay into the one it replaced.
 
 ---
 
-# EventStoreDB Integration Tests
+# PostgreSQL Integration Tests
 
 Required cases:
 
-- append to new stream;
-- append with expected version;
-- concurrency conflict;
-- stream read ordering;
-- stream not found;
-- metadata round trip;
-- subscription delivery;
-- restart/catch-up behavior.
+- a conditional update that matches, and one that matches nothing;
+- a unique constraint deciding which of two concurrent claims succeeds;
+- a transaction that rolls back leaving neither the change nor its outbox
+  message behind;
+- `FOR UPDATE SKIP LOCKED` handing one batch to exactly one claimant;
+- `COALESCE` preserving the first value written where first-write-wins matters.
+
+The last point is worth stating plainly: these are the rules, and they are
+written in SQL. Testing them anywhere other than against a real database tests
+something else.
 
 ---
 
-# Snapshot Tests
+# Outbox Tests
 
-If snapshots are introduced:
-
-- snapshot can restore state;
-- incompatible snapshot is rejected;
-- fallback replay works;
-- snapshot does not become sole authority.
-
-Snapshots are not a day-one test requirement unless snapshots are implemented.
+- a message enqueued in the same transaction as its change;
+- a rolled-back transaction leaving no message;
+- a claimed batch published and marked in one transaction;
+- a crash between publishing and marking re-delivering rather than losing;
+- nothing prohibited reaching the table — asserted against the table itself,
+  because it is a claim about what was written rather than what was intended.
 
 ---
 
-# CQRS Command Tests
+# Route Tests
 
-Command-handler tests should verify:
+Route tests should verify:
 
-- authentication context where needed;
-- authorization;
-- aggregate load;
-- invariant enforcement;
-- authoritative persistence;
-- idempotency;
-- concurrency behavior;
-- returned command result.
+- authentication and authorization requirements;
+- schema validation, including what the schema refuses before a handler runs;
+- status and error mapping;
+- serialization.
+
+They should not duplicate rules already proven in policy or service tests.
+
+Use `app.inject()` rather than binding a real port. A suite that needs a free
+port is a suite that fails when run in parallel.
 
 ---
 
-# CQRS Query Tests
+# Read Tests
 
-Query tests should verify:
+Read tests should verify:
 
-- correct read source;
+- correct source;
 - no mutation;
 - filtering;
 - pagination;
 - authorization;
-- mapping to API/GraphQL contract.
+- mapping to the API or GraphQL contract.
 
 ---
 
@@ -1422,7 +1397,7 @@ Failure testing verifies behavior under dependency outages.
 
 Examples:
 
-- EventStoreDB unavailable;
+- PostgreSQL unavailable;
 - PostgreSQL unavailable;
 - ClickHouse unavailable;
 - Kafka unavailable;
@@ -1789,9 +1764,9 @@ Manual testing should not replace repeatable automation for deterministic logic.
 Before launch, Chronologity must implement:
 
 - colocated unit tests;
-- aggregate Given/When/Then tests;
+- exhaustive policy unit tests;
 - event schema/upcaster tests;
-- EventStoreDB integration tests;
+- service integration tests against real PostgreSQL;
 - PostgreSQL integration tests;
 - Kafka integration tests;
 - ClickHouse integration tests;
@@ -1855,11 +1830,6 @@ Do not choose tools only for popularity; choose them for fit with the establishe
 - shared CI service containers?
 - Recommended: isolated ephemeral infrastructure where practical.
 
-## EventStoreDB
-
-- Which test image/version?
-- How are subscriptions/checkpoints isolated between tests?
-
 ## Kafka
 
 - Real Kafka or a lighter compatible broker in local tests?
@@ -1920,14 +1890,14 @@ Do not choose tools only for popularity; choose them for fit with the establishe
 1. Testing validates architecture at real failure boundaries.
 2. Unit tests are numerous, fast, deterministic, and local.
 3. Infrastructure semantics are tested with real infrastructure where correctness depends on them.
-4. EventStoreDB expected-version behavior is not trusted from mocks alone.
+4. Conditional-update and constraint behaviour is never trusted from a mock.
 5. Kafka partition/group/offset semantics are integration tested.
 6. PostgreSQL constraints/transactions are integration tested.
 7. ClickHouse ordering/update semantics are integration tested.
 8. Tests remain close to owned code where practical.
 9. Cross-system harnesses are shared rather than duplicated.
-10. Aggregate logic is testable without EventStoreDB.
-11. Event-sourced aggregates have reconstruction tests.
+10. Rules live in pure policy modules and are unit tested exhaustively.
+11. Services are proven by integration tests against real PostgreSQL; a fake repository is never substituted for one.
 12. Old persisted event versions have compatibility fixtures.
 13. Event upcasters are deterministic and tested.
 14. Command tests cover authorization, invariants, persistence, idempotency, and concurrency.

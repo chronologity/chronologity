@@ -1,0 +1,21 @@
+{
+  "extends": "@chronologity/tsconfig/node.json",
+  "_comment": [
+    "Decorators are enabled here rather than in the shared base because apps/api is",
+    "the only consumer: TypeORM entities declare their columns with them. These are",
+    "the legacy semantics TypeORM requires, not the ES standard ones.",
+    "",
+    "emitDecoratorMetadata is deliberately off. It exists so an ORM can infer a",
+    "column's type from the property's, and every column and relation here states",
+    "its type outright instead. Leaving it on emits a direct reference to each",
+    "property's class, which throws on any entity that names one declared later in",
+    "the same file."
+  ],
+  "compilerOptions": {
+    "experimentalDecorators": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    "noEmit": false
+  },
+  "include": ["src/**/*"]
+}
