@@ -524,7 +524,13 @@ The service should preserve a correct continuation cursor.
 
 # Cursor Ownership
 
-The feed aggregator owns client-facing Timeline cursor encoding/decoding.
+The feed aggregator presents client-facing Timeline cursors, and shares their
+format with the API through `packages/timeline-derivation` rather than owning it
+(ADR-138). Two applications page the same projection, so two encodings that
+drifted would skip and repeat Moments sharing an occurrence time.
+
+What the aggregator owns is when a cursor is issued and what a client is told
+when one is refused.
 
 Cursors should be:
 

@@ -55,6 +55,7 @@ chronologity/
 │   ├── config/
 │   ├── contracts/
 │   ├── eslint-config/
+│   ├── timeline-derivation/
 │   └── tsconfig/
 ├── docs/
 │   ├── architecture/
@@ -102,6 +103,7 @@ packages/
 ├── config/
 ├── contracts/
 ├── eslint-config/
+├── timeline-derivation/
 └── tsconfig/
 ```
 
@@ -1102,6 +1104,16 @@ It should **not** contain repositories, Fastify handlers, ClickHouse adapters, R
 Contains the typed REST client used primarily by `apps/mobile` and, where appropriate, `apps/web`.
 
 It encapsulates API transport contracts without importing API implementation.
+
+## `packages/timeline-derivation`
+
+Contains what the two applications that derive Timelines must agree about: the eligibility rule deciding which Moments a Viewer may be shown, the cursor format together with the keyset condition and ordering that read it back, the translation from a View Specification into filters, and the row shape and projection version.
+
+**It computes and never connects.** It holds SQL text and pure functions, takes no client and opens no socket; each application supplies its own connection and runs what it returns. That is what makes it neutral between them, and it is deliberately not neutral between datastores — the projection is ClickHouse, and an abstraction over that would be one nobody needs.
+
+It exists because these are the things that must not be written twice. A security rule written in two places eventually disagrees with itself, and two cursor implementations that drift skip and repeat Moments sharing an occurrence time (ADR-138).
+
+It does not contain either application's query methods. Their needs differ — the API pages, the aggregator over-fetches and builds connections — and sharing the execution layer would force one shape on both.
 
 ## `packages/config`
 

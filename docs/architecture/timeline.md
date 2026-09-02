@@ -257,6 +257,12 @@ The exact tuple must be reflected consistently in:
 - historical jump anchoring;
 - neighboring-slice queries.
 
+Three of those four are code rather than schema, and two applications now write
+them. `packages/timeline-derivation` holds the cursor encoding together with the
+keyset condition and ordering that read it back, so the consistency this section
+asks for is a property of one module rather than a rule two teams remember
+(ADR-138).
+
 ---
 
 # Backfilled History

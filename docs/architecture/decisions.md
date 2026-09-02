@@ -4690,3 +4690,68 @@ Verifying the signature alone; and Pattern B, trusting identity forwarded by a g
 ## Consequences
 
 Every authenticated read costs one indexed lookup by primary key, alongside the ClickHouse work it was going to do anyway. PostgreSQL joins ClickHouse as something readiness reports, because without it every credential-carrying request is refused — which would look to a client like everybody being signed out at once. The credential this service is issued should be able to SELECT and nothing more; enforcing that is a deployment decision, and the local stack has one role, so `testing.md:1005`'s runtime-credential test is not yet meaningful here.
+
+---
+
+# ADR-138 — One Timeline Read Rule, in a Package That Computes and Never Connects
+
+## Status
+
+Accepted. Completes what ADR-084 assumed and settles the cursor ownership `api.md` and `feed.md` disagreed about.
+
+## Context
+
+ADR-084 removed the API's Timeline query handlers "because `apps/feed-aggregator/src/timelines/` already owns them". That directory has never existed. Phase 7 built the handlers in the API instead, because Saved Views needed derivation and there was nowhere else to put it, and Phase 8 then created an aggregator that reads nothing.
+
+Before 9A can build Viewer eligibility it has to know where the rule deciding what a Viewer may see is going to live. Two things in `apps/api/src/features/timeline/` are needed by both applications:
+
+- `eligible(alias)`, one condition covering own history, suspended authors, Blocks, private Moments, the named audience, age restriction and moderation takedown;
+- the cursor format, together with the keyset condition and ordering that read it back.
+
+`monorepo.md:1148` forbids the aggregator importing the API, so it cannot use either in place.
+
+Four canonical statements pull in different directions. `feed.md:527` says the aggregator owns client-facing cursor encoding; `api.md:913` said the API's Timeline feature owns cursor encoding. `feed.md:350` says the aggregator should avoid calling back into the API per read; `projections.md:498` says normal API feature queries should not bypass the aggregator. And `principles.md:396` names "persistence adapters" and "service implementations imported by multiple applications" as poor candidates for sharing, while ADR-130 records this codebase's standing objection that "a rule written twice eventually disagrees with itself".
+
+## Decision
+
+**A new package, `packages/timeline-derivation`, holds what the two applications must agree about.** It carries the eligibility rule, the cursor format with its keyset condition and ordering, the translation from a View Specification into filters, and the row shape and projection version.
+
+**It computes and never connects.** No client, no pool, no I/O: it returns SQL text and parameters, and each application runs them through its own connection. That is the line, and it is what makes the package neutral with respect to which application and which connection — the test `monorepo.md:1292` sets. It is frankly not neutral with respect to datastore, and does not pretend to be.
+
+**Each application keeps its own query methods.** `TimelineReadRepository` stays in the API; the aggregator writes its own in 9C, shaped for GraphQL rather than REST. Their needs differ — one pages, the other over-fetches after filtering and builds connections — and sharing the execution layer would force one shape on both.
+
+**The resolver takes a `Queryable` rather than a `DataSource`.** It used TypeORM only as a `.query(sql, params)` handle, so the narrowest interface that works is declared in the package. The API passes its `DataSource`; the aggregator will pass a wrapper over the `pg` pool it already has. Neither client is a dependency of the package.
+
+**The cursor throws its own error.** The two applications report a refusal differently — the API as a 400 in its error envelope, the aggregator as a GraphQL error — and a package that threw either would be choosing transport for both.
+
+**The API's sixteen Timeline routes are deprecated rather than deleted**, and go in Phase 10. Nothing consumes them; mobile is Phase 11. Removing a working surface before its replacement exists is the riskier move, and the roadmap warns against freezing the API before mobile integration.
+
+## Alternatives Considered
+
+Writing a second copy in the aggregator, which is what ADR-084's file trees literally describe. Having the aggregator send a View Specification to the API over HTTP. Putting the shared parts in `packages/contracts`.
+
+## Rationale
+
+**The rule that must not fork is a security rule.** `timeline.read.repository.ts` already said so of `eligible()`: *"A rule written in several places eventually disagrees with itself, and this is the rule that leaks when it does."* Two copies would drift in the direction nobody notices — a clause dropped in an edit shows history rather than withholding it, and every clause in that condition was added in response to something that had already gone wrong.
+
+**The cursor is the same argument in a quieter register.** Two encodings that disagreed would not fail; they would page through history skipping and repeating Moments that share an occurrence time, which is a small enough set that nobody would find it deliberately.
+
+**`principles.md` is right about the general case and this is the exception it does not cover.** Its objection to sharing implementation is that it erases ownership boundaries — a package that owns a service means neither application owns it. That is not what is happening here: what moves is a rule and a format, and *ownership of the rule* is precisely what was missing while it sat inside one of the two applications that need it. The execution layer, which is the part `principles.md` names, stays in each application.
+
+**`packages/contracts` was refused on its own terms.** `monorepo.md:1098` forbids ClickHouse adapters there, and this is SQL. The cursor alone would have qualified as a serialized contract, but splitting it from the rule it pages against would have put the two halves of one agreement in two places.
+
+**HTTP was refused for availability.** It is the only option with no duplication at all, and it makes every Timeline page two network hops and the read path's uptime a function of the write path's. `feed.md:350` names both.
+
+## Consequences
+
+There is now a package neither application owns, and a change to the eligibility rule affects both. That is the point, and it is also the cost: the API's integration suite is the only thing proving the rule behaves, and until 9C the aggregator's use of it is untested. `packages/timeline-derivation` therefore ships with unit tests asserting each clause of the rule is present — weak evidence compared to a query against real data, but it is what a string can be held to, and a clause silently dropped is the failure it is there to catch.
+
+Both `vitest.workspace-build.ts` guards gained the package, or a stale build would fail as a missing symbol minutes into a run.
+
+`TIMELINE_VERSION` moved with the row shape, which incidentally fixes `config/env.ts` importing a constant out of a feature directory.
+
+## Deliberately Not Here
+
+The anonymous Viewer. `TimelineEligibility` requires a `viewerUserId`, and the aggregator will need to express somebody with no account. That is 9A's design and belongs in this package when it arrives; moving the rule as it stands was the smaller change.
+
+The aggregator gains the dependency and uses none of it yet.

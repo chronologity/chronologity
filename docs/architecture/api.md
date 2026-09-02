@@ -910,9 +910,14 @@ They must not change Moment occurrence time or become authoritative historical s
 
 The finalized product model establishes that the Timeline is a derived historical representation rather than an arbitrary user-created container. A derived representation has nothing to create, rename, archive, or delete: it changes when the history beneath it changes.
 
-The feature owns what maintains Timeline read models, and nothing else — cursor
-encoding and the projection logic that keeps ClickHouse in step with what
-PostgreSQL has accepted.
+The feature owns what maintains Timeline read models, and nothing else — the
+projection logic that keeps ClickHouse in step with what PostgreSQL has
+accepted, and the queries this application still makes of them.
+
+It does **not** own the cursor format. That said "cursor encoding" until
+ADR-138, which contradicted `feed.md`'s claim that the aggregator owns it;
+neither is right now that two applications page the same projection. The format
+lives in `packages/timeline-derivation`, and both use it.
 
 It must **not** own high-volume Timeline composition. That belongs to
 `apps/feed-aggregator`.
