@@ -1564,6 +1564,14 @@ Fast unit tests should run in parallel.
 
 Integration tests may parallelize only when infrastructure isolation is safe.
 
+It is not safe here, in either direction. Within an application, each suite's
+vitest configuration sets `fileParallelism: false`, because the files share a
+database and global checkpoint tables. Across applications, the root
+`test:integration` script passes `--concurrency=1`, because `apps/api` and
+`apps/feed-aggregator` share one PostgreSQL, one Kafka and one ClickHouse — and
+two suites writing the same tables produce contention that reads as a flake
+rather than as the collision it is.
+
 Applying the schema is a step of its own rather than a suite's side effect. The
 API's integration tests migrate in their own setup; the aggregator's cannot,
 since it may not import the API and the schema it reads belongs to the API. CI
