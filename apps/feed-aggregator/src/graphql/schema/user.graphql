@@ -1,0 +1,28 @@
+"""
+Somebody, as anyone may see them.
+
+Carries nothing about authentication and nothing a person has not chosen to
+present. There is no account status here: somebody is told when their own
+account is suspended, and only they are — to everybody else a suspended profile
+is simply absent.
+"""
+type PublicUser {
+  userId: ID!
+
+  """
+  Unique, and how somebody is referred to.
+  """
+  handle: String!
+
+  """
+  What they chose to be called. Not unique, and not an identifier.
+  """
+  displayName: String!
+
+  biography: String
+
+  """
+  When they joined. Not when anything in their history happened.
+  """
+  createdAt: DateTime!
+}

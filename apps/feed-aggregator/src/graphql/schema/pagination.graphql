@@ -1,0 +1,40 @@
+"""
+Where a page sits, and whether there is more history either side of it.
+
+History is paged by position rather than by page number, and the difference is
+the product rather than performance: history grows in the middle. A photograph
+uploaded today may belong to 1969, so an offset taken a moment ago now points
+somewhere else, and paging with it would repeat some Moments and skip others.
+
+The field names follow the convention GraphQL clients already know, so a client
+library can page this without being taught the shape.
+"""
+type PageInfo {
+  """
+  Where this page begins, or null when it holds nothing.
+
+  Nullable because an empty page has no ends. A page that holds anything has
+  both.
+  """
+  startCursor: Cursor
+
+  """
+  Where this page ends, or null when it holds nothing.
+  """
+  endCursor: Cursor
+
+  """
+  Whether there is more history in the direction being read.
+
+  False means history ran out, rather than that the next request would be
+  empty for some other reason. A page may hold fewer Moments than were asked
+  for and still have more beyond it: what a Viewer may see is decided before
+  the page is filled, so a sparse stretch returns what it has.
+  """
+  hasNextPage: Boolean!
+
+  """
+  Whether there is more history the other way.
+  """
+  hasPreviousPage: Boolean!
+}

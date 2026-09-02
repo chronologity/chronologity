@@ -1,0 +1,98 @@
+"""
+The files produced from a recording so it can be shown.
+
+Delivery conveniences, never authoritative: the original is always kept, so any
+of these can be produced again.
+"""
+enum DerivativeKind {
+  """
+  A small preview of a photograph.
+  """
+  THUMBNAIL
+
+  """
+  A still frame from a video, shown before it plays.
+  """
+  POSTER
+
+  """
+  A video repackaged so a player can begin without downloading it all.
+  """
+  FASTSTART
+}
+
+"""
+Something recorded, as a reader receives it.
+
+Evidence of an experience rather than the experience itself: a Moment is not its
+media, and media count creates no additional positions in history.
+
+Narrower than what its owner sees. There is no storage key and no URL here — a
+key is infrastructure, and a durable signed URL is a credential with a hostname
+in front of it. There is no upload state, no declared-versus-verified pair and
+no failure reason either: those are an author's view of their own upload, and
+this is somebody reading their history.
+"""
+interface Media {
+  mediaId: ID!
+
+  """
+  As a decoder found it, rather than as anybody declared it.
+  """
+  width: Int
+
+  height: Int
+
+  """
+  Which forms have been produced for showing this.
+  """
+  derivatives: [DerivativeKind!]!
+}
+
+"""
+A photograph.
+"""
+type Image implements Media {
+  mediaId: ID!
+  width: Int
+  height: Int
+  derivatives: [DerivativeKind!]!
+}
+
+"""
+A recording with a length.
+"""
+type Video implements Media {
+  mediaId: ID!
+  width: Int
+  height: Int
+  derivatives: [DerivativeKind!]!
+
+  """
+  How long it runs.
+
+  A video's length is not the duration of the experience it records, and neither
+  is the sum of a Moment's media.
+  """
+  durationSeconds: Float
+}
+
+"""
+One piece of media in a Moment, at its position in the sequence.
+"""
+type MediaEdge {
+  cursor: Cursor!
+  node: Media!
+}
+
+"""
+A Moment's media, a page at a time.
+
+Paged because a Moment may hold any number of images and videos. That is a
+product statement rather than a limit: the technical page bound is how an
+unlimited collection is delivered, not a cap on how much a Moment may contain.
+"""
+type MediaConnection {
+  edges: [MediaEdge!]!
+  pageInfo: PageInfo!
+}

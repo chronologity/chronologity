@@ -1,0 +1,145 @@
+"""
+Who may see a Moment.
+
+Three models and no more. There is deliberately no value meaning "my followers":
+following states what somebody wants to hear about, never what they are entitled
+to see.
+"""
+enum MomentVisibility {
+  """
+  Its author, and nobody else.
+  """
+  PRIVATE
+
+  """
+  Its author and the people it names.
+  """
+  RESTRICTED
+
+  """
+  Anybody who may read the person's history.
+  """
+  PUBLIC
+}
+
+"""
+How much of a Moment's place other people are told.
+
+The author's privacy choice, and a different axis from how well the place is
+known. Precision says how well anybody knows where something happened and is the
+same for everybody; this says how much of that a given reader receives. A place
+known exactly may still be disclosed as a city.
+
+The author always receives the exact place. This governs everybody else.
+"""
+enum LocationDisclosure {
+  """
+  The place in full: its name, its coordinates, and its identity.
+  """
+  EXACT
+
+  """
+  The neighbourhood it sits in, and the wider areas around that.
+  """
+  NEIGHBOURHOOD
+
+  """
+  The city and wider, with the neighbourhood withheld.
+  """
+  CITY
+
+  """
+  Nothing about where. The Moment itself is still readable.
+  """
+  HIDDEN
+}
+
+"""
+A Moment's place, as one reader receives it.
+
+Two fields rather than one, because a client has to know which it was given.
+At `EXACT` the whole place is here, its identifier included. Below that there is
+no identifier at all — a reduced place is a coarser statement about where rather
+than a reference to a place, and an identifier would let anybody look up exactly
+what was withheld.
+"""
+type MomentPlace {
+  disclosure: LocationDisclosure!
+
+  """
+  The place in full. Present only at `EXACT`.
+  """
+  location: Location
+
+  """
+  The area, at the granularity disclosed. Present at `NEIGHBOURHOOD` and `CITY`.
+  """
+  area: GeographicContext
+}
+
+"""
+Something that happened, recorded by one person.
+
+The fundamental unit of represented history. Not a media file, and not a
+container: media is evidence of an experience, and this is the experience.
+
+Its position in history comes from when it happened, never from when it was
+recorded, and nothing that happens afterwards — a comment, a reaction, a
+correction — moves it.
+"""
+type Moment {
+  momentId: ID!
+
+  """
+  Who recorded it.
+
+  Authorship alone. Who may see it is `visibility`, and the two stopped
+  coinciding when Moments gained an audience.
+  """
+  author: PublicUser!
+
+  """
+  The words that say what happened.
+
+  Media and a timestamp alone are a photograph with a date on it; this is what
+  makes the record be about an experience.
+  """
+  caption: String!
+
+  occurrence: Occurrence!
+
+  """
+  How far from UTC the person was when it happened.
+  """
+  occurrenceOffsetMinutes: Int!
+
+  """
+  Where it happened, as this reader may receive it.
+
+  Null means nobody said where — a fact about the history. A place its author
+  withheld is **not** null: it is a place with `HIDDEN` disclosure, because
+  "nobody said where" and "you are not being told where" are different facts and
+  a client should be able to tell them apart.
+  """
+  place: MomentPlace
+
+  """
+  Its media, a page at a time.
+  """
+  media: MediaConnection!
+
+  """
+  Who may see it.
+  """
+  visibility: MomentVisibility!
+
+  """
+  How it has been responded to.
+  """
+  reactions: ReactionSummary!
+
+  """
+  When it was recorded, which is not when it happened.
+  """
+  createdAt: DateTime!
+}

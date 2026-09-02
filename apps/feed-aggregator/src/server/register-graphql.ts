@@ -8,6 +8,8 @@ import { createContext } from "../graphql/context/create-context.js";
 import { formatErrors } from "../graphql/format-errors.js";
 import { loadSchema } from "../graphql/load-schema.js";
 import { queryResolvers } from "../graphql/resolvers/query.resolver.js";
+import { cursorScalar } from "../graphql/scalars/cursor.scalar.js";
+import { dateTimeScalar } from "../graphql/scalars/date-time.scalar.js";
 import { authPlugin } from "../plugins/auth.plugin.js";
 import type { ReadStore } from "../read-models/clickhouse/client.js";
 
@@ -46,7 +48,15 @@ export async function registerGraphql(app: FastifyInstance, wiring: GraphQLWirin
 
     await scope.register(mercurius, {
       schema: loadSchema(),
-      resolvers: queryResolvers,
+      resolvers: {
+        ...queryResolvers,
+        // Attached by name, and the names must match the SDL: Mercurius builds
+        // the schema first and then copies these onto the types it found, so a
+        // scalar declared here and not there fails at startup rather than
+        // silently doing nothing.
+        Cursor: cursorScalar,
+        DateTime: dateTimeScalar,
+      },
       context: createContext(wiring.store, wiring.eligibility),
       // No mutations, and `defineMutation` stays off so the schema does not
       // grow an empty one. A read service that advertised a mutation type

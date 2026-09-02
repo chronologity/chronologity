@@ -1,0 +1,248 @@
+"""
+How precisely an occurrence is known.
+
+History arrives imprecisely, and the product refuses to invent precision it does
+not have. A Moment known only as "summer 1998" is that month at `MONTH`
+precision and never acquires a fabricated day, so a client must present it as
+what it is rather than as a date.
+"""
+enum TemporalPrecision {
+  """
+  Known to the moment.
+  """
+  INSTANT
+
+  """
+  Known to the day.
+  """
+  DAY
+
+  """
+  Known to the month.
+  """
+  MONTH
+
+  """
+  Known to the year.
+  """
+  YEAR
+}
+
+"""
+When something happened, as an interval at the precision it is actually known.
+
+`start` and `end` bound where the occurrence is known to fall. At `INSTANT`
+precision they are equal; at `YEAR` they span the year. This is historical
+position and never when the record was made — a Moment entered today for 2014
+belongs in 2014.
+"""
+type Occurrence {
+  start: DateTime!
+  end: DateTime!
+  precision: TemporalPrecision!
+}
+
+"""
+Which way a page runs through history.
+"""
+enum TimelineDirection {
+  """
+  Backwards, towards the past.
+  """
+  OLDER
+
+  """
+  Forwards, towards the present.
+  """
+  NEWER
+}
+
+"""
+How coarsely history is being counted.
+
+Narrower than the scales somebody may ask for. What a client requests and what
+the projection can currently count are different questions, and this is the
+second.
+"""
+enum TimelineScale {
+  YEAR
+  DECADE
+}
+
+"""
+What kind of thing a stretch of history is about.
+"""
+enum TimelineScopeType {
+  """
+  Somebody's history: what they recorded, together with what they took part in.
+  """
+  PERSON
+
+  """
+  A place.
+  """
+  LOCATION
+
+  """
+  An occasion in the world that Moments were part of.
+  """
+  REAL_WORLD_EVENT
+}
+
+"""
+Whose history, or what's, is being read.
+
+Carried on a page so a client can restore where it was without having to
+remember what it asked for.
+"""
+type TimelineScope {
+  type: TimelineScopeType!
+  id: ID!
+}
+
+"""
+A Moment as a Timeline presents it.
+
+Deliberately thin: where it sits in history and what its occurrence claims, and
+nothing it says. A caption is read by opening the Moment, which keeps somebody's
+words out of a read model built to be rebuilt.
+"""
+type ReadableTimelineEntry {
+  momentId: ID!
+
+  """
+  When it happened. Never when it was recorded.
+  """
+  occurredAt: DateTime!
+
+  occurrenceEnd: DateTime!
+
+  """
+  What the occurrence claims, so a month is never presented as a day.
+  """
+  occurrencePrecision: TemporalPrecision!
+
+  """
+  How far from UTC the person was when it happened.
+
+  What makes "half past seven in the evening" mean anything. A timestamp alone
+  keeps the instant and throws that away.
+  """
+  occurrenceOffsetMinutes: Int!
+
+  """
+  Who may see it.
+  """
+  visibility: MomentVisibility!
+
+  """
+  Whether it may be offered to somebody who did not ask for it.
+  """
+  discoverable: Boolean!
+}
+
+"""
+A Moment somebody was part of and may not read.
+
+Appears only on that person's own Timeline. They accepted participation, so they
+are entitled to know it happened — their own history should not have a hole they
+cannot see the shape of — but accepting granted them nothing, so what it says
+stays shut.
+
+Its own type rather than the readable one with fields left out. A client cannot
+read a field that is not there, and a field that is merely null is
+indistinguishable from one that failed to load.
+
+**It carries no offset.** A UTC offset is a weak statement about where somebody
+was — the one field in the occurrence set that says anything about place rather
+than time — so the times come back in UTC and nothing else comes back at all.
+"""
+type WithheldTimelineEntry {
+  momentId: ID!
+  occurredAt: DateTime!
+  occurrenceEnd: DateTime!
+  occurrencePrecision: TemporalPrecision!
+}
+
+"""
+A Moment in a Timeline, readable or not.
+
+Everything a Location's or an occasion's Timeline returns is readable, because
+such a read filters rather than reports: a Moment somebody may not see is absent
+from it, because its existence is not theirs to know. Only somebody's own
+Timeline carries the other kind.
+"""
+union TimelineEntry = ReadableTimelineEntry | WithheldTimelineEntry
+
+"""
+One Moment in a page, with the position it sits at.
+"""
+type TimelineEdge {
+  """
+  Where to resume from here.
+  """
+  cursor: Cursor!
+
+  node: TimelineEntry!
+}
+
+"""
+A page of history, and where it sits.
+"""
+type TimelineConnection {
+  edges: [TimelineEdge!]!
+  pageInfo: PageInfo!
+
+  """
+  Whose history this is, so a client can restore where it was.
+  """
+  scope: TimelineScope!
+}
+
+"""
+How much history sits in one span of time.
+
+Counts what the reader may see and nothing else: a count is a way of revealing
+that something exists, so one taken before eligibility would tell somebody how
+much they are not being shown.
+"""
+type TemporalBucket {
+  startsAt: DateTime!
+  scale: TimelineScale!
+  count: Int!
+}
+
+"""
+How history is distributed across a stretch of time.
+
+Spans holding nothing are absent rather than zero: a century of silence is not a
+hundred rows of nothing.
+"""
+type TemporalDistribution {
+  buckets: [TemporalBucket!]!
+  scope: TimelineScope!
+}
+
+"""
+Where a jump landed, and the history either side of it.
+
+The instant asked for need not be one anything happened at. When nothing did,
+`at` is null and the surrounding pages still answer — the position is preserved
+rather than quietly redefined as whichever Moment was nearest.
+"""
+type TimelineAround {
+  """
+  The Moment at the position, or null when nothing happened there.
+  """
+  at: TimelineEntry
+
+  """
+  History before it.
+  """
+  older: TimelineConnection!
+
+  """
+  History after it.
+  """
+  newer: TimelineConnection!
+}

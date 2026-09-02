@@ -14,9 +14,25 @@ import { fileURLToPath } from "node:url";
  * process runs would be a contract that changes under a client mid-request.
  *
  * Files are concatenated in the order given. GraphQL does not care, and the
- * order is for whoever reads it: the root type first, then the types it reaches.
+ * order is for whoever reads it: the root type first, then the scalars and the
+ * paging convention everything else uses, then history from the outside in —
+ * a Timeline, a Moment, and the things a Moment is made of.
+ *
+ * A file not named here is silently absent from the contract, which is why the
+ * list is explicit rather than a directory read: a schema file nobody loaded
+ * would fail as a missing type at startup rather than as a missing file.
  */
-const FILES = ["schema.graphql"] as const;
+const FILES = [
+  "schema.graphql",
+  "scalar.graphql",
+  "pagination.graphql",
+  "timeline.graphql",
+  "moment.graphql",
+  "media.graphql",
+  "location.graphql",
+  "user.graphql",
+  "reaction.graphql",
+] as const;
 
 /**
  * Load the schema.

@@ -1,0 +1,77 @@
+"""
+A lightweight response to a Moment.
+
+Four feelings, each describing the reader rather than the history. None of them
+amounts to confirming that a Moment occurred as represented.
+
+Names rather than glyphs, so that changing an icon cannot silently change the
+meaning of what somebody recorded.
+"""
+enum ReactionKind {
+  """
+  Warmth, affection, being touched by it.
+  """
+  LOVED
+
+  """
+  It was funny.
+  """
+  AMUSED
+
+  """
+  Wonder, or disbelief.
+  """
+  ASTONISHED
+
+  """
+  Sorrow, sympathy, loss.
+  """
+  SADDENED
+}
+
+"""
+How many people responded one way.
+
+A kind nobody chose is absent rather than present as zero, so a client shows
+what happened rather than a row of empties.
+"""
+type ReactionCount {
+  kind: ReactionKind!
+  count: Int!
+}
+
+"""
+How a Moment has been responded to.
+
+Counts, never identities. Showing an aggregate and showing exactly who reacted
+are different things, and a list of reactors on a restricted Moment would reveal
+that Moment's audience to everybody on it.
+
+Never a measure of historical importance: a private family Moment with two may
+matter more than a public one with millions.
+"""
+type ReactionSummary {
+  """
+  Whether this Moment accepts reactions.
+
+  Told rather than implied, because "reactions are off" and "nobody has reacted"
+  are different facts and a client that cannot tell them apart shows the wrong
+  thing.
+  """
+  enabled: Boolean!
+
+  counts: [ReactionCount!]!
+
+  """
+  Everybody who reacted, counted once each.
+  """
+  total: Int!
+
+  """
+  Your own, or null.
+
+  Yours is not an identity disclosure, and without it a client cannot show which
+  one you chose.
+  """
+  yours: ReactionKind
+}

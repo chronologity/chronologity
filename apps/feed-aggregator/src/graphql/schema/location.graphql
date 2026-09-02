@@ -1,0 +1,87 @@
+"""
+How precisely a position is actually known.
+
+A fact about history, the same for everybody, and not to be confused with how
+much of it a particular reader is told — that is disclosure, and it lives on the
+Moment. A place known exactly may still be disclosed as a city; a place known
+only to the city reports `BROAD` to its author too.
+"""
+enum LocationPrecision {
+  """
+  A specific spot: a venue, an address, a seat in a theatre.
+  """
+  EXACT
+
+  """
+  Near something, without a definite point.
+  """
+  APPROXIMATE
+
+  """
+  A wide area: a city, a region, a country.
+  """
+  BROAD
+
+  """
+  Nothing is known about where. Legitimate history, not missing data.
+  """
+  UNKNOWN
+}
+
+"""
+A position on the earth.
+
+Optional on a place, because a place can be meaningful without one and because
+inventing a coordinate to fill a gap would fabricate historical certainty.
+"""
+type Coordinates {
+  latitude: Float!
+  longitude: Float!
+}
+
+"""
+The wider areas a place sits inside, as recorded.
+
+Flat text rather than references to other places, deliberately: administrative
+boundaries change, places overlap, and a hiking trail crosses several
+jurisdictions. This records the context a place was recorded with and does not
+claim to describe geography.
+"""
+type GeographicContext {
+  neighbourhood: String
+  city: String
+  region: String
+  country: String
+
+  """
+  ISO 3166-1 alpha-2, where known. Useful for grouping; not an identity.
+  """
+  countryCode: String
+}
+
+"""
+A place somebody recorded.
+
+A place, not a coordinate: `40.7505, -73.9934` is a measurement and "Madison
+Square Garden" is a place.
+"""
+type Location {
+  locationId: ID!
+
+  """
+  The name as recorded, and never rewritten by a later lookup.
+
+  What makes historical naming possible: the map service will eventually rename
+  that venue, and this keeps what it was called when somebody recorded it.
+  """
+  name: String!
+
+  coordinates: Coordinates
+
+  """
+  How well the position is known.
+  """
+  precision: LocationPrecision!
+
+  context: GeographicContext!
+}

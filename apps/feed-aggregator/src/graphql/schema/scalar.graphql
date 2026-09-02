@@ -1,0 +1,27 @@
+"""
+An instant, as ISO-8601 with an explicit offset.
+
+The offset is required rather than optional. Chronologity records when things
+happened in the world, and a timestamp without a zone cannot be placed in
+history without guessing — so one arriving without an offset is refused rather
+than assumed to be UTC, which would move a Moment by up to fourteen hours in
+silence.
+
+Sent in UTC. A client wanting the offset the author was actually at reads
+`occurrenceOffsetMinutes` on the Moment, which is a separate field because it
+is a statement about where somebody was rather than when.
+"""
+scalar DateTime
+
+"""
+Where a page of history resumes.
+
+Opaque. It names a position, and its shape is this service's business rather
+than a client's — the encoding is versioned so it can change without a cursor
+somebody stored last month becoming a wrong answer.
+
+Do not construct one. A cursor this service did not issue is refused, and a
+refusal says only that: the encoding is not described, and the value is not
+quoted back.
+"""
+scalar Cursor
