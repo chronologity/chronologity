@@ -472,9 +472,14 @@ An authenticated Session does not automatically override account-state restricti
 
 ## Public/Anonymous Access
 
-If Chronologity exposes public content without authentication, authorization must support an explicit anonymous Viewer context.
+Chronologity does not expose content without authentication (ADR-139).
+`docs/product/moments.md:589` settles it: "every read requires a Viewer, public
+Moments included", because a Block is between two accounts and a signed-out
+reader would not be subject to one.
 
-Anonymous access still respects visibility, moderation, resource deletion, Location precision, age/safety restrictions, and Search/Discovery eligibility.
+Authorization still models an explicit anonymous Viewer context rather than the
+absence of one, because a request that offers no credential has to be answered
+with something. What that context is entitled to is nothing.
 
 ## Search Authorization
 
@@ -785,7 +790,7 @@ Before launch, Chronologity must define and implement:
 - privileged-action auditing;
 - role/permission propagation;
 - suspended/deactivated account policy;
-- anonymous/public Viewer policy if public content ships;
+- anonymous Viewer policy: reading history requires an account (ADR-139);
 - client capability hints;
 - secure denial/error semantics;
 - authorization tests across API and aggregator.
@@ -804,7 +809,7 @@ The following questions require explicit resolution before privileged functional
 - Can moderators view private reported content, and only within active moderation cases?
 - Do administrators automatically have moderator permissions? Recommended default: only if explicitly assigned.
 - Are direct User permission grants allowed? Recommended default: no unless a concrete need emerges.
-- Does launch expose public Timelines without login?
+- ~~Does launch expose public Timelines without login?~~ Answered by ADR-139: no. Reading history requires an account.
 - How are blocks represented in ClickHouse/read models?
 - What visibility metadata is denormalized into ClickHouse?
 - What must be revalidated at query time?

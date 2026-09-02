@@ -10,6 +10,8 @@ It has no mutations and never will have — a GraphQL mutation surface is not ad
 
 It creates no Session, refreshes none and revokes none. It verifies a token and asks whether the Session it names still authenticates. If the answer is no, the read is refused and the client goes to the API.
 
+**Reading history requires an account.** A request with no credential is answered — it can ask whether it is signed in — but it reads nothing. `moments.md:589` settles that: a Block is between two accounts, so somebody who could read signed out would have routed around one (ADR-139).
+
 It never imports from `apps/api`. Where the two need the same vocabulary, the shared type lives in `packages/contracts`.
 
 ## Running locally

@@ -374,16 +374,22 @@ Sensitive authentication credentials must not propagate deeper than necessary.
 
 # Anonymous Viewer
 
-Public Timeline reads may support an anonymous Viewer.
+**An anonymous Viewer reads no history** (ADR-139). This section previously said
+public Timeline reads _may_ support one; `docs/product/moments.md:589` had
+already settled otherwise — "every read requires a Viewer, public Moments
+included" — and every read route in the API has always behaved that way.
 
-Anonymous eligibility is not equivalent to bypassing authorization.
+The reason is a Block. A Block is between two accounts, so a signed-out reader
+is not subject to one; serving public Moments anonymously would let somebody who
+had been blocked sign out and see exactly what the Block was hiding.
 
-The system still applies:
+Anonymous remains an explicit Viewer rather than the absence of one. A request
+offering no credential resolves to it and is answered — it can learn whether it
+is signed in. Asking it for history is refused, distinguishably from a request
+whose credential failed.
 
-- public visibility;
-- moderation;
-- deletion;
-- Location/privacy rules.
+The invariant that anonymous reads still enforce eligibility therefore holds by
+construction: there are none.
 
 ---
 

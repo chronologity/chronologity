@@ -17,10 +17,17 @@ export type Viewer = AnonymousViewer | AuthenticatedViewer;
 /**
  * Somebody who has not said who they are.
  *
- * A supported state, not a degraded one. Public history is readable without an
- * account, and anonymous is not a bypass: visibility, moderation, deletion and
- * Location privacy all still apply, and the rules that need a relationship
- * simply find none.
+ * A real state rather than a failure — a request offering no credential resolves
+ * to this, and is answered. It is simply a state that reads no history.
+ *
+ * `moments.md:589` settles that: "every read requires a Viewer, public Moments
+ * included", because a Block is between two accounts and somebody who could
+ * read signed out would have routed around one. So this Viewer can be told
+ * whether it is signed in, and nothing else.
+ *
+ * An earlier version of this comment claimed the opposite — that public history
+ * is readable without an account. It was wrong, and it sat directly above the
+ * type everything downstream branches on.
  */
 export interface AnonymousViewer {
   readonly kind: "anonymous";

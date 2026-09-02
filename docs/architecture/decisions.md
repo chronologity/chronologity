@@ -4755,3 +4755,57 @@ Both `vitest.workspace-build.ts` guards gained the package, or a stale build wou
 The anonymous Viewer. `TimelineEligibility` requires a `viewerUserId`, and the aggregator will need to express somebody with no account. That is 9A's design and belongs in this package when it arrives; moving the rule as it stands was the smaller change.
 
 The aggregator gains the dependency and uses none of it yet.
+
+---
+
+# ADR-139 — Reading History Requires an Account, and an Anonymous Viewer Reads Nothing
+
+## Status
+
+Accepted. Implements a settled product decision that three architecture documents contradicted, and answers the open question at `authorization.md:807`.
+
+## Context
+
+Phase 8 gave the feed aggregator a Viewer: a request with a bearer token resolves to somebody, a request with none resolves to an anonymous Viewer, and a request whose credential fails is refused rather than downgraded (ADR-137). 9A is where that Viewer becomes an entitlement, and it could not be written without settling what an anonymous one is entitled to.
+
+Four sources disagreed.
+
+`docs/product/moments.md:589`, under *Established Moment Decisions*: "Every read requires a Viewer, public Moments included. That is what lets a Block take effect: a blocked person must not be able to route around it by signing out."
+
+`feed.md:377`: "Public Timeline reads **may** support an anonymous Viewer." `authorization.md:473`: "**If** Chronologity exposes public content without authentication…", with `:807` still carrying "Does launch expose public Timelines without login?" as an open question and `:788` conditioning the whole policy on "if public content ships".
+
+And `apps/feed-aggregator/src/auth/auth-context.ts`, written in Phase 8, asserted in a doc comment that "Public history is readable without an account" — directly above the type every downstream branch reads.
+
+Meanwhile every read route in the API carries `requireUser`. There has never been an unauthenticated read of history in the implemented product.
+
+## Decision
+
+**Reading history requires an account.** The aggregator resolves eligibility only for a Viewer with a `userId`; anonymous requests for history are refused.
+
+**Anonymous remains an explicit Viewer rather than the absence of one.** A request offering no credential is answered — it can ask whether it is signed in, and `Query.viewer` tells it. What it cannot do is read history. `feed.md`'s invariant that anonymous reads still enforce eligibility holds by construction rather than by rule: there are none.
+
+**A Viewer signed in but not yet onboarded is refused distinguishably**, with `ONBOARDING_REQUIRED` and 403 rather than `AUTHENTICATION_FAILED` and 401. ADR-137 left this to 9A. Between a Session and a User there is nobody for eligibility to be resolved for — no Blocks, no audience, no recorded age — so history is refused; but telling that person they are not authenticated would send them to sign in, which they have already done. `apps/api`'s `requireUser` draws the same line with the same code.
+
+**One function decides all three**, taking the Viewer union rather than a `userId`, so a resolver cannot reach eligibility without passing through it and a fourth Viewer state would fail to compile rather than fall through to something permissive.
+
+**Eligibility is resolved once per scope for the length of a request.** Not for speed — because two resolutions of the same scope could disagree, leaving one response whose parts disagreed about what its reader was entitled to. The API already resolves once for both halves of a jump for this reason.
+
+## Alternatives Considered
+
+Serving public Moments to signed-out readers, as `feed.md:377` permitted. Treating an unonboarded Viewer as anonymous. Deferring the whole question to 9C, when a Timeline query would exist to attach it to.
+
+## Rationale
+
+**The Block argument is the one that decides it.** `privacy.md:104` says a Block hides two people from each other "including from each other's public Moments". A Block is a relationship between two accounts, so a signed-out reader is outside it. Anonymous public reads would therefore have made signing out a way to see precisely the history a Block was hiding — not a subtle failure, and not one a later rule could patch, since the reader would be indistinguishable from any other stranger.
+
+**Nothing exercised the alternative.** No product surface reads history signed out: mobile requires an account and `apps/web` is a marketing site. Building anonymous eligibility would have shipped a security-sensitive path with nothing to test it in anger, against a "may" in one document and a settled "must not" in another.
+
+**Deferring to 9C was rejected because 9A is where eligibility is shaped.** The question is what the type expresses, not what a query does with it, and answering it later would have meant shaping `TimelineEligibility` twice.
+
+## Consequences
+
+`packages/timeline-derivation` needs no change. `TimelineEligibility.viewerUserId` stays a required string, because every Viewer that now reaches eligibility has one — which also means `apps/api` is untouched by 9A.
+
+If a public, signed-out surface is ever wanted, this is the decision to revisit, and the Block hole is the thing that revisiting must solve rather than rediscover. The eligibility rule itself would need no change: with an empty viewer, empty lists and `isAdult` false it already yields public, unmoderated, non-age-restricted Moments. What would need designing is how a Block binds on somebody with no account, and there may be no good answer.
+
+Three documents and one code comment were corrected rather than left to contradict the product: `feed.md`'s "Anonymous Viewer" section, `authorization.md`'s "Public/Anonymous Access" and its open question, and the comment in `auth-context.ts`. That comment is the one worth noticing — the code was right and the prose above it was wrong, which is the direction that eventually produces wrong code.
