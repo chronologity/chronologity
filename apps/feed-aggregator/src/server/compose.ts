@@ -1,8 +1,10 @@
 import type { FastifyInstance } from "fastify";
+import { TimelineEligibilityResolver } from "@chronologity/timeline-derivation";
 import { SessionRepository } from "../auth/session.repository.js";
 import type { AppConfig } from "../config/app-config.js";
 import { createReadStore, type ReadStore } from "../read-models/clickhouse/client.js";
 import { createDirectory, type Directory } from "../read-models/postgres/client.js";
+import { asQueryable } from "../read-models/postgres/queryable.js";
 import { buildApp } from "./app.js";
 import type { HealthCheckable } from "./health.js";
 import type { Closable } from "./server.js";
@@ -56,7 +58,13 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
   const app = await buildApp({
     config,
     dependencies: [store, directory],
-    graphql: { store, sessions: new SessionRepository(directory.pool) },
+    graphql: {
+      store,
+      sessions: new SessionRepository(directory.pool),
+      // The same rule the API applies, from the same package, over this
+      // application's own pool.
+      eligibility: new TimelineEligibilityResolver(asQueryable(directory.pool)),
+    },
   });
 
   return { app, dependencies: [store, directory], store, directory };

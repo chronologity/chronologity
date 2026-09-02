@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
+import type { TimelineEligibilityResolver } from "@chronologity/timeline-derivation";
 import { SignJWT } from "jose";
 import { afterEach, describe, it } from "vitest";
 import type { OpenSession, SessionLookup } from "../auth/session.repository.js";
@@ -32,6 +33,19 @@ const open = (identityId = IDENTITY): SessionLookup => ({
 
 const closed: SessionLookup = { findOpen: async () => undefined };
 
+/**
+ * An eligibility resolver nothing in this file reaches.
+ *
+ * The schema has no query that reads history yet, so no resolver asks. It fails
+ * loudly rather than answering, because a test that started needing it should
+ * say so rather than quietly pass on an invented answer.
+ */
+const NEVER_ASKED = {
+  resolve: () => {
+    throw new Error("a test asked for eligibility without arranging any");
+  },
+} as unknown as TimelineEligibilityResolver;
+
 let app: FastifyInstance | undefined;
 let store: ReadStore | undefined;
 
@@ -42,7 +56,11 @@ const appWith = async (
   const config = testAppConfig(overrides);
 
   store = createReadStore(config.clickhouse);
-  app = await buildApp({ config, dependencies: [], graphql: { store, sessions } });
+  app = await buildApp({
+    config,
+    dependencies: [],
+    graphql: { store, sessions, eligibility: NEVER_ASKED },
+  });
 
   return app;
 };

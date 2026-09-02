@@ -8,10 +8,15 @@ import type { HealthCheckable } from "../../server/health.js";
  * Narrow by intent. `feed.md:307` allows direct PostgreSQL access only where it
  * is limited and deliberate, and names current Viewer eligibility as the reason;
  * `feed.md:321` forbids ordinary Timeline reads from touching these tables at
- * all. So this connection exists to answer one question — does the Session this
- * token names still authenticate — because the answer changes the moment
- * somebody signs out and a token, being a claim made in the past, cannot carry
- * that.
+ * all. So this connection answers two questions and no others.
+ *
+ * Does the Session this token names still authenticate — because the answer
+ * changes the moment somebody signs out, and a token, being a claim made in the
+ * past, cannot carry that. And what may this Viewer see: Blocks, the Moments
+ * naming them within a scope, whether they are old enough, and whether the
+ * person whose history they asked for has closed it. Those four facts change
+ * while a projection lags, which is why `feed.md:459` requires them from
+ * current state rather than from the rows being filtered.
  *
  * `pg` rather than the API's TypeORM, and that is the point rather than an
  * economy. An ORM here would mean entity classes for tables this application
@@ -44,11 +49,12 @@ export function createDirectory(config: DatabaseConfig): Directory {
     database: config.database,
     user: config.user,
     password: config.password,
-    // Small on purpose. Every query through this pool is a lookup by primary
-    // key on the path of a request that is otherwise reading ClickHouse; a pool
-    // sized for Timeline traffic would be a pool sized for work that does not
-    // happen here.
-    max: 4,
+    // Sized for what a single request actually holds. Eligibility issues three
+    // statements at once per scope, so one request can occupy three connections
+    // and a pool of four would have two concurrent readers waiting on each
+    // other. Still far short of a pool sized for Timeline traffic, which is not
+    // what happens here — history is read from ClickHouse.
+    max: 10,
     connectionTimeoutMillis: 5_000,
     idleTimeoutMillis: 30_000,
   });

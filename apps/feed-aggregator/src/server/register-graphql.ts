@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import type { TimelineEligibilityResolver } from "@chronologity/timeline-derivation";
 import mercurius from "mercurius";
 import type { SessionLookup } from "../auth/session.repository.js";
 import type { AuthConfig } from "../config/auth-config.js";
@@ -15,6 +16,8 @@ export interface GraphQLWiring {
   readonly auth: AuthConfig;
   readonly sessions: SessionLookup;
   readonly store: ReadStore;
+  /** Reads current state to decide what a Viewer may see. Wrapped per request. */
+  readonly eligibility: TimelineEligibilityResolver;
 }
 
 /**
@@ -33,8 +36,8 @@ export interface GraphQLWiring {
  *
  * @param app - The application to mount on.
  * @param wiring - The depth bound and explorer setting, how to verify a token,
- *   where to ask whether a Session is open, and the store resolvers read
- *   through.
+ *   where to ask whether a Session is open, the store resolvers read through,
+ *   and how to decide what the Viewer may see of it.
  * @returns Nothing.
  */
 export async function registerGraphql(app: FastifyInstance, wiring: GraphQLWiring): Promise<void> {
@@ -44,7 +47,7 @@ export async function registerGraphql(app: FastifyInstance, wiring: GraphQLWirin
     await scope.register(mercurius, {
       schema: loadSchema(),
       resolvers: queryResolvers,
-      context: createContext(wiring.store),
+      context: createContext(wiring.store, wiring.eligibility),
       // No mutations, and `defineMutation` stays off so the schema does not
       // grow an empty one. A read service that advertised a mutation type
       // would be inviting the first person in a hurry to add one.

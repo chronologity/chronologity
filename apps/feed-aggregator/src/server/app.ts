@@ -1,3 +1,4 @@
+import type { TimelineEligibilityResolver } from "@chronologity/timeline-derivation";
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 import type { SessionLookup } from "../auth/session.repository.js";
 import type { AppConfig } from "../config/app-config.js";
@@ -37,6 +38,7 @@ export interface BuildAppOptions {
     | {
         readonly store: ReadStore;
         readonly sessions: SessionLookup;
+        readonly eligibility: TimelineEligibilityResolver;
       }
     | undefined;
 }
@@ -112,6 +114,7 @@ export async function buildApp({
       auth: config.auth,
       sessions: graphql.sessions,
       store: graphql.store,
+      eligibility: graphql.eligibility,
     });
   }
 

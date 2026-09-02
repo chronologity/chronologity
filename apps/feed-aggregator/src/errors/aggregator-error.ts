@@ -37,14 +37,38 @@ export abstract class AggregatorError extends Error {
  * not the caller's business, and saying would tell somebody probing which check
  * to fix next.
  *
- * Note what this is *not*: an unauthenticated request is not this error. A
- * request with no credentials at all is an anonymous Viewer, which is a state
- * the product supports. This is a request that tried to say who it was and
- * failed — and it fails closed rather than falling back to anonymous, so a
- * client with an expired token is told to refresh rather than quietly shown
- * less of somebody's history than it asked for.
+ * It also refuses a request that offered nothing and then asked for history.
+ * Establishing a Viewer and being entitled to read are different questions: a
+ * request with no credentials resolves to an anonymous Viewer, which is a real
+ * state, and that Viewer may read nothing. `moments.md:589` requires it —
+ * "every read requires a Viewer, public Moments included" — because a Block is
+ * between two accounts, so a blocked person who could read signed out would
+ * have routed around it.
+ *
+ * Failing closed rather than falling back to anonymous matters for the other
+ * case too: a client with an expired token is told to refresh rather than
+ * quietly shown less of somebody's history than it asked for.
  */
 export class UnauthenticatedError extends AggregatorError {
   override readonly code = "AUTHENTICATION_FAILED" as const;
   override readonly status = 401;
+}
+
+/**
+ * The request is signed in, but there is no account behind it yet.
+ *
+ * A Session exists from the moment somebody signs in; a User exists once they
+ * finish creating an account. Between the two there is nobody for eligibility
+ * to be resolved for — no Blocks, no audience, no recorded age — so history is
+ * refused.
+ *
+ * Its own code rather than an authentication failure, and that distinction is
+ * the whole point. Telling this person they are not authenticated would send
+ * them to sign in, which they have already done; telling them onboarding is
+ * unfinished sends them where the problem actually is. `apps/api` draws the
+ * same line with the same code, so a client handles one answer rather than two.
+ */
+export class OnboardingRequiredError extends AggregatorError {
+  override readonly code = "ONBOARDING_REQUIRED" as const;
+  override readonly status = 403;
 }

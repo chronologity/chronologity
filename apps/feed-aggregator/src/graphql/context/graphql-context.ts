@@ -1,5 +1,6 @@
 import type { ClickHouseClient } from "@clickhouse/client";
 import type { Viewer } from "../../auth/auth-context.js";
+import type { RequestEligibility } from "../../auth/request-eligibility.js";
 import type { Logger } from "../../observability/logger.js";
 
 /**
@@ -32,6 +33,18 @@ export interface GraphQLContext {
   readonly clickhouse: ClickHouseClient;
   /** Which projection version this process reads. Every query names it. */
   readonly projectionVersion: string;
+  /**
+   * What this Viewer may see, resolved on demand and once per scope.
+   *
+   * On the context rather than constructed by each resolver, so that one
+   * response cannot hold two answers to the same question — and so a resolver
+   * cannot reach eligibility for a Viewer other than the one this request
+   * established.
+   *
+   * Asking it refuses a request with no account: reading history requires one
+   * (`moments.md:589`).
+   */
+  readonly eligibility: RequestEligibility;
 }
 
 /**
