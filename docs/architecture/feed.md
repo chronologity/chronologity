@@ -1751,10 +1751,12 @@ An anonymous context is a Viewer of its own kind rather than an authenticated on
 
 The server is Mercurius on Fastify, schema-first, with SDL under `src/graphql/schema/` (ADR-136). Depth is bounded by configuration from the start.
 
+**Connections rather than custom slice types** (ADR-140): `edges` of `{ cursor, node }` alongside a conventional `pageInfo`, so a mobile GraphQL library pages without being taught the shape. A Timeline connection additionally carries its scope.
+
+**Types are named after the contract they correspond to** in `packages/contracts`, so `ReadableTimelineEntry` and `WithheldTimelineEntry` rather than a Timeline-level `Moment`; `Moment` is the depth type. A Moment the reader may not see is its own type in a union rather than the readable one with nullable fields.
+
 Still open:
 
-- Exact schema naming?
-- Connections versus custom slice types?
 - Persisted queries at launch?
 - Complexity calculation strategy beyond depth?
 - Maximum page sizes?

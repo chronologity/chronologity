@@ -4809,3 +4809,63 @@ Serving public Moments to signed-out readers, as `feed.md:377` permitted. Treati
 If a public, signed-out surface is ever wanted, this is the decision to revisit, and the Block hole is the thing that revisiting must solve rather than rediscover. The eligibility rule itself would need no change: with an empty viewer, empty lists and `isAdult` false it already yields public, unmoderated, non-age-restricted Moments. What would need designing is how a Block binds on somebody with no account, and there may be no good answer.
 
 Three documents and one code comment were corrected rather than left to contradict the product: `feed.md`'s "Anonymous Viewer" section, `authorization.md`'s "Public/Anonymous Access" and its open question, and the comment in `auth-context.ts`. That comment is the one worth noticing — the code was right and the prose above it was wrong, which is the direction that eventually produces wrong code.
+
+---
+
+# ADR-140 — The Read Contract Follows the Connection Convention, and a Withheld Moment Is Its Own Type
+
+## Status
+
+Accepted. Answers two of `feed.md`'s open GraphQL questions and settles the naming convention ADR-136 left open.
+
+## Context
+
+9B writes the types 9C through 9G will return. Two shape decisions had to be made before any of them, because both are visible to mobile and expensive to change once a client is written against them.
+
+`feed.md:1757` asked "Connections versus custom slice types?" and left it open. `timeline.md:766` describes a slice as carrying "ordered nodes/items; start/end cursor; previous/next availability; scope; scale" — connection-shaped data, without saying whether to adopt the convention that shapes it.
+
+Separately, `packages/contracts/src/timeline.ts` models a Timeline entry as a discriminated union: a readable Moment, and a withheld one carrying its date and nothing else. That shape exists because somebody may take part in a Moment they may not read, and their own history should not have a hole they cannot see the shape of.
+
+## Decision
+
+**A page follows the GraphQL connection convention**: `edges` of `{ cursor, node }`, alongside a `pageInfo` naming the ends and whether there is more each way. Field names are the conventional ones, so a mobile GraphQL library pages this without being taught the shape.
+
+`TimelineConnection` additionally carries `scope`, because `timeline.md:766` asks a slice to say what it is, and a client restoring navigation needs it.
+
+**Cursors are nullable on `pageInfo` and non-null on an edge.** An empty page has no ends; an edge that exists has a position. Making them non-null would force a lie about the empty case.
+
+**A withheld Moment is its own type**, in a union with the readable one, exactly as the contract models it. The contract's own reasoning governs: "a client cannot read a field that is absent, and a missing field is indistinguishable from one that was never sent."
+
+**Types are named after the contract**, so `ReadableTimelineEntry` and `WithheldTimelineEntry` rather than a Timeline-level `Moment`. `Moment` is reserved for the depth type, which is a different and much fuller thing.
+
+**A refused cursor is now a semantic error.** The `Cursor` scalar parses at the boundary and translates `packages/timeline-derivation`'s `CursorError` into a `VALIDATION_FAILED` the formatter presents. Until this scalar existed, a tampered cursor answered `INTERNAL_ERROR` with "An unexpected error occurred" — the package's error is deliberately not one of the aggregator's, and the formatter preserves a message only for errors it recognises.
+
+**`DateTime` refuses a timestamp with no offset**, and refuses a day that did not happen.
+
+## Alternatives Considered
+
+A custom slice type in Chronologity's own vocabulary; nodes with a conventional `pageInfo` but no per-item wrapping; a single entry type with a `readable` flag and nullable fields.
+
+## Rationale
+
+**The convention buys behaviour rather than familiarity.** Mobile's GraphQL library implements paging against these field names. A slice named in Chronologity's own vocabulary would read better against the product documents and would mean writing that paging by hand in the client — which is the wrong place for it, since the client is the one thing here that will exist in many versions at once.
+
+**Nullable-with-a-flag was rejected on the same ground the contract rejected it.** Nothing would stop a client asking a withheld Moment for its caption; it would simply receive null, indistinguishably from a field that failed to load. A union makes that query fail to compile against the schema.
+
+**The offset is the field that made the union worth the trouble.** A withheld entry carries no `occurrenceOffsetMinutes`, because an offset is a weak statement about where somebody was — the one field in the occurrence set that says anything about place rather than time. With one nullable type that omission is a runtime decision somebody can forget; with two types it is the schema.
+
+**A whole-schema snapshot was rejected for the tests.** `testing.md` asks for schema shape, nullability, pagination types, unions and error contracts, and warns against "giant snapshots that obscure semantic changes". The assertions are targeted, and the two that matter most assert *absence*: the withheld type's fields, and that media exposes no storage key, URL or upload state.
+
+## Consequences
+
+Every Timeline result now costs a wrapper object per entry. That is the price of the convention and it is paid on every page.
+
+The schema defines types no query returns yet. They are reachable by introspection because Mercurius builds from SDL and keeps every declared type, and mobile can be written against them before 9C fills them in — which is the point of a schema phase.
+
+Two things were found and fixed rather than left: the cursor error path, and `schema.graphql` still claiming public history is readable without an account, which ADR-139 had corrected in three other places and missed here.
+
+## Deliberately Not Here
+
+Query fields. A field declared before something can answer it returns null, so `Query` still exposes only `viewer`, and a test asserts it.
+
+`longitude-latitude.scalar.ts` from the canonical tree. Coordinates appear only at exact disclosure and `Float` carries them faithfully; that file would have been created to populate a tree rather than because it acquired responsibility.
