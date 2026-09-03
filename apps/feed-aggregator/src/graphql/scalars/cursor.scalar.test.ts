@@ -16,7 +16,11 @@ import { cursorScalar } from "./cursor.scalar.js";
  * which tells a client the service broke when in fact its request was refused.
  */
 
-const POSITION = { occurredAt: new Date("1998-07-04T19:30:00.000Z"), momentId: randomUUID() };
+const POSITION = {
+  kind: "timeline",
+  occurredAt: new Date("1998-07-04T19:30:00.000Z"),
+  momentId: randomUUID(),
+} as const;
 
 /** The code and message a refusal carried, or a failure if it did not refuse. */
 const refusalFrom = (call: () => unknown): { code: unknown; message: string } => {

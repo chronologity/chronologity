@@ -20,7 +20,8 @@ const MOMENT = randomUUID();
 
 const person = (): TimelineViewArguments => ({ scope: { type: "PERSON", id: PERSON } });
 const place = (): TimelineViewArguments => ({ scope: { type: "LOCATION", id: PLACE } });
-const at = (iso: string) => ({ occurredAt: new Date(iso), momentId: MOMENT });
+const at = (iso: string) =>
+  ({ kind: "timeline", occurredAt: new Date(iso), momentId: MOMENT }) as const;
 
 describe("the scope", () => {
   it("reads a person", () => {

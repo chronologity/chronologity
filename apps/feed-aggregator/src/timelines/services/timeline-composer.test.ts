@@ -88,10 +88,12 @@ describe("where the page sits", () => {
     const { pageInfo } = connectionFor(slice([newer, older]), viewing(), false);
 
     assert.deepEqual(pageInfo.startCursor, {
+      kind: "timeline",
       occurredAt: new Date("2014-05-02T00:00:00.000Z"),
       momentId: newer.moment_id,
     });
     assert.deepEqual(pageInfo.endCursor, {
+      kind: "timeline",
       occurredAt: new Date("2014-05-01T00:00:00.000Z"),
       momentId: older.moment_id,
     });
@@ -111,6 +113,7 @@ describe("where the page sits", () => {
     const { edges } = connectionFor(slice([row]), viewing(), false);
 
     assert.deepEqual(edges[0]?.cursor, {
+      kind: "timeline",
       occurredAt: new Date("2014-05-01T00:00:00.000Z"),
       momentId: row.moment_id,
     });

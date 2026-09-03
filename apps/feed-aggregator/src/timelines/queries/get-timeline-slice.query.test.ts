@@ -28,7 +28,11 @@ describe("paging a Timeline", () => {
 
   it("resumes from a supplied cursor, and says there is something before it", async () => {
     const asked: Asked = {};
-    const after = { occurredAt: new Date("2015-01-01T00:00:00Z"), momentId: randomUUID() };
+    const after = {
+      kind: "timeline",
+      occurredAt: new Date("2015-01-01T00:00:00Z"),
+      momentId: randomUUID(),
+    } as const;
     const context = contextReturning(PERSON, { rows: [reading(PERSON)], more: false }, asked);
 
     const connection = await getTimelineSlice(view, { first: 10, after }, context);

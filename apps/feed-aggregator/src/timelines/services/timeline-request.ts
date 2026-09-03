@@ -5,6 +5,7 @@ import {
   type ViewSpecification,
 } from "@chronologity/contracts";
 import type { TimelinePosition, TimelineScopeRef } from "@chronologity/timeline-derivation";
+import { expectKind, type Position } from "../../pagination/cursors.js";
 import { ValidationError } from "../../errors/aggregator-error.js";
 
 /**
@@ -85,9 +86,9 @@ export interface TimelineViewArguments {
  */
 export interface PagingArguments {
   readonly first?: number | null;
-  readonly after?: TimelinePosition | null;
+  readonly after?: Position | null;
   readonly last?: number | null;
-  readonly before?: TimelinePosition | null;
+  readonly before?: Position | null;
 }
 
 /**
@@ -142,7 +143,11 @@ export function specificationFor(
   // walking back through history.
   const backward = last !== undefined || before !== undefined;
   const limit = backward ? last : first;
-  const from = backward ? before : after;
+  const supplied = backward ? before : after;
+  // Narrowed rather than trusted. One `Cursor` scalar serves every connection,
+  // so a media cursor reaches this argument as readily as a Timeline one — and
+  // it would decode to something plausible rather than to an error.
+  const from = supplied === undefined ? undefined : expectKind(supplied, "timeline");
   const filters = view.filters ?? undefined;
   const authorUserId = filters?.authorUserId ?? undefined;
   const locationId = filters?.locationId ?? undefined;

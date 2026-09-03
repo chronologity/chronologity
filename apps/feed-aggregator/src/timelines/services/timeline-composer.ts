@@ -1,5 +1,6 @@
 import type { ViewSpecification } from "@chronologity/contracts";
-import type { TimelinePosition, TimelineReading } from "@chronologity/timeline-derivation";
+import type { TimelineReading } from "@chronologity/timeline-derivation";
+import type { Position } from "../../pagination/cursors.js";
 import type { TimelineSlice } from "../../read-models/clickhouse/timeline-read-model.js";
 
 /**
@@ -64,14 +65,14 @@ export type TimelineEntry = ReadableEntry | WithheldEntry;
 /** One Moment in a page, with the position it sits at. */
 export interface TimelineEdge {
   /** Serialised by the `Cursor` scalar, which is what makes it opaque. */
-  readonly cursor: TimelinePosition;
+  readonly cursor: Position;
   readonly node: TimelineEntry;
 }
 
 /** Where a page sits, and whether there is more history either side of it. */
 export interface TimelinePageInfo {
-  readonly startCursor: TimelinePosition | null;
-  readonly endCursor: TimelinePosition | null;
+  readonly startCursor: Position | null;
+  readonly endCursor: Position | null;
   readonly hasNextPage: boolean;
   readonly hasPreviousPage: boolean;
 }
@@ -166,10 +167,12 @@ export function entryFor(row: TimelineReading): TimelineEntry {
  * The position a row occupies.
  *
  * @param row - The row.
- * @returns Its place in the sort tuple, which is what a cursor encodes.
+ * @returns Its place in the sort tuple, which is what a cursor encodes. Tagged
+ *   as a Timeline position, so a client handing it to a connection that pages
+ *   something else is refused rather than resumed at a coincidence.
  */
-export function positionOf(row: TimelineReading): TimelinePosition {
-  return { occurredAt: instantOf(row.occurred_at), momentId: row.moment_id };
+export function positionOf(row: TimelineReading): Position {
+  return { kind: "timeline", occurredAt: instantOf(row.occurred_at), momentId: row.moment_id };
 }
 
 /**

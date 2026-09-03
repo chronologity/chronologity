@@ -1,10 +1,6 @@
-import {
-  CursorError,
-  decodeCursor,
-  encodeCursor,
-  type TimelinePosition,
-} from "@chronologity/timeline-derivation";
+import { CursorError } from "@chronologity/timeline-derivation";
 import { GraphQLError, Kind, type ValueNode } from "graphql";
+import { decodePosition, encodePosition, type Position } from "../../pagination/cursors.js";
 
 /**
  * Where a page of history resumes.
@@ -43,13 +39,13 @@ const REFUSED = "VALIDATION_FAILED";
  *   issued. Carries the stable code the error formatter reads, so the client
  *   receives a refusal rather than an internal error.
  */
-function parse(value: unknown): TimelinePosition {
+function parse(value: unknown): Position {
   if (typeof value !== "string") {
     throw refuse("A cursor is a string");
   }
 
   try {
-    return decodeCursor(value);
+    return decodePosition(value);
   } catch (error) {
     // The package's message is already written to be shown — "not a usable
     // cursor", or one from an encoding this Timeline cannot read — and says
@@ -80,6 +76,11 @@ function refuse(message: string): GraphQLError {
  * Both `parseValue` and `parseLiteral` are supplied because GraphQL derives
  * neither from the other: a cursor sent as a variable takes the first, one
  * written into the document takes the second, and a client will do both.
+ *
+ * One scalar serves every connection, so what it decodes is a position of some
+ * kind rather than a Timeline position. Which kind a given connection can use is
+ * that connection's business — `expectKind` is where a cursor from the wrong one
+ * is refused, because the scalar cannot know which field it is being read for.
  */
 export const cursorScalar = {
   /**
@@ -91,18 +92,13 @@ export const cursorScalar = {
    *   position, which is a defect here rather than in the request.
    */
   serialize(value: unknown): string {
-    if (
-      typeof value !== "object" ||
-      value === null ||
-      !("occurredAt" in value) ||
-      !("momentId" in value)
-    ) {
+    if (typeof value !== "object" || value === null || !("kind" in value)) {
       throw new GraphQLError("A cursor could not be produced", {
         extensions: { code: "INTERNAL_ERROR" },
       });
     }
 
-    return encodeCursor(value as TimelinePosition);
+    return encodePosition(value as Position);
   },
 
   /**
@@ -112,7 +108,7 @@ export const cursorScalar = {
    * @returns The position it names.
    * @throws {GraphQLError} If it is not a cursor this Timeline issued.
    */
-  parseValue(value: unknown): TimelinePosition {
+  parseValue(value: unknown): Position {
     return parse(value);
   },
 
@@ -124,7 +120,7 @@ export const cursorScalar = {
    * @throws {GraphQLError} If it is not a string literal, or not a cursor this
    *   Timeline issued.
    */
-  parseLiteral(node: ValueNode): TimelinePosition {
+  parseLiteral(node: ValueNode): Position {
     if (node.kind !== Kind.STRING) {
       throw refuse("A cursor is a string");
     }
