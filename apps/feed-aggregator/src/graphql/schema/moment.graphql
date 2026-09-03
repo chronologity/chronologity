@@ -125,8 +125,12 @@ type Moment {
 
   """
   Its media, a page at a time.
+
+  Paged because a Moment may hold any number of images and videos. The bound is
+  on the request, never on the Moment: a client walks the whole collection
+  through repeated pages, and nothing here caps how much a Moment may contain.
   """
-  media: MediaConnection!
+  media(first: Int, after: Cursor): MediaConnection!
 
   """
   Who may see it.
@@ -137,6 +141,41 @@ type Moment {
   How it has been responded to.
   """
   reactions: ReactionSummary!
+
+  """
+  What was said about it, oldest first.
+
+  A field rather than a root query, because the permission to read a discussion
+  is the Moment's and has already been established by the time this is reached.
+  A client that does not ask for comments pays for none of them.
+
+  Replies are read by naming their thread rather than through a field on a
+  comment: a connection per comment would be one query per row of a page, which
+  is the shape this service exists to avoid.
+  """
+  comments(first: Int, after: Cursor, thread: ID): CommentConnection!
+
+  """
+  Who may join the discussion.
+
+  Distinct from who may read it. Told so a client knows whether to offer a way
+  to reply, rather than discovering the answer by being refused.
+  """
+  commentPolicy: CommentPolicy!
+
+  """
+  What this Moment is connected to, in both directions.
+
+  A list rather than a page: the vocabulary is deliberately small, and history
+  connected to a hundred other Moments is not the case worth designing for
+  first.
+  """
+  relationships(limit: Int): [MomentRelationship!]!
+
+  """
+  Whether you have marked this as mattering to you.
+  """
+  personalSignificance: PersonalSignificance!
 
   """
   When it was recorded, which is not when it happened.

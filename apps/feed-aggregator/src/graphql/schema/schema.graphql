@@ -72,6 +72,16 @@ type Query {
     """
     before: Cursor
   ): TimelineConnection!
+
+  """
+  One Moment, in full.
+
+  Null is the only refusal, and it means every reason at once: there is no such
+  Moment, it is private, its author blocked you, you are not on its list, or
+  Chronologity withheld it. Telling them apart would disclose which one applied,
+  and knowing an identifier has never granted access to what it names.
+  """
+  moment(id: ID!): Moment
 }
 
 """

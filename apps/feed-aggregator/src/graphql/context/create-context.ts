@@ -1,9 +1,11 @@
 import type { FastifyRequest } from "fastify";
+import type { Pool } from "pg";
 import { ANONYMOUS } from "../../auth/auth-context.js";
 import type { TimelineEligibilityResolver } from "@chronologity/timeline-derivation";
 import { RequestEligibility } from "../../auth/request-eligibility.js";
 import type { ReadStore } from "../../read-models/clickhouse/client.js";
 import { TimelineReadModel } from "../../read-models/clickhouse/timeline-read-model.js";
+import { MomentReadModel } from "../../read-models/postgres/moment-read-model.js";
 import type { GraphQLContext } from "./graphql-context.js";
 
 /**
@@ -25,11 +27,19 @@ import type { GraphQLContext } from "./graphql-context.js";
  * @param eligibility - The shared resolver. Wrapped per request rather than
  *   used directly, so that what a Viewer may see is decided once per scope for
  *   the length of one response.
+ * @param directory - The read-only PostgreSQL pool, for the reads that cannot
+ *   come from the Timeline projection: a Moment's own detail, which the
+ *   projection deliberately does not hold.
  * @returns A function Mercurius calls once per request, producing the context
  *   every resolver receives.
  */
-export function createContext(store: ReadStore, eligibility: TimelineEligibilityResolver) {
+export function createContext(
+  store: ReadStore,
+  eligibility: TimelineEligibilityResolver,
+  directory: Pool,
+) {
   const timeline = new TimelineReadModel(store.client, store.projectionVersion);
+  const moments = new MomentReadModel(directory);
 
   return function contextFor(request: FastifyRequest): GraphQLContext {
     const viewer = request.viewer ?? ANONYMOUS;
@@ -47,6 +57,7 @@ export function createContext(store: ReadStore, eligibility: TimelineEligibility
       // client and a projection version and nothing about who is asking, so
       // sharing it cannot leak a Viewer between requests.
       timeline,
+      moments,
     };
   };
 }

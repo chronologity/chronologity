@@ -64,6 +64,10 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
       // The same rule the API applies, from the same package, over this
       // application's own pool.
       eligibility: new TimelineEligibilityResolver(asQueryable(directory.pool)),
+      // The same pool again, for a different question. Eligibility asks who a
+      // Viewer is; this reads what a Moment says, which the Timeline projection
+      // deliberately does not hold.
+      directory: directory.pool,
     },
   });
 

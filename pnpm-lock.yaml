@@ -135,6 +135,9 @@ importers:
       '@chronologity/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@chronologity/moment-access':
+        specifier: workspace:*
+        version: link:../../packages/moment-access
       '@chronologity/timeline-derivation':
         specifier: workspace:*
         version: link:../../packages/timeline-derivation

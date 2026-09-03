@@ -1,0 +1,31 @@
+"""
+Whether this reader has marked a Moment as mattering to them.
+
+One private mark, and theirs alone. Which Moments matter to somebody is closer
+to a diary than to a reaction, so there is no shape here that could carry
+anybody else's — no count of how many people marked it, no list, no aggregate.
+
+**There is no score here, and that is a decision rather than an omission.**
+Chronologity does compute historical significance: derived per scope and per
+dimension, versioned, with its provenance kept. None of it is exposed. A number
+beside a Moment would invite a leaderboard of somebody's life, and significance
+is not popularity, not engagement, and not a thing one scalar can state
+correctly. What is computed serves navigation — jumping to what mattered — and
+that arrives with historical jumps.
+
+A mark says something about this person's relationship to the Moment and
+nothing about universal importance.
+"""
+type PersonalSignificance {
+  momentId: ID!
+
+  """
+  Whether this reader has marked it.
+  """
+  significant: Boolean!
+
+  """
+  When they marked it, or null if they have not.
+  """
+  markedAt: DateTime
+}

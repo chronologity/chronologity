@@ -158,3 +158,61 @@ describe("RequestEligibility", () => {
     await assert.rejects(() => request.forScope(PLACE), UnauthenticatedError);
   });
 });
+
+describe("what is true of the Viewer regardless of what they read", () => {
+  it("resolves once and answers the same thing twice", async () => {
+    // Correctness rather than cost. One response may read a Moment and the far
+    // ends of its relationships, and a birthday falling between two of them
+    // would leave a response whose parts disagreed about its reader.
+    let asked = 0;
+    const eligibility = new RequestEligibility(
+      {
+        viewerFacts: async (viewerUserId: string) => {
+          asked += 1;
+
+          return { viewerUserId, isAdult: true };
+        },
+      } as unknown as TimelineEligibilityResolver,
+      signedIn(USER),
+    );
+
+    const first = await eligibility.forViewer();
+    const second = await eligibility.forViewer();
+
+    assert.equal(asked, 1);
+    assert.equal(first, second);
+  });
+
+  it("refuses a request with no account, without remembering the refusal", async () => {
+    const eligibility = new RequestEligibility(
+      { viewerFacts: async () => assert.fail("asked for facts about nobody") } as unknown as TimelineEligibilityResolver,
+      ANONYMOUS,
+    );
+
+    await assert.rejects(() => eligibility.forViewer(), UnauthenticatedError);
+    await assert.rejects(() => eligibility.forViewer(), UnauthenticatedError);
+  });
+
+  it("does not keep a failed lookup", async () => {
+    // A transient database error must not become every later reader's answer.
+    let attempt = 0;
+    const eligibility = new RequestEligibility(
+      {
+        viewerFacts: async (viewerUserId: string) => {
+          attempt += 1;
+
+          if (attempt === 1) {
+            throw new Error("the database was briefly unreachable");
+          }
+
+          return { viewerUserId, isAdult: false };
+        },
+      } as unknown as TimelineEligibilityResolver,
+      signedIn(USER),
+    );
+
+    await assert.rejects(() => eligibility.forViewer());
+
+    assert.deepEqual(await eligibility.forViewer(), { viewerUserId: USER, isAdult: false });
+  });
+});

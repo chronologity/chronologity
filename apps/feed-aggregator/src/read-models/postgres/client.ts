@@ -6,9 +6,9 @@ import type { HealthCheckable } from "../../server/health.js";
  * The aggregator's PostgreSQL boundary.
  *
  * Narrow by intent. `feed.md:307` allows direct PostgreSQL access only where it
- * is limited and deliberate, and names current Viewer eligibility as the reason;
- * `feed.md:321` forbids ordinary Timeline reads from touching these tables at
- * all. So this connection answers two questions and no others.
+ * is limited and deliberate; `feed.md:321` forbids ordinary Timeline reads from
+ * touching these tables at all. So this connection answers three questions and
+ * no others, and the third was added deliberately.
  *
  * Does the Session this token names still authenticate — because the answer
  * changes the moment somebody signs out, and a token, being a claim made in the
@@ -17,6 +17,15 @@ import type { HealthCheckable } from "../../server/health.js";
  * person whose history they asked for has closed it. Those four facts change
  * while a projection lags, which is why `feed.md:459` requires them from
  * current state rather than from the rows being filtered.
+ *
+ * And, since 9D, what a Moment actually says. The Timeline projection holds
+ * where a Moment sits in history and deliberately not its caption, its media or
+ * its discussion, so opening one has nowhere else to read from (ADR-142).
+ * Projecting depth into ClickHouse instead would mean storing reaction and
+ * comment counts, which two decisions refused to store because a stored count
+ * goes wrong. The bound that matters is unchanged: this happens when somebody
+ * taps a Moment, never while they scroll, and a Timeline page still touches
+ * none of these tables.
  *
  * `pg` rather than the API's TypeORM, and that is the point rather than an
  * economy. An ORM here would mean entity classes for tables this application

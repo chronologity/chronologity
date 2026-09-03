@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { GraphQLError } from "graphql";
+import type { Pool } from "pg";
 import type { TimelineEligibilityResolver } from "@chronologity/timeline-derivation";
 import { SignJWT } from "jose";
 import { afterEach, describe, it } from "vitest";
@@ -47,7 +48,23 @@ const NEVER_ASKED = {
   resolve: () => {
     throw new Error("a test asked for eligibility without arranging any");
   },
+  viewerFacts: () => {
+    throw new Error("a test asked about the Viewer without arranging anything");
+  },
 } as unknown as TimelineEligibilityResolver;
+
+/**
+ * A pool nothing in this file reaches.
+ *
+ * Reading a Moment is the only thing that would, and no test here does — these
+ * are about the transport. It fails loudly rather than answering, for the same
+ * reason as the resolver above.
+ */
+const NEVER_READ = {
+  query: () => {
+    throw new Error("a test read a Moment without arranging any");
+  },
+} as unknown as Pool;
 
 let app: FastifyInstance | undefined;
 let store: ReadStore | undefined;
@@ -62,7 +79,7 @@ const appWith = async (
   app = await buildApp({
     config,
     dependencies: [],
-    graphql: { store, sessions, eligibility: NEVER_ASKED },
+    graphql: { store, sessions, eligibility: NEVER_ASKED, directory: NEVER_READ },
   });
 
   return app;

@@ -1,0 +1,134 @@
+"""
+Who may join the discussion on a Moment.
+
+Seeing a Moment does not by itself mean being able to speak on it; this is what
+separates the two. `FOLLOWERS` grants no access — a stranger who could read the
+Moment still can — because it governs participation rather than sight.
+"""
+enum CommentPolicy {
+  """
+  Anybody who may read the Moment.
+  """
+  ANYONE
+
+  """
+  People who follow the author.
+  """
+  FOLLOWERS
+
+  """
+  Nobody. What was already said stays readable.
+  """
+  DISABLED
+}
+
+"""
+Somebody a comment refers to.
+
+Resolved to identity rather than to a handle, so that a rename does not silently
+repoint years-old text at whoever holds the name now.
+
+Never a claim that the person was there. Participation is a Moment's, and only
+the named person can accept it.
+"""
+type CommentMention {
+  userId: ID!
+
+  """
+  Their handle as it stands now, which may not be the one that was typed.
+  """
+  handle: String!
+}
+
+"""
+Something somebody said about a Moment.
+
+Conversation, not history. When a comment was written says nothing about when
+the experience happened, and no amount of discussion moves a Moment in time.
+
+**A deleted comment with replies is still here**, carrying neither body nor
+author. The replies need something to hang from, and a thread that silently
+reparented itself would rewrite what people were answering.
+"""
+type Comment {
+  commentId: ID!
+  momentId: ID!
+
+  """
+  Who wrote it. Null on a comment that was deleted.
+  """
+  author: PublicUser
+
+  """
+  What they wrote. Null on a comment that was deleted.
+  """
+  body: String
+
+  """
+  Whether this is a place a comment used to be.
+
+  Told rather than inferred from a null body: a client that guessed would show
+  "loading" where it should show that somebody withdrew what they said.
+  """
+  deleted: Boolean!
+
+  """
+  The top-level comment this belongs to, or null when it is one.
+  """
+  threadCommentId: ID
+
+  """
+  Which comment was actually addressed, where that differs from the thread.
+
+  Replying to a reply joins that reply's thread rather than nesting deeper, so
+  one level of nesting is the whole shape — but who was being answered survives.
+  """
+  inReplyToCommentId: ID
+
+  mentions: [CommentMention!]!
+
+  """
+  How this comment has been responded to, and your own response.
+  """
+  reactions: ReactionSummary!
+
+  """
+  Its position in the conversation. Never rewritten by an edit.
+  """
+  createdAt: DateTime!
+
+  """
+  When the visible text last changed, or null if it never has.
+  """
+  editedAt: DateTime
+}
+
+"""
+One comment in a page, with the position it sits at.
+"""
+type CommentEdge {
+  cursor: Cursor!
+  node: Comment!
+}
+
+"""
+A page of discussion, **oldest first**.
+
+The one list in Chronologity that does not run newest first, and deliberately:
+showing the beginning of a conversation preserves the context that makes later
+replies comprehensible. Ordering by engagement would make it unreadable in a
+different way.
+"""
+type CommentConnection {
+  edges: [CommentEdge!]!
+  pageInfo: PageInfo!
+
+  """
+  Every comment on the Moment that this reader may see, replies included.
+
+  Excludes comments that were deleted, which the page itself still carries when
+  they hold replies — so a page can be longer than this number, and that is not
+  a contradiction but the tombstones being counted honestly as nothing.
+  """
+  total: Int!
+}

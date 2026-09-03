@@ -36,6 +36,8 @@ beforeEach(async () => {
       store,
       sessions: NOTHING_TO_LOOK_UP,
       eligibility: {} as never,
+      // Never reached: these assertions are introspection, which touches no store.
+      directory: {} as never,
     },
   });
 });
@@ -69,6 +71,10 @@ const typeNamed = async (name: string) => {
 /** The field names a type declares. */
 const fieldsOf = async (name: string): Promise<string[]> =>
   ((await typeNamed(name))?.fields ?? []).map((field: { name: string }) => field.name);
+
+/** The values an enum declares. */
+const enumValuesOf = async (name: string): Promise<string[]> =>
+  ((await typeNamed(name))?.enumValues ?? []).map((value: { name: string }) => value.name);
 
 /** Whether a field is non-null. */
 const isRequired = async (typeName: string, fieldName: string): Promise<boolean> => {
@@ -232,12 +238,113 @@ describe("occurrence", () => {
   });
 });
 
+describe("a Moment in full", () => {
+  it("is null when it may not be had, so one refusal covers every reason", async () => {
+    // No such Moment, private, blocked, not on its list, withheld: telling them
+    // apart would disclose which applied, and knowing an identifier has never
+    // granted access to what it names.
+    assert.equal(await isRequired("Query", "moment"), false);
+  });
+
+  it("pages its media and its discussion, and neither connection is optional", async () => {
+    assert.equal(await isRequired("Moment", "media"), true);
+    assert.equal(await isRequired("Moment", "comments"), true);
+    assert.ok((await fieldsOf("CommentConnection")).includes("pageInfo"));
+    assert.ok((await fieldsOf("CommentConnection")).includes("total"));
+  });
+
+  it("says who may join the discussion, separately from who may read it", async () => {
+    assert.equal(await isRequired("Moment", "commentPolicy"), true);
+    assert.deepEqual((await enumValuesOf("CommentPolicy")).sort(), [
+      "ANYONE",
+      "DISABLED",
+      "FOLLOWERS",
+    ]);
+  });
+});
+
+describe("comments", () => {
+  it("lets a tombstone carry neither author nor words", async () => {
+    // A deleted comment with live replies still appears: the replies need
+    // something to hang from. What it loses is who wrote it and what they said.
+    assert.equal(await isRequired("Comment", "author"), false);
+    assert.equal(await isRequired("Comment", "body"), false);
+    assert.equal(await isRequired("Comment", "deleted"), true);
+  });
+
+  it("keeps its position in the conversation non-null", async () => {
+    // The ordering the page is keyed on. A null here would be a comment that
+    // could not be paged past.
+    assert.equal(await isRequired("Comment", "createdAt"), true);
+    assert.equal(await isRequired("Comment", "editedAt"), false);
+  });
+});
+
+describe("what a Moment is connected to", () => {
+  it("keeps who claimed it, and offers no confidence score", async () => {
+    const fields = await fieldsOf("MomentRelationship");
+
+    assert.ok(fields.includes("assertedByUserId"));
+    assert.ok(fields.includes("origin"));
+
+    for (const absent of ["confidence", "score", "probability", "likelihood"]) {
+      assert.ok(!fields.includes(absent), `a relationship offered ${absent}`);
+    }
+  });
+
+  it("carries nothing about a far end moderation withheld", async () => {
+    // `unavailable` says a link continues here and refuses to say through what.
+    const fields = await fieldsOf("MomentRelationship");
+
+    assert.ok(fields.includes("unavailable"));
+
+    for (const absent of ["caption", "author", "place", "media", "occurrence"]) {
+      assert.ok(!fields.includes(absent), `a relationship exposed ${absent}`);
+    }
+  });
+
+  it("names suggestion and derivation without being able to produce them", async () => {
+    // Named so a suggestion engine is additive, and so what it produces can
+    // never be mistaken for what a person said.
+    assert.deepEqual((await enumValuesOf("MomentRelationshipOrigin")).sort(), [
+      "ASSERTED",
+      "DERIVED",
+      "SUGGESTED",
+    ]);
+  });
+});
+
+describe("significance", () => {
+  it("exposes one private mark and no score at all", async () => {
+    // The absence is the decision. Chronologity computes significance per scope
+    // and per dimension, versioned, with provenance — and shows none of it.
+    const fields = await fieldsOf("PersonalSignificance");
+
+    assert.deepEqual(fields.sort(), ["markedAt", "momentId", "significant"]);
+
+    for (const absent of ["score", "value", "dimension", "scope", "provenance", "algorithmVersion"]) {
+      assert.ok(!fields.includes(absent), `significance exposed ${absent}`);
+    }
+  });
+
+  it("has no shape that could carry anybody else's mark", async () => {
+    const fields = await fieldsOf("PersonalSignificance");
+
+    for (const absent of ["count", "total", "users", "markedBy"]) {
+      assert.ok(!fields.includes(absent), `significance exposed ${absent}`);
+    }
+  });
+});
+
 describe("what this phase did not add", () => {
   it("leaves Query with the fields that can be answered", async () => {
     // Types are defined here; the queries returning them arrive with the phases
     // that compose them. A field declared before then would answer null, so a
     // jump and a distribution are absent until something can answer one.
-    assert.deepEqual((await fieldsOf("Query")).sort(), ["timeline", "timelineHead", "viewer"]);
+    assert.deepEqual(
+      (await fieldsOf("Query")).sort(),
+      ["moment", "timeline", "timelineHead", "viewer"],
+    );
   });
 
   it("still exposes no mutations and no subscriptions", async () => {

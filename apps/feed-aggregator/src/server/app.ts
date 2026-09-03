@@ -4,6 +4,7 @@ import type { SessionLookup } from "../auth/session.repository.js";
 import type { AppConfig } from "../config/app-config.js";
 import { AggregatorError } from "../errors/aggregator-error.js";
 import { loggerOptions } from "../observability/logger.js";
+import type { Pool } from "pg";
 import type { ReadStore } from "../read-models/clickhouse/client.js";
 import type { HealthCheckable } from "./health.js";
 import { healthRoutes } from "./health.routes.js";
@@ -39,6 +40,7 @@ export interface BuildAppOptions {
         readonly store: ReadStore;
         readonly sessions: SessionLookup;
         readonly eligibility: TimelineEligibilityResolver;
+        readonly directory: Pool;
       }
     | undefined;
 }
@@ -115,6 +117,7 @@ export async function buildApp({
       sessions: graphql.sessions,
       store: graphql.store,
       eligibility: graphql.eligibility,
+      directory: graphql.directory,
     });
   }
 

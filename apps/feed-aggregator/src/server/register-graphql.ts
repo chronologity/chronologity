@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import type { Pool } from "pg";
 import type { TimelineEligibilityResolver } from "@chronologity/timeline-derivation";
 import mercurius from "mercurius";
 import type { SessionLookup } from "../auth/session.repository.js";
@@ -7,6 +8,11 @@ import type { GraphQLConfig } from "../config/graphql-config.js";
 import { createContext } from "../graphql/context/create-context.js";
 import { formatErrors } from "../graphql/format-errors.js";
 import { loadSchema } from "../graphql/load-schema.js";
+import {
+  mediaTypeResolver,
+  momentFields,
+  momentQueries,
+} from "../graphql/resolvers/moment.resolver.js";
 import { queryResolvers } from "../graphql/resolvers/query.resolver.js";
 import {
   timelineEntryResolver,
@@ -24,6 +30,8 @@ export interface GraphQLWiring {
   readonly store: ReadStore;
   /** Reads current state to decide what a Viewer may see. Wrapped per request. */
   readonly eligibility: TimelineEligibilityResolver;
+  /** The read-only pool a Moment's own detail is read through. */
+  readonly directory: Pool;
 }
 
 /**
@@ -55,8 +63,10 @@ export async function registerGraphql(app: FastifyInstance, wiring: GraphQLWirin
       resolvers: {
         // Merged field by field rather than by spreading two objects that both
         // carry a `Query`, which would keep only the last one.
-        Query: { ...queryResolvers.Query, ...timelineQueries },
+        Query: { ...queryResolvers.Query, ...timelineQueries, ...momentQueries },
+        Moment: momentFields,
         TimelineEntry: timelineEntryResolver,
+        Media: mediaTypeResolver,
         // Attached by name, and the names must match the SDL: Mercurius builds
         // the schema first and then copies these onto the types it found, so a
         // scalar declared here and not there fails at startup rather than
@@ -64,7 +74,7 @@ export async function registerGraphql(app: FastifyInstance, wiring: GraphQLWirin
         Cursor: cursorScalar,
         DateTime: dateTimeScalar,
       },
-      context: createContext(wiring.store, wiring.eligibility),
+      context: createContext(wiring.store, wiring.eligibility, wiring.directory),
       // No mutations, and `defineMutation` stays off so the schema does not
       // grow an empty one. A read service that advertised a mutation type
       // would be inviting the first person in a hurry to add one.

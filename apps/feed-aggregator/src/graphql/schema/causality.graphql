@@ -1,0 +1,106 @@
+"""
+What one Moment has to do with another.
+
+Five kinds and no more, kept small on purpose: an elaborate vocabulary built
+before anybody has watched how people describe their own histories would be a
+guess dressed as a model.
+
+The first two assert influence. The last three connect without claiming how, and
+are symmetric — for those, which Moment is the source means nothing.
+"""
+enum MomentRelationshipKind {
+  """
+  The source meaningfully brought the target about.
+  """
+  LED_TO
+
+  """
+  The source was one of several things that brought the target about.
+  """
+  CONTRIBUTED_TO
+
+  """
+  Connected, without any claim about how.
+  """
+  RELATED_TO
+
+  """
+  Another account of substantially the same occurrence.
+  """
+  ALTERNATE_PERSPECTIVE
+
+  """
+  The source disputes a claim the target represents.
+  """
+  CONTRADICTS
+}
+
+"""
+Where a relationship came from.
+
+Only `ASSERTED` is producible today. The others are named so that a suggestion
+engine can be added without its output ever being mistaken for what a person
+said — a suggestion is a hypothesis, and hypotheses do not become historical
+authority by being stored next to claims.
+"""
+enum MomentRelationshipOrigin {
+  """
+  Somebody said so.
+  """
+  ASSERTED
+
+  """
+  Produced from other explicit relationships rather than claimed directly.
+  """
+  DERIVED
+
+  """
+  Offered as a possibility, and not confirmed.
+  """
+  SUGGESTED
+}
+
+"""
+A claim connecting two Moments.
+
+**Chronology is not causality.** One thing following another is not evidence
+that it was caused by it, so nothing here is derived from Timeline order. Every
+relationship is something somebody asserted, and it carries who asserted it.
+
+**No confidence score, deliberately.** "87% likely that A caused B" is false
+mathematical precision, and human histories are not improved by it.
+
+A relationship reaches a reader only when the far end is one they could see
+anyway. Where privacy withholds that far end the relationship is **absent
+entirely** — an identifier pointing at an inaccessible Moment is itself a
+disclosure. Where Chronologity withheld it, the relationship remains with
+`unavailable` set, because a chain should keep its shape and admitting our own
+act discloses nothing about anybody else.
+"""
+type MomentRelationship {
+  relationshipId: ID!
+
+  """
+  Which way the claim runs. Meaningless for the symmetric kinds.
+  """
+  sourceMomentId: ID!
+
+  targetMomentId: ID!
+  kind: MomentRelationshipKind!
+  origin: MomentRelationshipOrigin!
+
+  """
+  Whose perspective this is.
+  """
+  assertedByUserId: ID!
+
+  createdAt: DateTime!
+
+  """
+  Whether the far end has been withheld by moderation.
+
+  True carries nothing else: no caption, no author, no place, no media. It says
+  a link continues here and refuses to say through what.
+  """
+  unavailable: Boolean!
+}

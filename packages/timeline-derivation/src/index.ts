@@ -48,6 +48,7 @@ export {
   type TimelineEligibility,
   type TimelineScopeRef,
   type TimelineScopeType,
+  type ViewerFacts,
 } from "./eligibility.js";
 
 export { narrowingFor, narrowingSql, resolveRange, type ViewNarrowing } from "./narrowing.js";

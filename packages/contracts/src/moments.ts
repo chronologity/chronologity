@@ -584,6 +584,22 @@ export const listMomentMediaRequestSchema = z.object({
 export type ListMomentMediaRequest = z.infer<typeof listMomentMediaRequestSchema>;
 
 /**
+ * What a caller may ask for when reading a Moment's relationships.
+ *
+ * A list rather than a page: the vocabulary of relationship kinds is small on
+ * purpose, and a Moment connected to more than a hundred others is not the case
+ * this bound exists to serve — it exists so that one request cannot ask for
+ * every claim in the graph.
+ */
+export const listMomentRelationshipsRequestSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(100),
+});
+
+export type ListMomentRelationshipsRequest = z.infer<
+  typeof listMomentRelationshipsRequestSchema
+>;
+
+/**
  * Whether somebody has marked a Moment as mattering to them.
  *
  * One binary mark, and private always. Which Moments matter to somebody is

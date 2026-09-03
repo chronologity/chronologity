@@ -89,6 +89,27 @@ export function eligible(alias: string): string {
   )`;
 }
 
+/**
+ * What every read needs to know about a Viewer, whatever it is a read of.
+ *
+ * Smaller than `TimelineEligibility` on purpose. A Timeline read has to carry
+ * Blocks and a scope-bounded audience as *lists*, because ClickHouse cannot join
+ * the tables those facts live in. A Moment read is a PostgreSQL statement over
+ * the same database, so it asks about Blocks and audiences with sub-selects and
+ * needs none of that carried — what it cannot ask inside the statement is age,
+ * because age is a comparison against a date rather than a fact about the row.
+ */
+export interface ViewerFacts {
+  readonly viewerUserId: string;
+  /**
+   * Whether the Viewer is old enough for age-restricted history.
+   *
+   * False when no date of birth is recorded, which is deny-by-default rather
+   * than an optimistic guess.
+   */
+  readonly isAdult: boolean;
+}
+
 /** What a Viewer's context comes to. */
 export interface TimelineEligibility {
   readonly viewerUserId: string;
@@ -197,6 +218,23 @@ export class TimelineEligibilityResolver {
       isAdult,
       scopeIsOpen: await this.scopeIsOpen(viewerUserId, scope, blocked),
     };
+  }
+
+  /**
+   * What is true of the Viewer regardless of what they are reading.
+   *
+   * Public, and reached by a Moment read as well as by `resolve` above, so that
+   * how old somebody is has one definition rather than one per surface. The
+   * class is named for Timelines and this is not a Timeline fact, which reads
+   * oddly; renaming it would touch every wiring site in two applications for the
+   * sake of a word, and the awkwardness is the cheaper of the two.
+   *
+   * @param viewerUserId - Who is asking.
+   * @returns Their identity, and whether they are an adult.
+   * @throws {Error} If the database refuses.
+   */
+  async viewerFacts(viewerUserId: string): Promise<ViewerFacts> {
+    return { viewerUserId, isAdult: await this.isAdult(viewerUserId) };
   }
 
   /**

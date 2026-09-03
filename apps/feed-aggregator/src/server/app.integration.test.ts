@@ -92,6 +92,7 @@ beforeAll(async () => {
       store,
       sessions: new SessionRepository(directory.pool),
       eligibility: new TimelineEligibilityResolver(asQueryable(directory.pool)),
+      directory: directory.pool,
     },
   });
 });

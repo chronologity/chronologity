@@ -2,6 +2,7 @@ import type {
   TimelineEligibility,
   TimelineEligibilityResolver,
   TimelineScopeRef,
+  ViewerFacts,
 } from "@chronologity/timeline-derivation";
 import type { Viewer } from "./auth-context.js";
 import { accountFor } from "./require-account.js";
@@ -27,6 +28,7 @@ import { accountFor } from "./require-account.js";
  */
 export class RequestEligibility {
   private readonly resolved = new Map<string, Promise<TimelineEligibility>>();
+  private facts: Promise<ViewerFacts> | undefined;
 
   /**
    * Build the request's eligibility.
@@ -39,6 +41,50 @@ export class RequestEligibility {
     private readonly resolver: TimelineEligibilityResolver,
     private readonly viewer: Viewer,
   ) {}
+
+  /**
+   * What is true of the Viewer, whatever they are reading.
+   *
+   * Its own memo rather than a scope's, because a Moment has no scope. Asking
+   * `forScope` for one would resolve a Block list and a scope-bounded audience
+   * that a PostgreSQL statement asks about itself, and would settle whether a
+   * Timeline is open — which is a Timeline's question and has no business
+   * gating a direct Moment read.
+   *
+   * Memoised for the same reason `forScope` is, and it is correctness rather
+   * than cost: one response may read a Moment and the far ends of its
+   * relationships, and a birthday falling between two of them would leave a
+   * response whose parts disagreed about whether its reader was an adult.
+   *
+   * @returns The Viewer's identity and whether they are old enough for
+   *   age-restricted history. The same object for the length of one request.
+   * @throws {UnauthenticatedError} If the request offered no credential.
+   *   Reading history requires an account (`moments.md:589`).
+   * @throws {OnboardingRequiredError} If somebody is signed in but has not
+   *   finished creating an account.
+   */
+  async forViewer(): Promise<ViewerFacts> {
+    // Before the memo, so a refusal is never cached as anything.
+    const userId = accountFor(this.viewer);
+
+    if (this.facts !== undefined) {
+      return this.facts;
+    }
+
+    const resolving = this.resolver.viewerFacts(userId);
+
+    this.facts = resolving;
+
+    try {
+      return await resolving;
+    } catch (error) {
+      // A failed lookup is not an answer. Left behind it would be replayed to
+      // every later reader in this request, turning one transient database
+      // error into a whole response that could not be composed.
+      this.facts = undefined;
+      throw error;
+    }
+  }
 
   /**
    * What this Viewer may see within one scope.

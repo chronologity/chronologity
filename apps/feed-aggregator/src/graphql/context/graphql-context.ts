@@ -1,6 +1,7 @@
 import type { Viewer } from "../../auth/auth-context.js";
 import type { RequestEligibility } from "../../auth/request-eligibility.js";
 import type { Logger } from "../../observability/logger.js";
+import type { MomentReadModel } from "../../read-models/postgres/moment-read-model.js";
 import type { TimelineReadModel } from "../../read-models/clickhouse/timeline-read-model.js";
 
 /**
@@ -32,6 +33,15 @@ export interface GraphQLContext {
    * forbids, and which a raw client on the context would quietly permit.
    */
   readonly timeline: TimelineReadModel;
+  /**
+   * Where a Moment's own detail is read from.
+   *
+   * PostgreSQL rather than the Timeline projection, because the projection holds
+   * what chronology needs and deliberately not what a Moment says. Opening one
+   * is the only read in this service that touches the authoritative tables, and
+   * it happens when somebody taps a Moment rather than while they scroll.
+   */
+  readonly moments: MomentReadModel;
   /**
    * What this Viewer may see, resolved on demand and once per scope.
    *
