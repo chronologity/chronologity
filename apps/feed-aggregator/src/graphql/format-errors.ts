@@ -1,4 +1,4 @@
-import type { ErrorCode } from "@chronologity/contracts";
+import { errorCodeSchema, type ErrorCode } from "@chronologity/contracts";
 import type {
   ExecutionResult,
   FormattedExecutionResult,
@@ -28,6 +28,14 @@ import { AggregatorError } from "../errors/aggregator-error.js";
  * document the client sent rather than anything behind the schema, so it is
  * safe and useful to pass through. Refusing to say "there is no such field"
  * would make the schema undiscoverable without telling an attacker anything.
+ *
+ * A GraphQL error carrying one of this system's codes was written to be shown
+ * too. That is how a scalar refuses: a `Cursor` this Timeline did not issue is
+ * rejected while a variable is being coerced, before any resolver runs, and
+ * GraphQL wraps the refusal in an error of its own. Without this branch the
+ * wrapper would be an unrecognised original and the refusal would reach the
+ * client as "An unexpected error occurred" — precisely what `feed.md:562`
+ * forbids, and indistinguishable from the service falling over.
  *
  * Anything else is a failure nobody planned. It becomes one internal error
  * carrying the trace identifier, and its real message stays in the logs.
@@ -120,6 +128,15 @@ function describe(
     return withCode(error, "VALIDATION_FAILED", traceId);
   }
 
+  const declared = codeOf(original);
+
+  if (declared !== undefined) {
+    // The wrapper's message, not the original's: GraphQL prefixes which
+    // variable was rejected, which is the useful half, and the scalar's own
+    // words are already inside it.
+    return withCode(error, declared, traceId);
+  }
+
   log?.error({ err: original, traceId }, "GraphQL execution failed");
 
   return {
@@ -127,6 +144,36 @@ function describe(
     ...(error.path === undefined ? {} : { path: error.path }),
     extensions: { code: "INTERNAL_ERROR" satisfies ErrorCode, traceId },
   };
+}
+
+/**
+ * The classification an error declared for itself.
+ *
+ * Read only from a GraphQL error, and only when the value is one of the codes
+ * the contract defines. Both narrowings matter: anything else reaching here is
+ * a driver's or a library's error, and one that happened to carry an
+ * `extensions.code` would otherwise get to choose how it is presented — and its
+ * message would go with it.
+ *
+ * @param error - The original error, whatever it turned out to be.
+ * @returns Its code, or undefined when it declared none this system issues.
+ */
+function codeOf(error: Error): ErrorCode | undefined {
+  // By name rather than by `instanceof`, and measured rather than assumed.
+  // `graphql` ships both a CommonJS and an ECMAScript build; Mercurius loads
+  // one and this module the other, so the error a scalar throws is a
+  // `GraphQLError` from a different copy of the class and `instanceof` is
+  // false. Testing the name works across both, and it is the check that would
+  // go on working if a third copy ever appeared.
+  if (error.name !== "GraphQLError") {
+    return undefined;
+  }
+
+  const parsed = errorCodeSchema.safeParse(
+    (error as { extensions?: Record<string, unknown> }).extensions?.["code"],
+  );
+
+  return parsed.success ? parsed.data : undefined;
 }
 
 /**

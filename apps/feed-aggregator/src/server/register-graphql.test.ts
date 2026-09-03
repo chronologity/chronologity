@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
+import { GraphQLError } from "graphql";
 import type { TimelineEligibilityResolver } from "@chronologity/timeline-derivation";
 import { SignJWT } from "jose";
 import { afterEach, describe, it } from "vitest";
@@ -36,9 +37,11 @@ const closed: SessionLookup = { findOpen: async () => undefined };
 /**
  * An eligibility resolver nothing in this file reaches.
  *
- * The schema has no query that reads history yet, so no resolver asks. It fails
- * loudly rather than answering, because a test that started needing it should
- * say so rather than quietly pass on an invented answer.
+ * Nothing here reads history: the one test that names a Timeline query is
+ * refused while its arguments are being coerced, which is before any resolver
+ * runs — and proving that it never gets that far is half of what that test is
+ * for. It fails loudly rather than answering, because a test that started
+ * needing it should say so rather than quietly pass on an invented answer.
  */
 const NEVER_ASKED = {
   resolve: () => {
@@ -252,6 +255,49 @@ describe("what a client is told about a failure", () => {
     assert.equal(body.errors[0].message, "An unexpected error occurred");
     assert.equal(body.errors[0].extensions.code, "INTERNAL_ERROR");
     assert.ok(!JSON.stringify(body).includes("shard 3"));
+  });
+
+  it("refuses a cursor it did not issue as a refusal rather than an internal error", async () => {
+    // The scalar throws while the argument is coerced, so GraphQL wraps the
+    // refusal in an error of its own. Unrecognised, that wrapper would reach the
+    // client as "An unexpected error occurred", which `feed.md:562` forbids and
+    // which a client cannot tell from the service falling over.
+    const instance = await appWith(open());
+    const config = testAppConfig();
+
+    const response = await ask(
+      instance,
+      `{ timeline(view: { scope: { type: PERSON, id: "${USER}" } }, after: "forged") {
+           pageInfo { hasNextPage }
+         } }`,
+      { authorization: `Bearer ${await tokenFor(config)}` },
+    );
+    const body = response.json();
+
+    assert.equal(body.errors[0].extensions.code, "VALIDATION_FAILED");
+    assert.ok(!JSON.stringify(body).includes("base64"));
+  });
+
+  it("does not let an error invent a classification of its own", async () => {
+    // Only codes this system defines are honoured. A library that happened to
+    // put something in `extensions.code` would otherwise choose how it is
+    // presented, and its message would travel with it.
+    const instance = await appWith({
+      findOpen: async () => {
+        throw new GraphQLError("relation \"sessions\" does not exist", {
+          extensions: { code: "CLICKHOUSE_TABLE_MISSING" },
+        });
+      },
+    });
+    const config = testAppConfig();
+
+    const response = await ask(instance, "{ viewer { authenticated } }", {
+      authorization: `Bearer ${await tokenFor(config)}`,
+    });
+    const body = response.json();
+
+    assert.equal(body.errors[0].extensions.code, "INTERNAL_ERROR");
+    assert.equal(body.errors[0].message, "An unexpected error occurred");
   });
 
   it("quotes a trace identifier a report can be found by", async () => {
