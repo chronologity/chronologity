@@ -565,6 +565,25 @@ export const listCommentsRequestSchema = z.object({
 export type ListCommentsRequest = z.infer<typeof listCommentsRequestSchema>;
 
 /**
+ * What a caller may ask for when reading a Moment's media.
+ *
+ * A Moment may hold any number of images and videos, and that is a statement
+ * about the product rather than about a request. `moments.md:103` draws the
+ * line: "unlimited" describes the model, not the absence of infrastructure
+ * safeguards, and unlimited media is delivered through bounded pages.
+ *
+ * Bounded here rather than wherever a page happens to be assembled, so that a
+ * second surface cannot arrive at a different ceiling. The numbers match the
+ * discussion above for no deeper reason than that both are somebody scrolling.
+ */
+export const listMomentMediaRequestSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  cursor: z.string().max(200).optional(),
+});
+
+export type ListMomentMediaRequest = z.infer<typeof listMomentMediaRequestSchema>;
+
+/**
  * Whether somebody has marked a Moment as mattering to them.
  *
  * One binary mark, and private always. Which Moments matter to somebody is
