@@ -20,6 +20,7 @@ import { FollowRepository } from "../../features/social/follow.repository.js";
 import { UploadRepository } from "../../features/uploads/upload.repository.js";
 import { UserRepository } from "../../features/users/user.repository.js";
 import { UserService } from "../../features/users/user.service.js";
+import { createClient, type ClickHouseClient } from "@clickhouse/client";
 import { createAnalytics, type Analytics } from "../../lib/clickhouse/clickhouse.js";
 import { migrateAnalytics } from "../../lib/clickhouse/migrations.js";
 import { migrate } from "../../lib/database/migrations.js";
@@ -69,7 +70,23 @@ describe("a Moment reaching the Timeline", () => {
   let projector: TimelineProjector;
   let timeline: TimelineRepository;
   let sources: TimelineSourceRepository;
+  let measured: ClickHouseClient;
   const version = `test-${randomUUID().slice(0, 8)}`;
+  /**
+   * A tag carried by every statement whose cost this suite measures.
+   *
+   * Two tests here count statements, and counting them meant counting
+   * `system.query_log` from an instant — every query the server finished, from
+   * any client, for any database. A single unrelated statement landing in the
+   * window pushed a page of five over its budget, or turned "issued no delete"
+   * into one delete, and the failure looked like the projector regressing.
+   *
+   * A client of its own, tagged, is what makes the count mean what the
+   * assertion says: the work this test caused, and nothing else. The suite's
+   * own bookkeeping goes through `analytics` and is untagged, so flushing the
+   * log and reading the count no longer inflate the thing being read.
+   */
+  const MEASURED = `timeline-projector-${randomUUID()}`;
   // `timeline_suspended_authors` carries no projection version — a suspension
   // is one row per account and the read joins it without one. So the accounts
   // this suite writes are tracked and removed by hand.
@@ -83,8 +100,19 @@ describe("a Moment reaching the Timeline", () => {
     analytics = createAnalytics(config.clickhouse);
     await migrateAnalytics(analytics.client);
 
+    // Same server, same database, different tag. `final` is repeated because it
+    // is not a default: a read of a `ReplacingMergeTree` that omits it can see
+    // a duplicate awaiting a merge.
+    measured = createClient({
+      url: config.clickhouse.url,
+      database: config.clickhouse.database,
+      username: config.clickhouse.username,
+      password: config.clickhouse.password,
+      clickhouse_settings: { final: 1, log_comment: MEASURED },
+    });
+
     authentication = createTestAuthentication(database.dataSource, config.auth, config.email);
-    timeline = new TimelineRepository(analytics.client, version);
+    timeline = new TimelineRepository(measured, version);
     sources = new TimelineSourceRepository(database.dataSource);
     projector = new TimelineProjector(database.dataSource, timeline, sources);
 
@@ -131,6 +159,7 @@ describe("a Moment reaching the Timeline", () => {
     });
     await app.close();
     await authentication.close();
+    await measured.close();
     await analytics.close();
     await database.close();
   });
@@ -432,12 +461,18 @@ describe("a Moment reaching the Timeline", () => {
     };
 
     /**
-     * How many statements ClickHouse has finished, from its own records.
+     * How many statements the measured work has finished, from ClickHouse's
+     * own records.
      *
      * Read from `system.query_log` rather than counted by a wrapper here: a
      * counter this suite kept about itself could only ever agree with the code
      * it is testing, where the server's log is the same evidence an operator
      * would look at.
+     *
+     * Narrowed to this suite's tag as well as to an instant. The instant alone
+     * counted every client's work against every database, so an unrelated
+     * statement finishing inside the window failed the assertion — and did so
+     * only under load, which is the hardest kind of failure to place.
      */
     const countQueries = async (since: string, kind?: string): Promise<number> => {
       await analytics.client.command({ query: "SYSTEM FLUSH LOGS" });
@@ -447,8 +482,10 @@ describe("a Moment reaching the Timeline", () => {
           query: `SELECT count() AS count FROM system.query_log
                    WHERE type = 'QueryFinish'
                      AND event_time_microseconds > {since: DateTime64(6)}
+                     AND log_comment = {measured: String}
                      ${kind === undefined ? "" : "AND query_kind = {kind: String}"}`,
-          query_params: kind === undefined ? { since } : { since, kind },
+          query_params:
+            kind === undefined ? { since, measured: MEASURED } : { since, measured: MEASURED, kind },
           format: "JSONEachRow",
         })
       ).json<{ count: string }>();
@@ -649,6 +686,11 @@ describe("a Moment reaching the Timeline", () => {
       await projector.projectBatch(momentIds);
       const issued = await countQueries(since);
 
+      // Both ends, because only one of them is about the projector. A tag that
+      // stopped matching would count nothing, and "nothing" passes a ceiling
+      // silently — leaving a test that asserts an upper bound on a measurement
+      // it is no longer taking.
+      assert.ok(issued > 0, "the statement count matched nothing, so it measured nothing");
       assert.ok(issued <= 8, `a page of five cost ${issued} statements, which is per-Moment work`);
     });
 
@@ -690,15 +732,19 @@ describe("a Moment reaching the Timeline", () => {
       // would undo most of the saving.
       const author = await onboard();
       const momentId = await record(author);
-      const fresh = new TimelineRepository(analytics.client, `${version}-fresh`);
+      const fresh = new TimelineRepository(measured, `${version}-fresh`);
       const into = new TimelineProjector(database.dataSource, fresh, sources);
 
       const since = await marker();
       await into.projectBatch([momentId]);
       const deletes = await countQueries(since, "Delete");
+      const issued = await countQueries(since);
 
       await fresh.removeBatch([momentId]);
 
+      // The same reason as above, and it matters more here: the claim is that a
+      // count is zero, which is exactly what a measurement of nothing returns.
+      assert.ok(issued > 0, "the statement count matched nothing, so it measured nothing");
       assert.equal(deletes, 0, "a rebuild into an empty version issued a mutation");
     });
   });
