@@ -1,15 +1,25 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
-import { commentReadableBy } from "./moment-comment.repository.js";
-import { moderationPermits, privacyPermits, visibleToViewer } from "./moment.repository.js";
+import {
+  commentReadableBy,
+  moderationPermits,
+  NAMED_VIEWER,
+  privacyPermits,
+  visibleToViewer,
+} from "@chronologity/moment-access";
 
 /**
  * The exact text of the rule that decides what a Viewer may read.
  *
- * Written to be boring, and written *before* the rule moves into a package both
- * applications import. It asserts nothing about meaning — the integration suites
- * do that — and everything about characters, so that a move which was supposed
- * to change nothing is proved to have changed nothing.
+ * Written to be boring, and written *before* the rule moved into the package
+ * both applications now import. It asserts nothing about meaning — the
+ * integration suites do that — and everything about characters, so that a move
+ * which was supposed to change nothing is proved to have changed nothing.
+ *
+ * It stays here, in the application whose file the rule left, rather than
+ * following it into the package. The package has its own tests for what the
+ * rule says; this one exists to say that what the API renders today is what the
+ * API rendered before, and it can only mean that from here.
  *
  * A test of behaviour would not have caught what this is for. Dropping a clause
  * fails an integration test loudly; changing where a parenthesis sits, or which
@@ -24,14 +34,14 @@ import { moderationPermits, privacyPermits, visibleToViewer } from "./moment.rep
 describe("the Moment rule, as it stands today", () => {
   it("reads a Viewer and their age, and admits the author before anything else", () => {
     assert.equal(
-      visibleToViewer("moment"),
-      `(${privacyPermits("moment")} AND ${moderationPermits("moment")})`,
+      visibleToViewer("moment", NAMED_VIEWER),
+      `(${privacyPermits("moment", NAMED_VIEWER)} AND ${moderationPermits("moment", NAMED_VIEWER)})`,
     );
   });
 
   it("states the privacy half exactly", () => {
     assert.equal(
-      privacyPermits("moment"),
+      privacyPermits("moment", NAMED_VIEWER),
       `(
     moment.author_user_id = :viewerUserId
     OR (
@@ -54,7 +64,7 @@ describe("the Moment rule, as it stands today", () => {
 
   it("states the moderation half exactly", () => {
     assert.equal(
-      moderationPermits("moment"),
+      moderationPermits("moment", NAMED_VIEWER),
       `(
     moment.author_user_id = :viewerUserId
     OR (
@@ -89,20 +99,20 @@ describe("the Moment rule, as it stands today", () => {
     // far end is mentioned at all and moderation decides whether it is a
     // tombstone, so an age check leaking into the first would omit a Moment
     // that should have been marked unavailable — and silently.
-    assert.ok(!privacyPermits("moment").includes("viewerIsAdult"));
+    assert.ok(!privacyPermits("moment", NAMED_VIEWER).includes("viewerIsAdult"));
   });
 
   it("takes the alias it is given, everywhere", () => {
     // Reading the far end of a relationship joins the Moment table twice, so a
     // hardcoded alias would compare a Moment against itself.
-    assert.ok(!visibleToViewer("other").includes("moment."));
+    assert.ok(!visibleToViewer("other", NAMED_VIEWER).includes("moment."));
   });
 });
 
 describe("the comment rule, as it stands today", () => {
   it("states it exactly", () => {
     assert.equal(
-      commentReadableBy("comment"),
+      commentReadableBy("comment", NAMED_VIEWER),
       `(
     comment.author_user_id = :viewerUserId
     OR (
@@ -130,6 +140,6 @@ describe("the comment rule, as it stands today", () => {
   it("asks nothing about age", () => {
     // Comments carry no age gate. The Moment above them does, and reaching one
     // means having passed it.
-    assert.ok(!commentReadableBy("comment").includes("viewerIsAdult"));
+    assert.ok(!commentReadableBy("comment", NAMED_VIEWER).includes("viewerIsAdult"));
   });
 });

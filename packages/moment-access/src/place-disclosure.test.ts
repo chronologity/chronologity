@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import type { Location, LocationDisclosure } from "@chronologity/contracts";
-import { disclosePlace } from "./moment.disclosure-policy.js";
+import { disclosePlace } from "./place-disclosure.js";
 
 const AUTHOR = "author";
 const STRANGER = "stranger";

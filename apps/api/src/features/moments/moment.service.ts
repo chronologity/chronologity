@@ -9,6 +9,7 @@ import type {
   SetMomentVisibilityRequest,
 } from "@chronologity/contracts";
 import { MOMENTS_BOUNDARY } from "@chronologity/contracts";
+import { disclosePlace } from "@chronologity/moment-access";
 import type { DataSource } from "typeorm";
 import { withTransaction, type Transaction } from "../../lib/database/transaction.js";
 import { enqueueOutboxMessage } from "../../lib/database/outbox.js";
@@ -39,7 +40,6 @@ import type { ErasureRepository } from "../privacy/erasure.repository.js";
 import type { MomentCommentRepository } from "./moment-comment.repository.js";
 import type { MomentRepository } from "./moment.repository.js";
 import type { UndisclosedMoment } from "./moment.types.js";
-import { disclosePlace } from "./moment.disclosure-policy.js";
 import { isAdult } from "../moderation/moderation.policy.js";
 import type { ModerationRepository } from "../moderation/moderation.repository.js";
 import { checkVisibility, type ViewFacts } from "./moment.visibility-policy.js";

@@ -1,9 +1,9 @@
 import type { MomentRelationship as MomentRelationshipContract } from "@chronologity/contracts";
+import { moderationPermits, NAMED_VIEWER, privacyPermits } from "@chronologity/moment-access";
 import type { DataSource } from "typeorm";
 import type { Transaction } from "../../lib/database/transaction.js";
 import { MomentRelationship } from "./moment-relationship.model.js";
 import { Moment as MomentRow } from "./moment.model.js";
-import { moderationPermits, privacyPermits } from "./moment.repository.js";
 
 /**
  * Shape a stored relationship as the contract.
@@ -159,13 +159,13 @@ export class MomentRelationshipRepository {
              ELSE relationship.source_moment_id
            END`,
         )
-        .addSelect(`NOT ${moderationPermits("other")}`, "unavailable")
+        .addSelect(`NOT ${moderationPermits("other", NAMED_VIEWER)}`, "unavailable")
         .where(
           "(relationship.source_moment_id = :momentId OR relationship.target_moment_id = :momentId)",
           { momentId },
         )
         .andWhere("other.deleted_at IS NULL")
-        .andWhere(privacyPermits("other"), { viewerUserId })
+        .andWhere(privacyPermits("other", NAMED_VIEWER), { viewerUserId })
         .setParameter("viewerIsAdult", viewerIsAdult)
         .orderBy("relationship.created_at", "DESC")
         .addOrderBy("relationship.relationship_id", "DESC")
