@@ -304,10 +304,20 @@ afterAll(async () => {
     created.rows.map((row) => row.identity_id),
   ]);
 
+  // Queued rather than awaited, and that is measured rather than cautious.
+  // `lightweight_deletes_sync` defaults to 2, so `DELETE FROM` blocks until the
+  // mutation has been applied everywhere: 16.3s and 4.7s on these two tables
+  // against a version matching no rows at all. Two of those plus the PostgreSQL
+  // cleanup exceeds this suite's 30s hook timeout, which fails the file while
+  // every test in it passes — which is exactly how this was found.
+  //
+  // Safe to queue because nothing but this run reads this projection version,
+  // so when the rows actually go is nobody's business.
   for (const table of ["timeline_moments", "timeline_moment_contexts"]) {
     await store.client.command({
       query: `DELETE FROM ${table} WHERE projection_version = {version: String}`,
       query_params: { version: VERSION },
+      clickhouse_settings: { lightweight_deletes_sync: "0" },
     });
   }
 
