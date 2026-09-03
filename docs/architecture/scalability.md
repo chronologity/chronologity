@@ -550,13 +550,13 @@ Use:
 
 ---
 
-# Feed Over-Fetch Scale
+# Feed Eligibility Scale
 
-Viewer filtering may require candidate over-fetch.
+Viewer filtering happens inside the ClickHouse statement, before the limit, so a page is read once and comes back holding what was asked for whenever history holds that much.
 
-Over-fetch must be bounded.
+That is the redesign this section previously called for: an aggregator that filtered a finished page would need repeated scans to fill a sparse one, and repeated scans are what the read-model eligibility columns exist to avoid.
 
-If many pages routinely require repeated scans to find eligible content, read-model eligibility should be redesigned.
+Discovery is different and still over-fetches candidates, for diversity rather than for eligibility, and that over-fetch remains bounded.
 
 ---
 
@@ -1825,8 +1825,6 @@ Scale each independently based on measured saturation.
 ## Feed Aggregator
 
 - Expected Timeline query rate?
-- Maximum page size?
-- Maximum over-fetch iterations?
 - Cache strategy?
 
 ## Media

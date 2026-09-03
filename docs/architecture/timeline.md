@@ -744,13 +744,20 @@ Authority remains with the owning domain features.
 
 # Timeline Query Shape
 
-The feed aggregator should expose semantic GraphQL queries.
+The feed aggregator exposes semantic GraphQL queries.
 
-Potential concepts include:
+Settled so far (ADR-141):
 
 ```text
-timelineHead
-timelineSlice
+timeline        a page of history, as a connection
+timelineHead    where a Timeline opens
+```
+
+`timelineSlice` was the name this section suggested. A connection field is named for what it holds rather than for how it is assembled, and "slice" describes the second.
+
+Still to be named, each by the phase that can answer it:
+
+```text
 timelineAroundMoment
 timelineAroundTime
 timelineContextNeighbors
@@ -759,7 +766,7 @@ temporalZoom
 historicalJump
 ```
 
-Exact GraphQL naming belongs in API/GraphQL specifications.
+A query is not declared before something can answer it. A field that existed and returned null would be a contract mobile could be written against and then broken by.
 
 ---
 
@@ -1780,7 +1787,6 @@ Still open: whether a future scope emerges that genuinely needs a persisted defi
 - temporal zoom?
 - historical jump?
 - Moment depth?
-- Maximum page size?
 - Maximum GraphQL complexity?
 
 ## Naming

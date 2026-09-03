@@ -695,7 +695,6 @@ Important signals:
 - DataLoader batch size;
 - cache hit rate;
 - eligibility filtering ratio;
-- over-fetch iterations;
 - query timeout;
 - GraphQL complexity rejection.
 

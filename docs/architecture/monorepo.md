@@ -1113,7 +1113,7 @@ Contains what the two applications that derive Timelines must agree about: the e
 
 It exists because these are the things that must not be written twice. A security rule written in two places eventually disagrees with itself, and two cursor implementations that drift skip and repeat Moments sharing an occurrence time (ADR-138).
 
-It does not contain either application's query methods. Their needs differ — the API pages, the aggregator over-fetches and builds connections — and sharing the execution layer would force one shape on both.
+It does not contain either application's query methods. Their needs differ — the API returns REST pages, the aggregator builds connections — and sharing the execution layer would force one shape on both.
 
 ## `packages/config`
 

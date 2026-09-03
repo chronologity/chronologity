@@ -4718,7 +4718,7 @@ Four canonical statements pull in different directions. `feed.md:527` says the a
 
 **It computes and never connects.** No client, no pool, no I/O: it returns SQL text and parameters, and each application runs them through its own connection. That is the line, and it is what makes the package neutral with respect to which application and which connection — the test `monorepo.md:1292` sets. It is frankly not neutral with respect to datastore, and does not pretend to be.
 
-**Each application keeps its own query methods.** `TimelineReadRepository` stays in the API; the aggregator writes its own in 9C, shaped for GraphQL rather than REST. Their needs differ — one pages, the other over-fetches after filtering and builds connections — and sharing the execution layer would force one shape on both.
+**Each application keeps its own query methods.** `TimelineReadRepository` stays in the API; the aggregator writes its own in 9C, shaped for GraphQL rather than REST. Their needs differ — one returns REST pages and counts what a Saved View has gained, the other builds connections — and sharing the execution layer would force one shape on both.
 
 **The resolver takes a `Queryable` rather than a `DataSource`.** It used TypeORM only as a `.query(sql, params)` handle, so the narrowest interface that works is declared in the package. The API passes its `DataSource`; the aggregator will pass a wrapper over the `pg` pool it already has. Neither client is a dependency of the package.
 
@@ -4869,3 +4869,69 @@ Two things were found and fixed rather than left: the cursor error path, and `sc
 Query fields. A field declared before something can answer it returns null, so `Query` still exposes only `viewer`, and a test asserts it.
 
 `longitude-latitude.scalar.ts` from the canonical tree. Coordinates appear only at exact disclosure and `Float` carries them faithfully; that file would have been created to populate a tree rather than because it acquired responsibility.
+
+---
+
+# ADR-141 — A Timeline Is Asked For as a View, Paged as a Connection, and Never Over-Fetched
+
+## Status
+
+Accepted. Settles the query naming `timeline.md:762` deferred, the maximum page size left open in three documents, and the arguments 9D through 9G will extend rather than reshape.
+
+## Context
+
+9C is the first phase that returns history. Three questions had to be answered before writing a single query field, and each of them is visible to mobile.
+
+**What a query accepts.** The REST endpoints take a context, a lens, filters and a date range. A GraphQL query could take paging alone and grow the rest later.
+
+**How both sides of `pageInfo` are answered.** The API issues a cursor at each end of a page but deliberately does not say whether following the reverse one yields anything: knowing would cost a second query to answer a question a client usually does not ask. `PageInfo` asks it outright, so 9C had to answer both.
+
+**Whether the aggregator over-fetches.** `feed.md` described fetching twenty candidates, having eight filtered out, and fetching more to fill the page.
+
+## Decision
+
+**A query takes the whole View Specification**, as a `TimelineViewInput`: the scope, the lens, the filters and the range. It is translated into the contract's own object and parsed by `viewSpecificationSchema`, so every rule the contract enforces applies without being restated.
+
+**Query fields are named for what they return.** `timeline` for a connection, `timelineHead` for where one opens. `timeline.md:752` suggested `timelineSlice`.
+
+**Paging follows the connection convention.** `first`/`after` walk into the past; `last`/`before` come forward towards the present. A page is ordered newest first whichever way it was walked, so `hasNextPage` always means history continues further back and `hasPreviousPage` always means there is more between here and the present. Asking for both pairs at once is refused rather than resolved by precedence.
+
+**Both sides of `pageInfo` are answered from one query.** One row beyond the page is asked for and never returned; its presence answers the far side. The supplied cursor answers the near side.
+
+**Page sizes are bounded at 200, defaulting to 50** — the bound the contract already carries, reached through the translation rather than restated in the SDL.
+
+**A range is two nullable fields, not `@oneOf`.** `TimelineRangeInput` carries `fixed` and `rolling`; both or neither is refused.
+
+**There is no over-fetching, and the documents that said otherwise were wrong.**
+
+## Alternatives Considered
+
+Paging arguments alone with narrowing added later; `timelineSlice` as the field name; a second query to answer the reverse side of `pageInfo`; `@oneOf` for the range; a page-size bound restated in the SDL; building the over-fetch loop `feed.md` described.
+
+## Rationale
+
+**Taking the whole specification costs nothing and saves three reshapes.** It is the object the engine already takes, so its validation comes free — including the strictness that runs one way on purpose: an unrecognised field is refused rather than dropped, because a view asking to be narrowed that opened unnarrowed would show its reader more history than they asked for. A GraphQL surface with its own validation would be a second place for that to regress.
+
+**The cursor answers its side of `pageInfo` exactly.** Every cursor this service issues was taken from a row it returned, so when a client supplies one, a row exists on the near side by construction. The one case where that is generous is a cursor whose Moment has since been erased, where following it back yields an empty page — a better answer than paying a query on every page to rule out a case that almost never happens.
+
+**A backward page is reversed before it is returned.** `timeline.md:824` asks that neither direction be substantially harder. A page that read backwards depending on how it was reached would be worse than harder: it would be a different Timeline.
+
+**`@oneOf` would have cost what the connection convention bought.** It is enforced by this repository's `graphql` 16.14.2, but it was experimental at 16 and stabilised at 17, and it is enforced at coercion rather than at document validation — so client codegen support is uncertain. Connections were chosen because tooling handles them without being taught; a directive that tooling may refuse cuts against that. Worth revisiting at graphql 17.
+
+**The over-fetch loop describes an architecture that was not built.** Eligibility is applied inside the ClickHouse statement, before the limit: filtered in the `WHERE` for a Location's or an occasion's Timeline, and reported as a `readable` column for somebody's own. Nothing post-query removes a row, so a page comes back full whenever history holds that many Moments. Building the loop anyway would be machinery guarding a case the design prevents — and it would look correct forever, because nothing would exercise it.
+
+**A second page-size bound in the SDL would eventually disagree with the first.** That is the class of defect ADR-138 exists to prevent.
+
+## Consequences
+
+`Query` grows its first two fields that read history, and `schema.test.ts`'s assertion that it had one becomes an assertion that it has three.
+
+**A refused cursor reaches a client as a refusal for the first time**, and getting there required a fix in the error formatter. The `Cursor` scalar throws while a variable is coerced, so GraphQL wraps the refusal in an error of its own; unrecognised, that wrapper became "An unexpected error occurred", which `feed.md:562` forbids. The formatter now honours a code an error declared for itself, when it is one the contract defines. The check is by error name rather than `instanceof`: `graphql` ships both a CommonJS and an ECMAScript build, Mercurius loads one and the formatter the other, and `instanceof` across two copies of a class is false — measured, not assumed.
+
+**Six documents were corrected.** `feed.md` lost its "Pagination After Filtering" and "Bounded Over-Fetching" sections, an invariant, a metric, a test-list item, a checklist item, a request-flow step and an open question; `scalability.md` lost its "Feed Over-Fetch Scale" section; `observability.md` lost a metric; ADR-138, `monorepo.md` and `packages/timeline-derivation/src/index.ts` each carried the same sentence saying the aggregator over-fetches after filtering. Three of those were written in the same phase that shipped the opposite, and `pagination.graphql` told clients a page "may hold fewer Moments than were asked for and still have more beyond it" — a promise about when a short page means something, and the most wrong of them.
+
+## Deliberately Not Here
+
+`zoom` and an anchor as arguments. Both are fields of the same specification object, and both belong to phases that can answer them — temporal zoom to 9F, a jump to 9G. Declaring an input field a resolver silently discards is the input-side form of the rule ADR-140 stated for output fields.
+
+Field weighting and a total complexity budget. Depth remains the only cost control. Two queries is not enough shape to weigh, and 9K is where that lands.

@@ -27,8 +27,9 @@
  *   of the same version.
  *
  * What is not here is each application's own query methods. Their needs
- * genuinely differ — the API pages, the aggregator over-fetches and builds
- * connections — and sharing the execution layer would force one shape on both.
+ * genuinely differ — the API returns REST pages and counts what a Saved View
+ * has gained, the aggregator builds GraphQL connections — and sharing the
+ * execution layer would force one shape on both.
  */
 export {
   boundaryCondition,

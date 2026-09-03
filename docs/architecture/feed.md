@@ -496,35 +496,19 @@ unless product rules explicitly permit a tombstone representation.
 
 # Pagination After Filtering
 
-Viewer filtering complicates page size.
+There is none. Eligibility is applied **inside** the ClickHouse statement, before the limit: filtered in the `WHERE` for a Location's or an occasion's Timeline, and reported as a `readable` column for somebody's own (ADR-138, ADR-141).
 
-If ClickHouse returns 20 candidates and 8 are filtered out, the aggregator may need to fetch additional candidates to satisfy the requested page size.
+Nothing is removed after the query returns, so a page comes back holding as many Moments as the requested size whenever history holds that many. This is the property that stops a page's size disclosing what it does not show — filtering a finished page leaks through its size, since asking for twenty and receiving four says sixteen things exist.
 
-This requires bounded over-fetching.
-
----
-
-# Bounded Over-Fetching
-
-The aggregator should use a controlled strategy:
-
-```text
-requested = 20
-fetch candidate batch
-filter
-if insufficient:
-    fetch next bounded batch
-```
-
-Do not scan unbounded history trying to fill one page.
+This section previously described fetching a batch of candidates, filtering it, and fetching more to fill the page. That describes an architecture that was not built, and the sentence outlived the design it belonged to.
 
 ---
 
 # Sparse Eligible Results
 
-If a Viewer has few eligible items in a range, returning fewer than the requested page size is valid.
+A short page means history ran out, and `hasNextPage` says so.
 
-The service should preserve a correct continuation cursor.
+The service preserves a continuation cursor at each end of every page, so either direction is one request away from any page a client holds.
 
 ---
 
@@ -1287,7 +1271,6 @@ Important metrics include:
 - DataLoader batch size;
 - cache hit rate;
 - eligibility-filter rate;
-- over-fetch iterations;
 - timeout rate.
 
 ---
@@ -1546,7 +1529,6 @@ Verify:
 - chronological ordering;
 - cursor behavior;
 - eligibility;
-- bounded over-fetch;
 - enrichment;
 - degradation.
 
@@ -1623,13 +1605,9 @@ A representative request:
 
 3. Resolver decodes Timeline cursor.
 
-4. Timeline query adapter reads bounded candidates from ClickHouse.
+4. Timeline query reads a bounded page from ClickHouse, with eligibility applied inside the statement.
 
-5. Eligibility logic removes restricted candidates.
-
-6. If needed, bounded over-fetch obtains additional candidates.
-
-7. DataLoaders batch optional enrichment.
+5. DataLoaders batch optional enrichment.
 
 8. Aggregator constructs semantic Timeline nodes and opaque cursors.
 
@@ -1664,7 +1642,6 @@ Before launch, Chronologity must define and implement:
 - DataLoader strategy;
 - N+1 prevention;
 - eligibility filtering;
-- bounded over-fetch;
 - privacy/blocking/moderation behavior;
 - query complexity limits;
 - page-size limits;
@@ -1755,11 +1732,14 @@ The server is Mercurius on Fastify, schema-first, with SDL under `src/graphql/sc
 
 **Types are named after the contract they correspond to** in `packages/contracts`, so `ReadableTimelineEntry` and `WithheldTimelineEntry` rather than a Timeline-level `Moment`; `Moment` is the depth type. A Moment the reader may not see is its own type in a union rather than the readable one with nullable fields.
 
+**Query fields are named for what they return** (ADR-141): `timeline` for a connection and `timelineHead` for where one opens. `timeline.md:752` suggested `timelineSlice`; a connection field is named for what it holds, and "slice" describes the implementation rather than the thing.
+
+**Page sizes are bounded at 200, with a default of 50** (ADR-141) — the bound `viewSpecificationSchema` already carries, reached through the translation rather than restated in the SDL. Two bounds that could drift is the class of defect ADR-138 exists to prevent.
+
 Still open:
 
 - Persisted queries at launch?
 - Complexity calculation strategy beyond depth?
-- Maximum page sizes?
 
 ## Moment Depth
 
@@ -1798,7 +1778,6 @@ Still open:
   - temporal zoom;
   - historical jump?
 - Maximum ClickHouse rows scanned?
-- Maximum over-fetch iterations?
 - Maximum GraphQL complexity?
 
 ---
@@ -1826,8 +1805,8 @@ Still open:
 19. Candidate selection and Viewer eligibility are distinct.
 20. Security-sensitive visibility may require stronger current-state checks.
 21. Filtering does not leak restricted metadata.
-22. Post-filter pagination uses bounded over-fetching.
-23. Sparse eligible pages may return fewer items.
+22. Eligibility is applied inside the query, before the limit, never to a finished page.
+23. A short page means history ran out, and `hasNextPage` says so.
 24. Client-facing cursors are opaque.
 25. Cursor formats are internally versioned.
 26. Invalid cursors do not expose internals.
