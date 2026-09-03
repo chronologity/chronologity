@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { ViewSpecification } from "@chronologity/contracts";
 import type { TimelineReading } from "@chronologity/timeline-derivation";
 import { describe, it } from "vitest";
-import type { TimelineSlice } from "../read-models/clickhouse/timeline-read-model.js";
+import type { TimelineSlice } from "../../read-models/clickhouse/timeline-read-model.js";
 import { connectionFor, entryFor } from "./timeline-composer.js";
 
 /**

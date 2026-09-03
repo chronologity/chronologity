@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { describe, it } from "vitest";
-import { ValidationError } from "../errors/aggregator-error.js";
+import { ValidationError } from "../../errors/aggregator-error.js";
 import { specificationFor, type TimelineViewArguments } from "./timeline-request.js";
 
 /**

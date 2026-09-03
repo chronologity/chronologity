@@ -1,6 +1,6 @@
 import type { ViewSpecification } from "@chronologity/contracts";
 import type { TimelinePosition, TimelineReading } from "@chronologity/timeline-derivation";
-import type { TimelineSlice } from "../read-models/clickhouse/timeline-read-model.js";
+import type { TimelineSlice } from "../../read-models/clickhouse/timeline-read-model.js";
 
 /**
  * Turning rows into a page a GraphQL client already knows how to read.

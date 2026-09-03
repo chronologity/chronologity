@@ -4,8 +4,8 @@ import {
   type ViewPerspective,
   type ViewSpecification,
 } from "@chronologity/contracts";
-import type { TimelinePosition } from "@chronologity/timeline-derivation";
-import { ValidationError } from "../errors/aggregator-error.js";
+import type { TimelinePosition, TimelineScopeRef } from "@chronologity/timeline-derivation";
+import { ValidationError } from "../../errors/aggregator-error.js";
 
 /**
  * Turning GraphQL arguments into the object the derivation engine takes.
@@ -210,4 +210,20 @@ function rangeFor(
   // out already means. Refused rather than ignored: it is likelier a client
   // dropping a field than somebody asking for the whole of history the long way.
   throw new ValidationError("A range needs a stretch of time: a fixed span or a rolling one");
+}
+
+/**
+ * Which scope a specification names.
+ *
+ * @param context - The specification's context.
+ * @returns The scope reference eligibility is resolved for. The two vocabularies
+ *   are the same by construction, which is why this is a rename rather than a
+ *   translation — and why it is one function rather than a map that could fall
+ *   out of step with either side.
+ */
+export function scopeOf(context: {
+  type: TimelineScopeRef["type"];
+  id: string;
+}): TimelineScopeRef {
+  return { type: context.type, id: context.id };
 }
