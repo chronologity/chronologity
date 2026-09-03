@@ -107,8 +107,26 @@ jobs:
       - name: Apply migrations
         run: pnpm db:migrate
 
-      - name: Integration tests
-        run: pnpm test:integration
+      # Split by application, and sequential, for two reasons.
+      #
+      # A failure names where to look. One combined step reports as "Integration
+      # tests" and leaves the log to say which application broke.
+      #
+      # And running them one after another is stated here rather than implied.
+      # Both suites share one PostgreSQL and one ClickHouse, so running them at
+      # once produces contention that reads as a flake; the root script says
+      # `--concurrency=1` for the same reason, and this makes the constraint
+      # visible in the file that enforces it.
+      #
+      # Not two jobs. A second runner would repeat the checkout, the install,
+      # the build and the whole stack — several minutes of setup to parallelise
+      # a suite that takes thirty seconds, and the aggregator cannot shed that
+      # setup anyway, since it reads the API's schema and the API's projection.
+      - name: Integration tests (API)
+        run: pnpm exec turbo run test:integration --filter=@chronologity/api
+
+      - name: Integration tests (feed aggregator)
+        run: pnpm exec turbo run test:integration --filter=@chronologity/feed-aggregator
 
       # Only on failure: a passing run's logs are noise, and a failing one is
       # usually a service that refused a connection for a reason it recorded.
