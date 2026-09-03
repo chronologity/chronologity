@@ -28,6 +28,21 @@ export interface DeliveryOptions {
   readonly handler: (event: ConsumedEvent) => Promise<void>;
   readonly clientId: string;
   readonly timeoutMs?: number;
+  /**
+   * The event this test is actually waiting for, by type.
+   *
+   * Only the *waiting* is narrowed; the handler still receives every message
+   * about the aggregate, because that is what a worker sees in a deployment.
+   *
+   * Supply it whenever more than one event about the aggregate reaches these
+   * boundaries, which is more often than it looks: reacting to a Moment
+   * announces `MomentReacted` on the reactions boundary while `MomentRecorded`
+   * is still on the moments boundary, and a worker subscribed to both is given
+   * whichever Kafka polls first. Without this the wait ended on the wrong one,
+   * the test read its effect before the right one had been handled, and the
+   * assertion failed intermittently and only under load.
+   */
+  readonly eventType?: string;
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -43,12 +58,13 @@ const DEFAULT_TIMEOUT_MS = 60_000;
  *
  * @param options - What is being driven, and which worker is listening.
  * @returns How many messages about that aggregate the handler was given, which
- *   is zero when the boundaries are wrong and the message never arrives.
- * @throws {Error} If nothing arrives before the timeout, which is what a
- *   missing or misnamed subscription looks like from here.
+ *   counts every type rather than only the awaited one.
+ * @throws {Error} If what is being waited for does not arrive before the
+ *   timeout, which is what a missing or misnamed subscription looks like from
+ *   here.
  */
 export async function deliverThroughBroker(options: DeliveryOptions): Promise<number> {
-  const { dataSource, boundaries, aggregateId, handler, clientId } = options;
+  const { dataSource, boundaries, aggregateId, handler, clientId, eventType } = options;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const messaging = createMessaging({
     brokers: (process.env.KAFKA_BROKERS ?? "localhost:9092").split(","),
@@ -86,11 +102,16 @@ export async function deliverThroughBroker(options: DeliveryOptions): Promise<nu
     }
 
     const deadline = Date.now() + timeoutMs;
+    const arrived = (): boolean =>
+      eventType === undefined
+        ? handled.length > 0
+        : handled.some((event) => event.envelope.eventType === eventType);
 
-    while (handled.length === 0) {
+    while (!arrived()) {
       if (Date.now() > deadline) {
         throw new Error(
-          `Nothing about ${aggregateId} arrived on ${boundaries.join(", ")} within ${timeoutMs}ms`,
+          `${eventType === undefined ? "Nothing" : eventType} about ${aggregateId} ` +
+            `did not arrive on ${boundaries.join(", ")} within ${timeoutMs}ms`,
         );
       }
 

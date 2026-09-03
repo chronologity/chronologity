@@ -113,6 +113,10 @@ describe("a reaction reaching the notification generator over Kafka", () => {
       aggregateId: moment.momentId,
       handler: (event) => notifyFromEvent(generator, event),
       clientId: "notification-generator-broker",
+      // The reaction, not the Moment it is about. Both reach this worker's
+      // boundaries under the same aggregate, and waiting for whichever arrived
+      // first read the notifications table before the reaction was handled.
+      eventType: "MomentReacted",
     });
 
     const rows: { type: string; recipient_user_id: string }[] = await database.dataSource.query(
@@ -268,6 +272,7 @@ describe("a Moment arriving where somebody is watching", () => {
       aggregateId: moment.momentId,
       handler: (event) => notifyFromEvent(generator, event, undefined, fanOut),
       clientId: "fan-out-broker",
+      eventType: "MomentRecorded",
     });
 
     const theirs = await told(watcher.userId);
@@ -297,6 +302,7 @@ describe("a Moment arriving where somebody is watching", () => {
       aggregateId: moment.momentId,
       handler: (event) => notifyFromEvent(generator, event, undefined, fanOut),
       clientId: "fan-out-broker",
+      eventType: "MomentRecorded",
     });
 
     assert.deepEqual(
@@ -326,6 +332,7 @@ describe("a Moment arriving where somebody is watching", () => {
         aggregateId: moment.momentId,
         handler: (event) => notifyFromEvent(generator, event, undefined, fanOut),
         clientId: "fan-out-broker",
+        eventType: "MomentRecorded",
       });
 
     await deliver();
