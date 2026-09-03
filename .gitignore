@@ -56,6 +56,12 @@ test-results/
 !.vscode/extensions.json
 !.vscode/settings.json
 
+# Claude Code's working directory, which holds session notes and the worktrees
+# it creates. Local to whoever is working, and a worktree is a whole checkout
+# with a .env in it — so the cost of committing one by accident is a leaked
+# secret rather than a tidy-up.
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db
