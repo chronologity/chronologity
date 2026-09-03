@@ -308,11 +308,16 @@ The feed aggregator should not compensate for an under-designed projection by is
 
 Direct PostgreSQL access from the feed aggregator should be limited and intentional.
 
-Possible reasons may include:
+Reasons it is permitted:
 
 - current Viewer eligibility;
 - authorization state not appropriate for ClickHouse;
-- small operational lookup.
+- small operational lookup;
+- **reading one Moment in full**, when somebody opens it (ADR-142).
+
+The last was added deliberately and is the widest of them. The Timeline projection holds what chronology needs and, by design, nothing a Moment says — so a caption, its media, its discussion and how it was responded to can only come from the authoritative tables. Projecting them into ClickHouse instead would mean storing reaction and comment counts, which ADR-113 and ADR-114 refused to store because a stored count goes wrong.
+
+The prohibition below still stands, and the distinction is per-item versus on-demand: paging a Timeline must not touch these tables, and opening a single Moment does.
 
 If PostgreSQL becomes required for every Timeline item, the read model should be reconsidered.
 
@@ -1743,10 +1748,17 @@ Still open:
 
 ## Moment Depth
 
-- Which fields are included in the initial depth query?
-- Are Comments separate?
-- Are Reactions separate?
-- How is media connection paginated?
+Settled by ADR-142.
+
+**The depth query returns the Moment and everything one-to-one with it** — its caption, author, occurrence, place reduced for the reader, and that reader's own significance mark — in one statement, because each of those is a column on a row already being read.
+
+**Comments are a connection on `Moment`, not a root query**, and cost nothing unless selected. Replies are read as `comments(thread:)` rather than through a field on a comment: a connection per comment would be one statement per row of a page.
+
+**Reactions are eager** in the sense that the field costs one statement when selected and none at all when the Moment has them switched off — the answer is already known then, and it is not zero.
+
+**Media pages on `moment_media.position`**, which is dense, zero-based and unique within a Moment, so it totally orders the sequence and needs no tiebreaker. Keyset rather than offset, because media can be reordered while somebody is paging it.
+
+Still open: what a depth read should say about a Moment's corrections, which `moments.md:606` leaves open on the product side.
 
 ## Temporal Zoom
 

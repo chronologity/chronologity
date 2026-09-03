@@ -1053,12 +1053,12 @@ The major directory meanings are:
 
 - `src/graphql/` owns the GraphQL transport contract, resolvers, scalars, and request context.
 - `src/timelines/` owns Timeline read composition and navigation behavior.
-- `src/moments/` owns Moment read composition.
+- `src/moments/` owns Moment read composition, split into `queries/` and `services/` as the tree shows.
 - `src/locations/`, `src/reactions/`, `src/users/`, and `src/moderation/` own read/composition concerns for those domains.
 - `src/read-models/clickhouse/` is the normal persistence adapter boundary.
-- `src/read-models/postgres/` is the narrow exception `feed.md` permits: current Viewer eligibility, and nothing else. Its credential should be able to `SELECT` and no more, and if it is ever needed for every Timeline item the read model is wrong rather than this boundary (ADR-137).
+- `src/read-models/postgres/` is the narrow exception `feed.md` permits, and it now answers two kinds of question rather than one: current Viewer eligibility, and **a Moment read in full when somebody opens one** (ADR-142). The second was added deliberately — the Timeline projection holds no caption, media or discussion, so depth has nowhere else to come from — and the bound that matters is unchanged: paging a Timeline must not touch these tables, and if PostgreSQL is ever needed for every Timeline item the read model is wrong rather than this boundary (ADR-137). Its credential should be able to `SELECT` and no more.
 - `src/loaders/` owns request-scoped batching and deduplication.
-- `src/pagination/` owns opaque, deterministic cursor infrastructure.
+- `src/pagination/` owns opaque, deterministic cursor infrastructure. One `Cursor` scalar serves every connection, and `cursors.ts` tags the kinds this application invented — a Timeline position still encodes to exactly what `@chronologity/timeline-derivation` produces, so cursors stay interoperable with the API's.
 - `src/caching/` owns read-side cache abstractions; the existence of this directory does not imply Redis.
 - `src/auth/` owns request identity/permission interpretation sufficient for read authorization, not session creation.
 - `src/observability/` owns read-service instrumentation.
@@ -1114,6 +1114,18 @@ Contains what the two applications that derive Timelines must agree about: the e
 It exists because these are the things that must not be written twice. A security rule written in two places eventually disagrees with itself, and two cursor implementations that drift skip and repeat Moments sharing an occurrence time (ADR-138).
 
 It does not contain either application's query methods. Their needs differ — the API returns REST pages, the aggregator builds connections — and sharing the execution layer would force one shape on both.
+
+## `packages/moment-access`
+
+Contains what the two applications that read a Moment must agree about: whether a Viewer may see it, whether they may read a comment on it, and how much of where it happened they are told.
+
+**It computes and never connects**, exactly as its Timeline sibling does. The difference between them is the store rather than the style: this holds PostgreSQL predicates over the authoritative tables, and `timeline-derivation` holds a ClickHouse condition over the projection. They are separate packages because they are separate statements over separate stores, and one name over both would be a name for something that is not one thing.
+
+It emits **no placeholder syntax of its own**. The API binds by name through TypeORM and the aggregator binds by position through `pg`, so the caller supplies the tokens and neither dialect is privileged — a flag inside the package cannot work, because positional numbering depends on the surrounding statement the package cannot see (ADR-142).
+
+The two halves of the Moment rule are exported separately as well as together, and that is load-bearing rather than tidy: reading a relationship applies privacy to the far end as a filter and moderation as a selected column, because privacy withholding it means the claim must not be mentioned at all while moderation withholding it leaves a tombstone. A reader that conflated them would announce that somebody's private history exists.
+
+It exists for the reason ADR-138 gives about its sibling: a security rule written in two places eventually disagrees with itself, and this is one of the two that leaks when it does.
 
 ## `packages/config`
 

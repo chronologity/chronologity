@@ -1371,7 +1371,7 @@ Day one does require enough of the model to make temporal zoom principled rather
 
 **Engagement cannot reach significance.** The code that computes it imports nothing from reactions or comments, and a test asserts it. Separation is enforced rather than intended.
 
-**Nothing exposes a significance score.** The only endpoints concern somebody's own mark.
+**Nothing exposes a significance score.** The only endpoints concern somebody's own mark, and the read contract carries the same and no more: a Moment's `personalSignificance` is a private boolean and when it was set, with no shape that could hold a score, a dimension, a scope, or a count of other people's marks (ADR-142). What is computed goes on being computed and stays internal.
 
 ## Open Product Questions
 

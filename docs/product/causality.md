@@ -712,13 +712,14 @@ The important architectural requirement is that Chronologity does not make a mod
 
 ## Open Product Questions
 
+Settled: **relationships appear within Moment depth as a bounded list, in both directions** (ADR-142). Each carries its kind, its origin, who asserted it, and nothing about the Moment at the far end. A relationship whose far end privacy withholds is absent entirely — an identifier pointing at an inaccessible Moment is itself a disclosure — while one Chronologity withheld remains, marked unavailable, so a chain keeps its shape. Whether relationships also appear directly in the Timeline is still open.
+
 The following questions should be resolved deliberately:
 
 - Can another person propose a relationship for a Moment they do not own? Asserting one about two Moments that are both somebody else's is refused; whether a stranger may *propose* one, awaiting acceptance, is a different question and remains open.
 - Should the author of the far Moment be able to see, dispute, or remove a claim somebody else made about it?
 - What consent model is required for shared causal relationships?
 - How should users discover the relationship-authoring capability?
-- How should relationships appear within Moment depth?
 - Should relationships appear directly in the Timeline or only in Moment detail?
 - When should Chronologity begin suggesting possible relationships?
 - What evidence is sufficient for the system to suggest a relationship?

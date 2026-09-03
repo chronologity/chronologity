@@ -4935,3 +4935,83 @@ Paging arguments alone with narrowing added later; `timelineSlice` as the field 
 `zoom` and an anchor as arguments. Both are fields of the same specification object, and both belong to phases that can answer them — temporal zoom to 9F, a jump to 9G. Declaring an input field a resolver silently discards is the input-side form of the rule ADR-140 stated for output fields.
 
 Field weighting and a total complexity budget. Depth remains the only cost control. Two queries is not enough shape to weigh, and 9K is where that lands.
+
+---
+
+# ADR-142 — A Moment Is Read From PostgreSQL, Authorized Once, and Carries Its Own Proof
+
+## Status
+
+Accepted. Settles the Moment Depth open questions in `feed.md` and `timeline.md`, and `causality.md`'s question about how relationships appear in depth.
+
+## Context
+
+9C made the aggregator able to walk a Timeline. Every entry it returns is a date and an identifier, deliberately: the projection holds what chronology needs and nothing a Moment says.
+
+9D is what happens when somebody taps one, and it could not be built without answering three questions the documents had left open.
+
+**Where depth reads from.** `timeline.md` asked whether it comes entirely from ClickHouse. The projection has no caption, no media, no discussion and no reaction column, so the honest answers were to project them or to read the authoritative tables.
+
+**Where the visibility rule lives.** It is SQL inside `apps/api`, and the aggregator may not import it. ADR-138 answered this exact shape of question for the Timeline rule.
+
+**What "significance" means in a read.** The roadmap's line for 9D says to compose it. `historical-significance.md:1374` says nothing exposes a score.
+
+## Decision
+
+**Moment depth reads PostgreSQL directly**, one Moment at a time, when somebody opens one. `feed.md`'s "PostgreSQL Access" gains this as a fourth permitted reason, and its prohibition on normal feed queries reading authoritative tables stands unchanged — the distinction is per-item versus on-demand.
+
+**The visibility rule moves into `packages/moment-access`**, which both applications import. It carries `visibleToViewer`, its two halves separately, `commentReadableBy`, and `disclosePlace`.
+
+**The package emits no placeholder syntax of its own.** The caller supplies the tokens: `NAMED_VIEWER` for TypeORM, a `PositionalParameters` binder for `pg`.
+
+**Authorization happens once per Moment, and the type system enforces it.** Only `findVisible` produces an `AuthorizedMoment`; every other statement takes one. The media statement receives no Viewer at all.
+
+**Significance exposes the reader's own private mark and nothing else.** No score, no dimension, no scope, no count of other people's marks.
+
+**Relationships are a bounded list carrying no far-end content.** Privacy withholding the far end omits the claim entirely; moderation withholding it leaves `unavailable: true`.
+
+**A comment tombstone is the same type with nulls, not its own type** — a deliberate departure from ADR-140's union discipline.
+
+**One `Cursor` scalar serves three connections**, with a tagged envelope for the kinds this application invented. A Timeline position still encodes to exactly the bytes the shared codec produces.
+
+## Alternatives Considered
+
+A Moment-depth projection in ClickHouse; a second copy of the visibility rule in the aggregator; a dialect flag inside the package; rewriting `:name` to `$n` with a regular expression; exposing the derived significance score; a withheld-Moment union mirroring ADR-140; a cursor scalar per connection; comments as a root query; a `replies` connection on `Comment`.
+
+## Rationale
+
+**The projection would have had to store what two decisions refused to store.** ADR-113 keeps no reaction counter because a running total is a contended row; ADR-114 makes a comment count depend on who is blocked. A depth projection needs both as numbers, and a copy that lags shows five comments as three. `caching.md:722` independently names private Moment depth a poor caching candidate, for the same underlying reason.
+
+**A rewriter over SQL is a parser**, and this is the one string it must never mis-parse. A dialect flag fails differently: positional numbering depends on how many values the surrounding statement has already bound, which the package cannot see and must not be told.
+
+**The two halves are typed by what they read.** `privacyPermits` takes only the Viewer token, not adulthood — so a caller cannot bind an age into the half that must not depend on one. Getting the halves the wrong way round leaks private history, which is why they are exported separately rather than only as their conjunction.
+
+**Authorization once is a correctness argument before it is a cost one.** The API re-runs its access gate inside `relationships.list` and every significance method, because each of its endpoints is a separate request and cannot know the last one ran. A GraphQL tree copying that shape would prove one fact four times, with four chances for one of them to disagree mid-response.
+
+**Suspension filters the count, not the rows.** In the `WHERE` a suspended reader's own reaction vanishes before the aggregate sees it, and they stop being told what they themselves chose. That distinction is invisible in review and is pinned by an integration test.
+
+**A tombstone has no field whose absence is the guarantee.** ADR-140 chose a union because a withheld Timeline entry must not carry a UTC offset — an absence enforced by the schema. A deleted comment's replies need something to hang from, so clients need its identifier and its time regardless, and `deleted` is a discriminator the contract already carries.
+
+**Significance is computed and stays internal.** ADR-115 built it per scope and per dimension with provenance and an algorithm version; `:1098` rejects showing a number beside a Moment. What is computed serves navigation, and navigation arrives with historical jumps.
+
+## Consequences
+
+The aggregator's PostgreSQL connection answers three questions rather than two. `monorepo.md`, `feed.md`, `.env.example` and the boundary's own doc comment all said two, and all four are corrected here.
+
+**A statement-count integration suite now pins the shape.** The fullest selection costs eight statements and a caption costs three; ten times the media, comments and relationships costs the same eight. Growth is asserted rather than magnitude, because a tree that began asking per row would move that number loudly rather than quietly against real history.
+
+**A golden-string test was written before the rule moved** and now imports it from the package, proving the SQL is byte-identical. The API's integration suite passing unchanged is the behavioural half of the same evidence.
+
+**One bug was found by the GraphQL suite that the unit tests could not reach.** The composer uppercased the Moment's own enums and passed the place's through, so `LocationDisclosure` arrived as `exact` where the schema wanted `EXACT`. Every composer unit test passed, because they asserted in the contract's vocabulary; through GraphQL it surfaced as an internal error on `place.disclosure`. The composer now returns a shape spelled the way the schema spells it, and a unit test pins the case.
+
+`Query` grows a fourth field, and `schema.test.ts`'s assertion moves with it.
+
+## Deliberately Not Here
+
+Real-world Events. `timeline.md:426` lists them under depth composition, which is the honest case for including them, but `RealWorldEvent` has no GraphQL type and its shape is decided by what horizontal adjacency needs rather than by what a detail panel prints. 9D could answer only "here are some names", which 9E would immediately reshape.
+
+Reactor lists; any derived significance score; DataLoader, which 9H brings and which the lateral joins made unnecessary here; response caching; per-field complexity budgets; media URLs, storage keys and upload state, which the schema has never carried; edit history; `MediaConnection.totalCount`.
+
+The API caps relationships at a constant of 100 inside its own service while the aggregator reads the same bound from `packages/contracts`. Two copies of one number, left alone rather than unified, because the phase's remit was the security rule and this is a page bound. Worth collapsing when something else touches that service.
+
+`moment_comments` has no index on `moment_id` alone, so counting a whole discussion is a sequential scan — in the API too. `total` is a field resolver, so nobody pays for it unless they ask; the migration is a write-side change for a read-side need and was left out.

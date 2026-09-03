@@ -1755,10 +1755,9 @@ Still open: whether a future scope emerges that genuinely needs a persisted defi
 
 ## Moment Depth
 
-- Does Moment depth come entirely from ClickHouse?
-- Which fields require other read stores?
-- How are large media collections paginated?
-- Does depth query include Comments or load them separately?
+Settled by ADR-142: **no**. Depth comes from PostgreSQL, because the Timeline projection deliberately holds no caption, media, discussion or reaction. ClickHouse answers where a Moment sits in history; the authoritative tables answer what it is. Media pages on its stored position, and Comments are a connection that costs nothing unless a client selects it.
+
+Still open: how a Moment's corrections should be presented, which is a product question (`moments.md:606`).
 
 ## Authorization
 
