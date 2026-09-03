@@ -1,0 +1,202 @@
+import type { ViewSpecification } from "@chronologity/contracts";
+import type { ClickHouseClient } from "@clickhouse/client";
+import {
+  asClickHouseDateTime,
+  boundaryCondition,
+  eligible,
+  narrowingFor,
+  narrowingSql,
+  orderFor,
+  TIMELINE_VERSION,
+  type TimelineEligibility,
+  type TimelinePosition,
+  type TimelineReading,
+} from "@chronologity/timeline-derivation";
+
+/**
+ * Reading history in the order it happened.
+ *
+ * The aggregator's own statements over the projection the API writes. ADR-138
+ * shares what must not exist twice — the eligibility rule, the cursor format,
+ * the translation from a specification to filters — and leaves each application
+ * its own queries, because their shapes genuinely differ: the API returns REST
+ * pages and counts what a Saved View has gained, and this returns connections.
+ *
+ * Keyset paging throughout, never offsets. `timeline.md:776` requires it and
+ * the reason is the product rather than performance: history grows in the
+ * middle, so a photograph uploaded today about 1969 lands between two pages
+ * somebody has already seen, and an offset taken before that insertion now
+ * points a row further along.
+ *
+ * **Eligibility is applied inside the statement, before the limit.** Nothing
+ * here is removed after the fact, which is what makes a page come back full
+ * whenever history holds that many Moments — and it is why this service does no
+ * over-fetching. Filtering a finished page leaks through its size: asking for
+ * twenty and receiving four says sixteen things exist.
+ */
+
+/** The table carrying membership and the columns eligibility is decided from. */
+const CONTEXTS = "timeline_moment_contexts";
+
+/**
+ * A page of rows, and whether history continues past its far end.
+ *
+ * The `more` flag is decided here rather than by a caller, because it is a
+ * property of the statement: one row beyond the page is asked for and never
+ * returned, and its presence is the difference between "there is more" and
+ * "that was the end". The alternative is a cursor on every page and a client
+ * discovering the end by receiving nothing, which is a wasted round trip on
+ * every Timeline that ends.
+ */
+export interface TimelineSlice {
+  /** At most the limit the view asked for, in the order they were walked. */
+  readonly rows: readonly TimelineReading[];
+  /** Whether the probe row came back. */
+  readonly more: boolean;
+}
+
+/**
+ * Fill a scope's chosen Moments back out into whole Timeline rows.
+ *
+ * `timeline_moment_contexts` is an index rather than a record: it carries what
+ * ordering and eligibility need and nothing a Moment is presented with. So the
+ * inner query chooses and pages, and this joins back to `timeline_moments` for
+ * the rest — after the limit, so the join touches only the rows being returned.
+ *
+ * Every chosen query supplies a `readable` column. A scoped read selects a
+ * constant 1, because its `WHERE` has already refused everything else; a
+ * person's own read selects the eligibility rule itself, because it refuses
+ * nothing and reports instead. One shape either way, so nothing downstream has
+ * to know which it came from.
+ *
+ * @param chosen - A query over the contexts table selecting `moment_id`,
+ *   `occurred_at` and `readable`, already ordered and limited.
+ * @param order - How to order the joined rows, qualified with the `moment`
+ *   alias, since a join does not preserve the subquery's order.
+ * @returns The query to run.
+ */
+function withMoments(chosen: string, order: string): string {
+  // Named one by one rather than `moment.*`, which ClickHouse returns qualified
+  // — `moment.moment_id` — and every reader here expects bare names.
+  return `SELECT scoped.readable AS readable,
+                 moment.occurred_at AS occurred_at,
+                 moment.recorded_at AS recorded_at,
+                 moment.moment_id AS moment_id,
+                 moment.author_user_id AS author_user_id,
+                 moment.projected_at AS projected_at,
+                 moment.occurrence_end AS occurrence_end,
+                 moment.occurrence_precision AS occurrence_precision,
+                 moment.occurrence_offset_minutes AS occurrence_offset_minutes,
+                 moment.visibility AS visibility,
+                 moment.moderation_state AS moderation_state,
+                 moment.discoverable AS discoverable,
+                 moment.projection_version AS projection_version
+            FROM (${chosen}) AS scoped
+           INNER JOIN timeline_moments AS moment
+              ON moment.moment_id = scoped.moment_id
+             AND moment.projection_version = {version: String}
+           ORDER BY ${order}`;
+}
+
+/**
+ * Reads the Timeline projection for one Viewer at a time.
+ */
+export class TimelineReadModel {
+  /**
+   * Build the read model.
+   *
+   * @param client - The ClickHouse boundary, which reads with `final = 1` so a
+   *   duplicate awaiting a merge never reaches a caller.
+   * @param version - Which projection version to read, so a rebuild can fill a
+   *   new one beside the live one.
+   */
+  constructor(
+    private readonly client: ClickHouseClient,
+    readonly version: string = TIMELINE_VERSION,
+  ) {}
+
+  /**
+   * A page of whatever the view asks for.
+   *
+   * Two statements behind one method, and the branch is the asymmetry the
+   * product requires rather than an optimisation.
+   *
+   * **Somebody's own Timeline reports rather than filters.** Everything on it is
+   * theirs — they recorded it, or they agreed they were part of it — so nothing
+   * is removed and whether each row may be *read* comes back as a column. That
+   * is safe precisely because nothing is removed: the page is the same size
+   * either way, so its size cannot disclose what it does not show.
+   *
+   * **Every other Timeline filters.** A Moment somebody may not see is absent,
+   * because its existence is not theirs to know.
+   *
+   * @param view - What is being read: the scope, the lens, the narrowing, which
+   *   way the page runs and how large it is.
+   * @param viewer - What this Viewer may be shown, resolved before any row is
+   *   read. Never taken from the view: a stored view is a request, never a
+   *   grant.
+   * @param from - Where to resume, or undefined to start at the end the
+   *   direction implies.
+   * @returns The rows, and whether history continues past them.
+   * @throws {Error} If ClickHouse refuses the statement.
+   */
+  async page(
+    view: ViewSpecification,
+    viewer: TimelineEligibility,
+    from: TimelinePosition | undefined,
+  ): Promise<TimelineSlice> {
+    const own = view.context.type === "person" && view.context.id === viewer.viewerUserId;
+
+    // A Timeline its owner has closed answers empty, exactly as one belonging to
+    // somebody with no history does. Asked here rather than filtered later: the
+    // statement would return nothing anyway, and not sending it saves a query
+    // for an answer already known.
+    if (!own && !viewer.scopeIsOpen) {
+      return { rows: [], more: false };
+    }
+
+    const narrowing = narrowingFor(view, CONTEXTS, this.version);
+    const boundary = from === undefined ? "" : boundaryCondition(view.direction);
+    const membership = own
+      ? `AND context_type = 'person'
+         AND context_id = {viewer: String}`
+      : `AND context_type = {contextType: String}
+         AND context_id = {contextId: String}
+         AND ${eligible(CONTEXTS)}`;
+
+    const result = await this.client.query({
+      query: withMoments(
+        `SELECT moment_id, occurred_at,
+                ${own ? eligible(CONTEXTS) : "1"} AS readable
+           FROM ${CONTEXTS}
+          WHERE projection_version = {version: String}
+            ${membership}
+            ${narrowingSql(narrowing)}
+            ${boundary}
+          ORDER BY ${orderFor(view.direction)}
+          LIMIT {limit: UInt32}`,
+        orderFor(view.direction, "moment"),
+      ),
+      query_params: {
+        version: this.version,
+        viewer: viewer.viewerUserId,
+        blocked: viewer.blocked,
+        audience: viewer.audience,
+        isAdult: viewer.isAdult ? 1 : 0,
+        ...(own ? {} : { contextType: view.context.type, contextId: view.context.id }),
+        ...narrowing.params,
+        // One beyond the page. Never returned; its presence is how the far side
+        // of `pageInfo` is answered without a second count.
+        limit: view.limit + 1,
+        ...(from === undefined
+          ? {}
+          : { at: asClickHouseDateTime(from.occurredAt), momentId: from.momentId }),
+      },
+      format: "JSONEachRow",
+    });
+
+    const rows = await result.json<TimelineReading>();
+
+    return { rows: rows.slice(0, view.limit), more: rows.length > view.limit };
+  }
+}

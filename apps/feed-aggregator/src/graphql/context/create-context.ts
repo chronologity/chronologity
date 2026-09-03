@@ -3,6 +3,7 @@ import { ANONYMOUS } from "../../auth/auth-context.js";
 import type { TimelineEligibilityResolver } from "@chronologity/timeline-derivation";
 import { RequestEligibility } from "../../auth/request-eligibility.js";
 import type { ReadStore } from "../../read-models/clickhouse/client.js";
+import { TimelineReadModel } from "../../read-models/clickhouse/timeline-read-model.js";
 import type { GraphQLContext } from "./graphql-context.js";
 
 /**
@@ -28,6 +29,8 @@ import type { GraphQLContext } from "./graphql-context.js";
  *   every resolver receives.
  */
 export function createContext(store: ReadStore, eligibility: TimelineEligibilityResolver) {
+  const timeline = new TimelineReadModel(store.client, store.projectionVersion);
+
   return function contextFor(request: FastifyRequest): GraphQLContext {
     const viewer = request.viewer ?? ANONYMOUS;
 
@@ -40,8 +43,10 @@ export function createContext(store: ReadStore, eligibility: TimelineEligibility
       // Already bound to this request, so a resolver logging a slow query
       // produces a line that can be found beside the rest of the request.
       log: request.log,
-      clickhouse: store.client,
-      projectionVersion: store.projectionVersion,
+      // One read model for the process rather than one per request: it holds a
+      // client and a projection version and nothing about who is asking, so
+      // sharing it cannot leak a Viewer between requests.
+      timeline,
     };
   };
 }

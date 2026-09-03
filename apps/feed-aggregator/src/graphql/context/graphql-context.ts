@@ -1,7 +1,7 @@
-import type { ClickHouseClient } from "@clickhouse/client";
 import type { Viewer } from "../../auth/auth-context.js";
 import type { RequestEligibility } from "../../auth/request-eligibility.js";
 import type { Logger } from "../../observability/logger.js";
+import type { TimelineReadModel } from "../../read-models/clickhouse/timeline-read-model.js";
 
 /**
  * What every resolver receives.
@@ -26,13 +26,12 @@ export interface GraphQLContext {
   /**
    * Where Timeline history is read from.
    *
-   * On the context rather than imported by each resolver, so that a resolver
-   * cannot reach a store the request was not given — and so a test can give it
-   * a different one.
+   * The read model rather than the client it wraps, deliberately. On the context
+   * so a resolver cannot reach a store the request was not given, and narrowed
+   * to a read model so a resolver cannot write SQL at all — which `feed.md:256`
+   * forbids, and which a raw client on the context would quietly permit.
    */
-  readonly clickhouse: ClickHouseClient;
-  /** Which projection version this process reads. Every query names it. */
-  readonly projectionVersion: string;
+  readonly timeline: TimelineReadModel;
   /**
    * What this Viewer may see, resolved on demand and once per scope.
    *

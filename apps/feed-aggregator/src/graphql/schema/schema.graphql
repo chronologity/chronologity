@@ -24,6 +24,54 @@ type Query {
   problem depending on the answer here.
   """
   viewer: Viewer!
+
+  """
+  Where a Timeline opens.
+
+  The newest **occurrence** it holds, which is not the newest recording: a
+  photograph added today of 1969 belongs in 1969, and letting it become the head
+  would put somebody at the wrong end of history the moment they backfilled
+  anything. A head is a position in time and never a ranking.
+
+  Null when the view holds nothing. That includes a Timeline its owner has
+  closed, which answers as though it were empty rather than refusing — refusing
+  would itself say there was something there.
+  """
+  timelineHead(view: TimelineViewInput!): TimelineEntry
+
+  """
+  A page of history, newest first.
+
+  `first` and `after` walk back into the past; `last` and `before` come forward
+  towards the present. Either way the page is ordered newest first, so paging
+  back and then forward returns the same Moments in the same order.
+
+  The two pairs are alternatives: asking for both ends at once is refused rather
+  than resolved by precedence. Asking for neither opens the Timeline at its head.
+  """
+  timeline(
+    view: TimelineViewInput!
+
+    """
+    How many Moments, walking into the past. At least one, and at most 200.
+    """
+    first: Int
+
+    """
+    Resume after this position, walking into the past.
+    """
+    after: Cursor
+
+    """
+    How many Moments, walking towards the present.
+    """
+    last: Int
+
+    """
+    Resume before this position, walking towards the present.
+    """
+    before: Cursor
+  ): TimelineConnection!
 }
 
 """

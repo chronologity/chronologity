@@ -233,10 +233,11 @@ describe("occurrence", () => {
 });
 
 describe("what this phase did not add", () => {
-  it("leaves Query with the one field that can be answered", async () => {
+  it("leaves Query with the fields that can be answered", async () => {
     // Types are defined here; the queries returning them arrive with the phases
-    // that compose them. A field declared before then would answer null.
-    assert.deepEqual(await fieldsOf("Query"), ["viewer"]);
+    // that compose them. A field declared before then would answer null, so a
+    // jump and a distribution are absent until something can answer one.
+    assert.deepEqual((await fieldsOf("Query")).sort(), ["timeline", "timelineHead", "viewer"]);
   });
 
   it("still exposes no mutations and no subscriptions", async () => {

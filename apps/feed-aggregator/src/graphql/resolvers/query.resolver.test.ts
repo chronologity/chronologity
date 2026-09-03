@@ -13,7 +13,7 @@ import { queryResolvers } from "./query.resolver.js";
  */
 
 const contextFor = (viewer: Viewer): GraphQLContext =>
-  ({ viewer, traceId: "a-trace", projectionVersion: "timeline-v1" }) as GraphQLContext;
+  ({ viewer, traceId: "a-trace" }) as unknown as GraphQLContext;
 
 describe("Query.viewer", () => {
   it("reports an anonymous reader as unauthenticated, with no account", () => {

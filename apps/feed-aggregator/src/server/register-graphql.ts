@@ -8,6 +8,10 @@ import { createContext } from "../graphql/context/create-context.js";
 import { formatErrors } from "../graphql/format-errors.js";
 import { loadSchema } from "../graphql/load-schema.js";
 import { queryResolvers } from "../graphql/resolvers/query.resolver.js";
+import {
+  timelineEntryResolver,
+  timelineQueries,
+} from "../graphql/resolvers/timeline.resolver.js";
 import { cursorScalar } from "../graphql/scalars/cursor.scalar.js";
 import { dateTimeScalar } from "../graphql/scalars/date-time.scalar.js";
 import { authPlugin } from "../plugins/auth.plugin.js";
@@ -49,7 +53,10 @@ export async function registerGraphql(app: FastifyInstance, wiring: GraphQLWirin
     await scope.register(mercurius, {
       schema: loadSchema(),
       resolvers: {
-        ...queryResolvers,
+        // Merged field by field rather than by spreading two objects that both
+        // carry a `Query`, which would keep only the last one.
+        Query: { ...queryResolvers.Query, ...timelineQueries },
+        TimelineEntry: timelineEntryResolver,
         // Attached by name, and the names must match the SDL: Mercurius builds
         // the schema first and then copies these onto the types it found, so a
         // scalar declared here and not there fails at startup rather than

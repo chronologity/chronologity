@@ -246,3 +246,146 @@ type TimelineAround {
   """
   newer: TimelineConnection!
 }
+
+"""
+Which lens is applied to a person's Moments.
+
+Whose history is a different question from which of it. "What my father
+photographed" and "where my father was" are different questions about the same
+person, and only a person's Timeline can tell them apart.
+
+A place and an occasion have one lens, `ALL`: nothing about a place
+distinguishes recording from taking part. Asking either for another is refused
+rather than quietly answered as `ALL`, because a request that meant something
+other than it said would be worse than one that failed.
+"""
+enum TimelinePerspective {
+  """
+  What they recorded, together with what they took part in.
+  """
+  ALL
+
+  """
+  Only what they recorded.
+  """
+  AUTHORED
+
+  """
+  Only what somebody else recorded that they took part in.
+  """
+  PARTICIPATED
+}
+
+"""
+Whose history, or what's, to read.
+"""
+input TimelineScopeInput {
+  type: TimelineScopeType!
+  id: ID!
+}
+
+"""
+Narrowing within a scope, without changing what the scope is.
+
+Closed and enumerated on purpose. A Timeline is chronology over a scope and
+Search is what answers questions; accepting arbitrary predicates here would make
+this a second query language beside Search.
+
+A filter naming the same kind of thing as the scope is refused: filtering a
+place's Timeline by that place says nothing, and by a different one can never
+hold anything.
+"""
+input TimelineFiltersInput {
+  """
+  Only Moments this person recorded.
+  """
+  authorUserId: ID
+
+  """
+  Only Moments at this place.
+  """
+  locationId: ID
+
+  """
+  Only Moments that were part of this occurrence.
+  """
+  realWorldEventId: ID
+}
+
+"""
+A stretch of history, meant literally.
+
+Asked for again in ten years it is the same interval it always was: August 1969
+is August 1969.
+"""
+input FixedRangeInput {
+  from: DateTime!
+  to: DateTime!
+}
+
+"""
+The unit a rolling window is counted in.
+"""
+enum RollingRangeUnit {
+  DAY
+  MONTH
+  YEAR
+}
+
+"""
+A stretch of history counted back from now.
+
+`{ unit: DAY, count: 30 }` is the last thirty days, and it means the thirty days
+before the request rather than before anything was saved — which is what lets a
+stored view go on meaning "recently".
+"""
+input RollingRangeInput {
+  unit: RollingRangeUnit!
+
+  """
+  How many units, counting back from now. At least one, and at most a thousand.
+  """
+  count: Int!
+}
+
+"""
+A stretch of history, fixed or rolling.
+
+Exactly one. A fixed span and a rolling one are genuinely different things and
+supplying both is refused rather than resolved by precedence; supplying neither
+is refused too, since a range naming no stretch of time narrows nothing and is
+likelier a client dropping a field than an intention.
+
+Two nullable fields rather than a directive that would enforce the choice in the
+schema. `@oneOf` exists but was experimental in the GraphQL version this service
+is built on, and client tooling that does not understand it would refuse the
+whole schema — which would cost exactly what the connection convention was
+adopted to buy.
+"""
+input TimelineRangeInput {
+  fixed: FixedRangeInput
+  rolling: RollingRangeInput
+}
+
+"""
+A perspective on history: whose, which of it, and over what stretch.
+
+Everything except where the reader had got to, which the paging arguments carry.
+The same description a Saved View will store and a shared link will carry, so a
+Timeline means the same thing however it was arrived at.
+"""
+input TimelineViewInput {
+  scope: TimelineScopeInput!
+
+  """
+  Which lens. Only a person's Timeline has more than one.
+  """
+  perspective: TimelinePerspective = ALL
+
+  filters: TimelineFiltersInput
+
+  """
+  The stretch of history to read, or the whole of it when absent.
+  """
+  range: TimelineRangeInput
+}

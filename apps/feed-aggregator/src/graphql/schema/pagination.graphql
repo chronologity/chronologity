@@ -24,17 +24,24 @@ type PageInfo {
   endCursor: Cursor
 
   """
-  Whether there is more history in the direction being read.
+  Whether history continues further back.
 
-  False means history ran out, rather than that the next request would be
-  empty for some other reason. A page may hold fewer Moments than were asked
-  for and still have more beyond it: what a Viewer may see is decided before
-  the page is filled, so a sparse stretch returns what it has.
+  A page is ordered newest first whichever way it was walked, so this is the
+  end a client keeps following to read a life backwards.
+
+  False means history ran out. It does not mean the page came back short for
+  some other reason: what a Viewer may see is decided inside the query, before
+  the page is filled, so a page holds as many Moments as history has and its
+  size never says what was withheld.
   """
   hasNextPage: Boolean!
 
   """
-  Whether there is more history the other way.
+  Whether there is more history between this page and the present.
+
+  True whenever the page was reached from a cursor, since every cursor was
+  taken from a Moment that was returned. The one case where following it back
+  yields an empty page is a cursor whose Moment has since been erased.
   """
   hasPreviousPage: Boolean!
 }

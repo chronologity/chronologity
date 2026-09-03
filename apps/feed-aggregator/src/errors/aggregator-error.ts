@@ -72,3 +72,20 @@ export class OnboardingRequiredError extends AggregatorError {
   override readonly code = "ONBOARDING_REQUIRED" as const;
   override readonly status = 403;
 }
+
+/**
+ * The request is well-formed GraphQL and is not a question this service can ask.
+ *
+ * GraphQL refuses an unknown field, a wrong type and a missing argument before a
+ * resolver runs, and everything it refuses is refused better than this could be.
+ * What is left are the combinations the schema cannot express: a lens only a
+ * person has, asked of a place; a filter naming the same kind of thing the view
+ * is already about; both ends of a page asked for at once.
+ *
+ * Its message is written to be shown. Each of these is somebody's client sending
+ * a combination that does not mean anything, and the useful answer says which.
+ */
+export class ValidationError extends AggregatorError {
+  override readonly code = "VALIDATION_FAILED" as const;
+  override readonly status = 400;
+}
