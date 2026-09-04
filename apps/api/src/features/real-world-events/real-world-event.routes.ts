@@ -64,7 +64,7 @@ export function realWorldEventRoutes(events: RealWorldEventService) {
         },
         preHandler: requireUser,
       },
-      async (request) => events.get(request.params.realWorldEventId),
+      async (request) => events.get(request.params.realWorldEventId, request.user.userId),
     );
   };
 }

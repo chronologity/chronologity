@@ -1,4 +1,5 @@
 import type { Occurrence, RealWorldEvent, TemporalPrecision } from "@chronologity/contracts";
+import { NAMED_VIEWER, realWorldEventVisibleTo } from "@chronologity/moment-access";
 import type { DataSource } from "typeorm";
 import type { Transaction } from "../../lib/database/transaction.js";
 import {
@@ -125,5 +126,37 @@ export class RealWorldEventRepository {
     });
 
     return row === null ? undefined : toRealWorldEvent(row);
+  }
+
+  /**
+   * Whether a Viewer may know this Event exists.
+   *
+   * Its own statement rather than a predicate folded into `findById`, and
+   * deliberately: that read loads relations and shapes the contract, and a
+   * security predicate mixed into a relation query is a security predicate that
+   * a later refactor of the shape quietly drops.
+   *
+   * @param realWorldEventId - Which Event.
+   * @param viewerUserId - Who is asking.
+   * @param viewerIsAdult - Whether they are old enough for age-restricted
+   *   history, which the Moment rule inside this one asks about.
+   * @returns Whether they may be told it exists. False for an Event that does
+   *   not exist, so a caller need not distinguish the two — and must not.
+   * @throws {Error} If the database refuses.
+   */
+  async isVisibleTo(
+    realWorldEventId: string,
+    viewerUserId: string,
+    viewerIsAdult: boolean,
+  ): Promise<boolean> {
+    const rows: { visible: boolean }[] = await this.dataSource
+      .createQueryBuilder()
+      .select(realWorldEventVisibleTo("event", NAMED_VIEWER), "visible")
+      .from(EventRow, "event")
+      .where("event.real_world_event_id = :realWorldEventId", { realWorldEventId })
+      .setParameters({ viewerUserId, viewerIsAdult })
+      .getRawMany();
+
+    return rows[0]?.visible === true;
   }
 }

@@ -11,6 +11,7 @@ import { createTestAuthentication, type TestAuthentication } from "../../testing
 import { UserRepository } from "../users/user.repository.js";
 import { UserService } from "../users/user.service.js";
 import { LocationRepository } from "../locations/location.repository.js";
+import { ModerationRepository } from "../moderation/moderation.repository.js";
 import { LocationService } from "../locations/location.service.js";
 import { RealWorldEventRepository } from "./real-world-event.repository.js";
 import { RealWorldEventService } from "./real-world-event.service.js";
@@ -69,6 +70,7 @@ describe("real-world event endpoints", () => {
         database.dataSource,
         new RealWorldEventRepository(database.dataSource),
         locationRepository,
+        new ModerationRepository(database.dataSource),
       ),
     });
   });
@@ -155,6 +157,35 @@ describe("real-world event endpoints", () => {
     assert.equal(response.statusCode, 201, response.body);
 
     return response.json().locationId;
+  };
+
+  /**
+   * A private Moment belonging to an Event.
+   *
+   * Written by SQL rather than through the API: recording a Moment needs an
+   * upload and a caption, and none of that is what these assertions are about.
+   *
+   * @param authorUserId - Whose Moment it is.
+   * @param realWorldEventId - Which Event it belongs to.
+   * @returns Nothing.
+   */
+  const attachPrivateMoment = async (
+    authorUserId: string,
+    realWorldEventId: string,
+  ): Promise<void> => {
+    const momentId = randomUUID();
+
+    await database.dataSource.query(
+      `INSERT INTO moments (moment_id, author_user_id, caption, occurrence_start,
+                            occurrence_end, occurrence_precision,
+                            occurrence_offset_minutes, visibility)
+       VALUES ($1, $2, 'a private afternoon', now(), now(), 'instant', 0, 'private')`,
+      [momentId, authorUserId],
+    );
+    await database.dataSource.query(
+      "INSERT INTO moment_real_world_events (moment_id, real_world_event_id) VALUES ($1, $2)",
+      [momentId, realWorldEventId],
+    );
   };
 
   /** A three-day convention, at day precision. */
@@ -376,6 +407,69 @@ describe("real-world event endpoints", () => {
 
       assert.equal(response.statusCode, 200, response.body);
       assert.deepEqual(response.json(), created.json());
+    });
+
+    it("refuses one whose only history the caller may not read", async () => {
+      // Visibility is derived: an Event is as private as the history that
+      // establishes it. A stranger who cannot read the Moment cannot know the
+      // occasion happened.
+      const author = await onboard();
+      const stranger = await onboard();
+      const created = await record(author.accessToken, {
+        name: `Private gathering ${randomUUID()}`,
+        occurrence: convention,
+      });
+      const realWorldEventId = created.json().realWorldEventId as string;
+
+      await attachPrivateMoment(author.userId, realWorldEventId);
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/real-world-events/${realWorldEventId}`,
+        headers: authed(stranger.accessToken),
+      });
+
+      assert.equal(response.statusCode, 404, response.body);
+    });
+
+    it("returns it to whoever recorded that history", async () => {
+      const author = await onboard();
+      const created = await record(author.accessToken, {
+        name: `Private gathering ${randomUUID()}`,
+        occurrence: convention,
+      });
+      const realWorldEventId = created.json().realWorldEventId as string;
+
+      await attachPrivateMoment(author.userId, realWorldEventId);
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/real-world-events/${realWorldEventId}`,
+        headers: authed(author.accessToken),
+      });
+
+      assert.equal(response.statusCode, 200, response.body);
+    });
+
+    it("refuses an Event no Moment points at, to anybody but its creator", async () => {
+      // The assertion that pins the creator exemption. Without it, "the creator
+      // may read what they recorded" quietly degrades into "any authenticated
+      // caller may read anything" the moment somebody simplifies the rule — and
+      // the test above would still pass.
+      const creator = await onboard();
+      const stranger = await onboard();
+      const created = await record(creator.accessToken, {
+        name: `Unattached ${randomUUID()}`,
+        occurrence: convention,
+      });
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/real-world-events/${created.json().realWorldEventId}`,
+        headers: authed(stranger.accessToken),
+      });
+
+      assert.equal(response.statusCode, 404, response.body);
     });
 
     it("returns 404 for one that does not exist", async () => {

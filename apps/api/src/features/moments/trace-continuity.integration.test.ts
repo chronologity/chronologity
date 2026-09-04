@@ -109,6 +109,7 @@ describe("a trace that has to survive every hop", () => {
         database.dataSource,
         new RealWorldEventRepository(database.dataSource),
         new LocationRepository(database.dataSource),
+        new ModerationRepository(database.dataSource),
       ),
     });
   });

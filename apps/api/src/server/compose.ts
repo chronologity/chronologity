@@ -345,6 +345,7 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
       database.dataSource,
       realWorldEventRepository,
       locationRepository,
+      moderationRepository,
     ),
   });
 

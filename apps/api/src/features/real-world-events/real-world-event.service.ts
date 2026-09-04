@@ -9,6 +9,8 @@ import type { RequestContext } from "../../types/request-context.js";
 import { NotFoundError } from "../../lib/errors/not-found-error.js";
 import { ValidationError } from "../../lib/errors/validation-error.js";
 import type { LocationRepository } from "../locations/location.repository.js";
+import { isAdult } from "../moderation/moderation.policy.js";
+import type { ModerationRepository } from "../moderation/moderation.repository.js";
 import {
   checkOccurrence,
   describeOccurrenceRejection,
@@ -43,12 +45,18 @@ export class RealWorldEventService {
    * @param locations - Used to check that a place named actually exists.
    *   Reached through its repository rather than a foreign key alone so the
    *   refusal is a stated one rather than a constraint violation.
+   * @param moderation - Reads the one fact about a Viewer that an Event cannot
+   *   answer for itself: how old they are, which the Moment rule inside its
+   *   visibility check asks about.
    * @param clock - Injected so tests can move time without waiting.
    */
   constructor(
     private readonly dataSource: DataSource,
     private readonly events: RealWorldEventRepository,
     private readonly locations: LocationRepository,
+    // For the one fact the Event rule needs that an Event cannot answer: how
+    // old the Viewer is, which the Moment rule inside it asks about.
+    private readonly moderation: ModerationRepository,
     private readonly clock: () => Date = () => new Date(),
   ) {}
 
@@ -136,22 +144,39 @@ export class RealWorldEventService {
   }
 
   /**
-   * Read one Event.
+   * Read one Event, if this Viewer may know it exists.
    *
-   * Any authenticated caller may read one. Event visibility is deliberately
-   * unbuilt: the specification is explicit that an Event's *existence* can
-   * itself be sensitive, and deciding who sees what requires Moments, viewers,
-   * and audiences that do not exist yet. Nothing is exposed meanwhile, because
-   * nothing enumerates Events and no Moment points at one.
+   * **Visibility is derived rather than stored**, and that is a decision about
+   * ownership. An Event belongs to nobody — ADR-100 is explicit that recording
+   * one confers no authority over anybody else's history of it — so there is
+   * nobody whose setting a visibility flag would be. What decides instead is
+   * whether this Viewer can read a Moment that was part of it, which makes an
+   * Event's existence exactly as private as the history that establishes it.
+   *
+   * The Viewer who recorded it is admitted too. That is provenance granting what
+   * provenance should: you may read the record you caused to exist.
    *
    * @param realWorldEventId - Which Event.
+   * @param viewerUserId - Who is asking.
    * @returns The Event.
-   * @throws {NotFoundError} If there is no such Event.
+   * @throws {NotFoundError} If there is no such Event, or if this Viewer may not
+   *   know of one. One refusal for both, because distinguishing them would tell
+   *   a caller that an occurrence they may not see exists — which is the thing
+   *   `real-world-events.md:732` says may itself be sensitive.
    */
-  async get(realWorldEventId: string): Promise<RealWorldEvent> {
+  async get(realWorldEventId: string, viewerUserId: string): Promise<RealWorldEvent> {
     const event = await this.events.findById(realWorldEventId);
 
     if (event === undefined) {
+      throw new NotFoundError("No such real-world event");
+    }
+
+    const viewerIsAdult = isAdult(
+      await this.moderation.findDateOfBirth(viewerUserId),
+      this.clock(),
+    );
+
+    if (!(await this.events.isVisibleTo(realWorldEventId, viewerUserId, viewerIsAdult))) {
       throw new NotFoundError("No such real-world event");
     }
 

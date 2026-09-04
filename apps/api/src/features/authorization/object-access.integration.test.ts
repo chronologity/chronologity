@@ -750,6 +750,7 @@ describe("reaching something with somebody else's identifier", () => {
         database.dataSource,
         new RealWorldEventRepository(database.dataSource),
         new LocationRepository(database.dataSource),
+        new ModerationRepository(database.dataSource),
       ),
       moments,
       momentRelationships: new MomentRelationshipService(
