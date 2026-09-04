@@ -5151,3 +5151,79 @@ A `scale` argument on `timeline`; a `zoom` field on `TimelineViewInput`; represe
 **Both generators live in one file** because the risk is not that either expression is wrong alone — a count is a dot's size and a representative is a thumbnail — but that they drift apart, at which point a Moment appears under the wrong week and nothing reports it.
 
 **The counts are for conveying density, not for reading as a figure**, and that relaxes nothing about privacy. A dot sized for eleven where the reader may see two discloses nine withheld Moments at lower resolution, not at zero. ADR-130 is a disclosure rule rather than a rendering rule.
+
+---
+
+# ADR-145 — A Jump Lands in a Position, May Cross Into Another Timeline, and Reauthorizes Everything It Reaches
+
+## Status
+
+Accepted. Discharges ADR-141's deferred anchor and ADR-143's deferred landing, answers `architecture/timeline.md`'s four open questions on jump contract shape and its question about significance anchors, and settles `privacy.md:998`.
+
+## Context
+
+9C built the vertical axis, 9D depth, 9E the horizontal axis, 9F density. None of them let somebody arrive somewhere without travelling there, which `timeline.md:312` calls a day-one feature and ADR-023 accepted years of decisions ago.
+
+Two ADRs deferred work here by name. ADR-141 declined to accept an anchor argument until a phase could honour one — leaving `viewPositionSchema.anchorMomentId` in the contract, read by nothing. ADR-143 put it plainly: "**9E answers 'where can I go'; 9G answers 'where do I land.**"
+
+Two questions had no answer anywhere. `architecture/timeline.md:1749` asked "How does historical significance influence anchors without becoming ranking?" and nothing answered it, which is the shape of gap that made 9E unbuildable as written. And `privacy.md:998` asked what a jump landing among only inaccessible Moments should show, with three inconsistent precedents in the codebase.
+
+## Decision
+
+**A jump lands in a position, not on a Moment.** `at` is what sits *at* the anchor, and null when nothing does. The surrounding pages show what lies either side.
+
+**No `nearest` query.** A landing is two bounded keyset pages: `older` inclusive of the anchor, `newer` strictly after it.
+
+**An instant bounds a page by occurrence alone**, never by the `(occurred_at, moment_id)` tuple. `instantBoundary` is a sibling of `boundaryCondition` rather than a parameter of it.
+
+**Six anchors, two coordinates.** An instant and a Moment are irreducible; a place, an occasion, a relationship and a span are ways of computing one of them. One root field, `timelineAround`, taking one input with a runtime exactly-one rule.
+
+**A significance anchor is the Moment temporal zoom already picks** — 9F's first representative for the span, asserted equal across the two surfaces by test.
+
+**A jump may cross Timelines, under one rule for every anchor**: stay when the destination is a member of the Timeline being read, otherwise land in the destination author's own. A place or an occasion always changes scope, because naming one is naming a context. The answer carries the scope landed in.
+
+**Three refusals, one answer.** A destination that never existed, one that is not the reader's to see, and one on a Timeline they may not open all return a position of nothing.
+
+**Every destination is reauthorized before its instant is used**, and a cross-scope landing resolves the destination's scope rather than reusing the source's.
+
+**`reason` is returned; `SEARCH_RESULT` is not declared** until something can produce one.
+
+## Alternatives Considered
+
+Six root fields, one per anchor kind; `@oneOf` for the anchor input; a `nearest` query ordering by absolute distance; a synthesised `momentId` sentinel to reuse the tuple comparison for instants; stripping the landing out of the older page; a fifth "return cursor" kind; declaring `SEARCH_RESULT` now; changing the REST routes to match; a jump-destination projection in ClickHouse; landing a Moment jump wherever the reader already was; `scope` only on the connections.
+
+## Rationale
+
+**A field's return type cannot vary by argument — but here it does not need to.** ADR-144 split `temporalDistribution` off `timeline` because zoom's return type genuinely varied. All six anchors answer `TimelineAround`, so the reason to split does not apply and should not be applied by analogy. Two further arguments decide it: reauthorization becomes one gate rather than six places the check must be right; and if the client must pick the query, the client is deciding the destination, which makes "the answer says where you landed" true and useless.
+
+**The nearest-Moment semantics the REST surface ships are the thing the product document forbids.** `timeline.md:367` — "preserve the requested temporal orientation rather than silently redefining the target as one of the nearby Moments." A jump to a June nothing happened in reported as the February before it is not a smaller answer, it is a different one, and nothing in the response says so. The `TimelineAround` SDL written in 9B already agreed with the document; the implementation is what diverged.
+
+**The partition invariant is the whole correctness argument for a landing.** Two pages are right exactly when together they cover the readable axis once. Strict on both sides and a Moment at the anchor vanishes from a Timeline that contains it; inclusive on both and it appears twice. Neither surfaces as an error — the answer quietly has a hole or a double. **An instant cannot break a tie, because it names none of the Moments sharing it**, so it must put the whole instant on one side, and that is why it gets its own condition rather than a cleverer parameter on the tuple one. A sentinel identifier sorting above every UUID was measured and does produce the identical partition; it was rejected because correctness resting on how identifiers happen to sort is worse than correctness that reads as correct.
+
+**Older is the inclusive side for a reason that survives an empty newer page.** It runs newest-first from the boundary, so its first row *is* the landing. Inclusive `newer` would mean reading the landing out of the last edge of a page already reversed for presentation.
+
+**The landing stays in its page.** Lifting it out would shorten a page by one depending on whether the destination happened to be a member of the Timeline being read — a page short for a reason its size cannot explain, which is the shape ADR-141 removed from the architecture. It is also, for nothing, the membership probe: the first edge answers *is the destination here and eligible here*, in a query that was going to be issued anyway.
+
+**The significance anchor answers `timeline.md:1749` by construction rather than by argument.** It is not a new ranking; it is the summary the reader is already shown when they zoom out. Everything that makes it safe was decided and tested in 9F — readable-only, one Moment per person, the `personal` dimension excluded because ordering discloses as surely as a count does, and no score anywhere near the wire. A second definition would have been a second thing to get right, and `historical-significance.md:1117` refuses "a universal leaderboard of most historically significant Moments" — which "the single most significant Moment in this scope" is one step from.
+
+**One scope rule rather than two.** Landing a causal jump where the link points while leaving a Moment jump stranded — at the right instant, in a Timeline that does not contain what was asked for — would be two behaviours for one gesture. `timeline.md:373` asks that a jump preserve the contextual perspective "unless the jump itself explicitly specifies another context", and a destination the current context does not hold is exactly that exception.
+
+**A cross-scope landing must resolve the destination's own eligibility, and the failure if it does not is invisible.** An audience list is bounded to the scope it was resolved for and `scopeIsOpen` is a property of the scope, so reusing the source's answer would withhold history the reader is entitled to — or read a closed Timeline as though it were open. Both look exactly like an empty Timeline. `RequestEligibility` is keyed by scope already, so each destination is resolved independently and each is resolved once.
+
+**Three refusals share one answer because distinguishing them is the disclosure.** `privacy.md:544` wants "no accessible Moment here" and nothing beyond it. Two nulls carry the distinction that may safely be drawn: a position with nothing at it is an ordinary sparse landing, while no position at all is a destination that was not this reader's to reach — indistinguishable from one that never existed.
+
+**Reauthorization precedes the instant, not the page.** `architecture/timeline.md:672-684` counts a timestamp among the things an unauthorized destination must not leak, so an unresolved anchor yields no instant at all rather than an instant with a flag beside it.
+
+**A moderation-withheld causal far end is refused here though `Moment.relationships` keeps it.** A list keeps a chain's shape by admitting a link exists, which discloses only that Chronologity acted. A landing has no shape to keep and would disclose an instant and a position instead.
+
+**`reason` is worth returning only because it is never a claim.** It is reported after the relationship was found and its far end reauthorized, or after a representative was actually chosen. `SEARCH_RESULT` could only echo a client's assertion until something server-side produces a search entry point, and a value that cannot be verified would undo the property that makes the field worth having. It arrives with 9J, coupled to the change that makes it truthful.
+
+**No return cursor.** It would be a UI coordinate in a cursor's clothing — versioned forever, refused by `expectKind` at four other connections, and encoding nothing that `scope` and `anchoredAt` do not already say in the open. What a back stack needs is those two fields plus real cursors taken from real rows.
+
+## Consequences
+
+**Two surfaces answer "around" differently, deliberately, and the one that is wrong is deprecated.** Changing the semantics of routes being deleted in Phase 10 is risk without a beneficiary, so the code is untouched and the two places that stated the wrong behaviour as a promise — the route description and `timelineAroundSchema`'s comment — now say what it actually does and that the replacement differs.
+
+**A third implementation of span boundaries now exists**, in TypeScript, because whether a request names a real span start has to be settled before a store is read. It is proved against both engines in the same suite that proves them against each other.
+
+**A bound in `audienceWithin` became visible while testing.** For a person scope it joins only the participated half, so a restricted Moment its own author wrote naming somebody else never reaches that person's audience list for the author's Timeline — readable by identifier, absent from the Timeline. Pre-existing, documented in the function, and left alone; recorded here because a jump is the first surface where the asymmetry is easy to trip over.

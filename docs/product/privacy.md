@@ -549,6 +549,20 @@ No accessible Moment here
 
 from any internal knowledge that inaccessible Moments exist.
 
+**As built, a jump landing among only inaccessible Moments shows the position and
+nothing else.** The instant asked for comes back, with nothing at it and two
+empty pages either side — the same answer a stretch of genuine silence gives.
+Nothing in the response distinguishes "nothing happened here" from "nothing here
+is yours", because that distinction is the disclosure.
+
+**A destination that cannot be reached is answered, not refused.** A Moment that
+never existed, one that is not this reader's to see, and one on a Timeline they
+may not open all return a landing with no position at all: no instant, no entry,
+two empty pages. They are the same value, byte for byte, because a refusal that
+differed would say something was there. Knowing an identifier has never granted
+access to what it names, and a jump is where that would otherwise be easiest to
+forget.
+
 ## Privacy and Relationship Traversal
 
 Following causal or semantic relationships may move a user to another historical position.
@@ -995,7 +1009,6 @@ The following questions should be resolved deliberately:
 - Should view history exist at all?
 - How should relationship visibility compose when connected Moments have different visibility?
 - How should shared Event contexts represent private participation?
-- What information, if any, should appear when a historical jump lands in a period containing only inaccessible Moments?
 - Which temporal aggregates are safe to expose at broader zoom levels?
 - Which data categories require retention for security or legal reasons?
 - Should Chronologity ever use facial recognition?

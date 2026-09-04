@@ -1746,14 +1746,34 @@ Settled by ADR-143.
 
 - What ClickHouse tables/materialized views support them?
 - How are bucket summaries chosen?
-- How does historical significance influence anchors without becoming ranking?
+
+Settled by ADR-145 for anchors: **significance does not influence them, it
+already chose them.** A significance anchor is the Moment temporal zoom returns
+as standing for the span — the same selection, the same rules, asserted equal
+across the two surfaces by test. It cannot become ranking because it is not a
+new ordering; it is the summary the reader is already shown.
 
 ## Historical Jumps
 
-- What destination types exist?
-- Are jumps represented by one generic target union?
-- How are inaccessible targets handled?
-- How is return context encoded?
+Settled by ADR-145.
+
+**Destination types**: a Moment, an instant, a Location, a Real-World Event, a
+causal destination, and what a span of history was about. They reduce to two
+coordinates — an instant, and sometimes a Moment at one.
+
+**One field, one input**: `timelineAround(view:, anchor:)`, with the anchor a
+single input carrying six nullable ways of naming a destination and a runtime
+rule that exactly one is named. Not six queries: reauthorization is then one
+gate rather than six, and a client choosing the query would be a client deciding
+the destination.
+
+**Inaccessible targets** answer as a position of nothing — no instant, no entry,
+two empty pages — in exactly the shape of a destination that never existed.
+
+**Return context** is `scope` and `anchoredAt`, both ordinary fields, plus real
+cursors on both pages. There is no return token: it would be a UI coordinate in
+a cursor's clothing, and would encode nothing those two fields do not already
+say in the open.
 
 ## Moment Depth
 

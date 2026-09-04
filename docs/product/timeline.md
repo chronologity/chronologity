@@ -556,7 +556,6 @@ The existence of temporal zoom and historical jumps is decided. The following qu
 - Which temporal zoom levels must the initial experience expose?
 - How should users transition between temporal zoom levels?
 - Which historical jump targets must be supported initially: year, month, day, exact date, or another combination?
-- How should historical jumps behave when no Moment exists at the requested temporal position?
 - How should temporal zoom and historical jumps interact with approximate dates?
 - How should the Timeline behave when a correction moves the active Moment?
 - How should autoplay behave after horizontal navigation, temporal zoom, historical jumps, or returning from depth?
