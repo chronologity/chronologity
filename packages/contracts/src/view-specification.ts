@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { timelineScaleSchema } from "./spans.js";
 import { identifierSchema } from "./identifiers.js";
 import { timestampSchema } from "./time.js";
 
@@ -65,17 +66,6 @@ export const viewPerspectiveSchema = z.enum(["all", "authored", "participated"])
 
 export type ViewPerspective = z.infer<typeof viewPerspectiveSchema>;
 
-/**
- * How coarsely history is being read.
- *
- * `day` is here and absent from the Timeline's bucket scales, which stop at a
- * year. A specification describes what somebody asked for; what the projection
- * can currently count is a separate question, and the narrower of the two is not
- * the one worth persisting.
- */
-export const viewZoomSchema = z.enum(["day", "year", "decade"]);
-
-export type ViewZoom = z.infer<typeof viewZoomSchema>;
 
 /**
  * A stretch of history, meant literally.
@@ -185,7 +175,7 @@ export const viewSpecificationSchema = z
     context: viewContextSchema,
     perspective: viewPerspectiveSchema.default("all"),
     range: viewRangeSchema.optional(),
-    zoom: viewZoomSchema.optional(),
+    zoom: timelineScaleSchema.optional(),
     filters: viewFiltersSchema.default({}),
     position: viewPositionSchema.default({}),
     /** How many Moments a page holds. Bounded so one request cannot ask for a life. */

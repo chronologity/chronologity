@@ -219,7 +219,6 @@ export {
   viewPositionSchema,
   viewRangeSchema,
   viewSpecificationSchema,
-  viewZoomSchema,
   type ViewContext,
   type ViewContextType,
   type ViewFilters,
@@ -227,7 +226,6 @@ export {
   type ViewPosition,
   type ViewRange,
   type ViewSpecification,
-  type ViewZoom,
 } from "./view-specification.js";
 export {
   addMediaRequestSchema,
@@ -503,7 +501,6 @@ export {
   withheldTimelineEntrySchema,
   timelinePageRequestSchema,
   timelinePageSchema,
-  timelineScaleSchema,
   type TimelineAround,
   type TimelineAroundRequest,
   type TimelineBuckets,
@@ -517,8 +514,15 @@ export {
   type WithheldTimelineEntry,
   type TimelinePage,
   type TimelinePageRequest,
-  type TimelineScale,
 } from "./timeline.js";
+export {
+  HISTORY_FLOOR,
+  MAX_SPANS_PER_REQUEST,
+  REPRESENTATIVES_PER_SPAN,
+  spansBetween,
+  timelineScaleSchema,
+  type TimelineScale,
+} from "./spans.js";
 export {
   geoPrecisionSchema,
   matchReasonSchema,

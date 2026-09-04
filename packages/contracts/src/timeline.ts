@@ -3,6 +3,7 @@ import { identifierSchema } from "./identifiers.js";
 import { temporalPrecisionSchema, timestampSchema } from "./time.js";
 import { momentVisibilitySchema } from "./moments.js";
 import { viewPerspectiveSchema } from "./view-specification.js";
+import { timelineScaleSchema } from "./spans.js";
 
 /**
  * Navigating history.
@@ -18,11 +19,6 @@ import { viewPerspectiveSchema } from "./view-specification.js";
 export const timelineDirectionSchema = z.enum(["older", "newer"]);
 
 export type TimelineDirection = z.infer<typeof timelineDirectionSchema>;
-
-/** How coarsely history is being viewed. */
-export const timelineScaleSchema = z.enum(["year", "decade"]);
-
-export type TimelineScale = z.infer<typeof timelineScaleSchema>;
 
 /**
  * A Moment as the Timeline presents it.
