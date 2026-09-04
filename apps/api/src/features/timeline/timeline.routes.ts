@@ -12,6 +12,7 @@ import {
   type TimelineNarrowing,
   type ViewContext,
   type ViewSpecification,
+  type TimelineScale,
 } from "@chronologity/contracts";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
@@ -89,7 +90,7 @@ export function timelineRoutes(timeline: TimelineService) {
         direction?: "older" | "newer" | undefined;
         limit?: number | undefined;
         at?: string | undefined;
-        scale?: "year" | "decade" | undefined;
+        scale?: TimelineScale | undefined;
       },
     ): ViewSpecification => {
       const parsed = viewSpecificationSchema.safeParse({
@@ -212,7 +213,7 @@ export function timelineRoutes(timeline: TimelineService) {
         schema: {
           summary: "How your history is distributed",
           description: [
-            "Counts per year or per decade, for navigating at a scale where returning every Moment would be neither useful nor fast.",
+            "Counts per span, at any scale from a day to a century, for navigating where returning every Moment would be neither useful nor fast. Refused rather than shortened when the stretch and the scale together would be too many spans to answer.",
             "",
             "Spans holding nothing are absent rather than zero: a century you recorded nothing in is not a hundred empty rows. Counts agree with what paging returns.",
           ].join("\n"),
@@ -279,7 +280,7 @@ export function timelineRoutes(timeline: TimelineService) {
         ].join("\n"),
 
         buckets: [
-          "Counts per year or per decade, over what you may see.",
+          "Counts per span, at any scale from a day to a century, over what you may see.",
           "",
           "Counts agree with what paging returns, which is the point: a bucket saying twelve where you may open four would advertise the eight. Spans holding nothing are absent rather than zero.",
         ].join("\n"),

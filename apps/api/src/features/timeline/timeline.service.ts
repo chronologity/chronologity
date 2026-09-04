@@ -3,13 +3,14 @@ import type {
   ViewSpecification,
   TimelineEntry as ContractTimelineEntry,
 } from "@chronologity/contracts";
+import { HISTORY_FLOOR, MAX_SPANS_PER_REQUEST, spansBetween } from "@chronologity/contracts";
 import type {
   TimelineEligibility,
   TimelineEligibilityResolver,
   TimelineScopeRef,
 } from "@chronologity/timeline-derivation";
 import { ValidationError } from "../../lib/errors/validation-error.js";
-import { narrowingFor } from "@chronologity/timeline-derivation";
+import { narrowingFor, resolveRange } from "@chronologity/timeline-derivation";
 import { decodeCursor, encodeCursor, type TimelinePosition } from "@chronologity/timeline-derivation";
 import type {
   Direction,
@@ -303,20 +304,45 @@ export class TimelineService {
   /**
    * How the view's history is distributed.
    *
+   * **Bounded by how many spans it would produce**, which is the same rule and
+   * the same constant the read service applies. Without it this endpoint would
+   * be the way around that rule: a bound enforced on one surface and not on
+   * another is not a bound, and asking for a lifetime day by day is tens of
+   * thousands of rows either way.
+   *
+   * A view naming no stretch of time is read across everything history can
+   * hold, which the coarse scales answer comfortably and the fine ones cannot —
+   * so a fine scale needs a range, and says so.
+   *
    * @param viewerUserId - Who is asking.
    * @param view - What they are looking at; its zoom is the scale.
+   * @param now - Injected so a rolling range resolves against a clock a test can
+   *   pin, matching how new-Moment counts are derived.
    * @returns One bucket per span holding anything, oldest first.
+   * @throws {ValidationError} If the stretch and the scale together would
+   *   produce more spans than one request may answer.
    */
   async deriveBuckets(
     viewerUserId: string,
     view: ViewSpecification,
+    now: Date = new Date(),
   ): Promise<readonly TimelineBucket[]> {
-    // A view may ask for a day, which somebody can save and this projection
-    // cannot yet count. Answered at the nearest scale it has rather than
-    // refusing a view that is otherwise perfectly readable — a saved view
-    // failing to open is the outcome worth avoiding.
-    const scale: Scale = view.zoom === "decade" ? "decade" : "year";
-    const narrowing = narrowingFor(view, CONTEXTS, this.timeline.version);
+    // Every scale a view can save is now a scale the projection counts, so what
+    // was saved is what is answered. A view that names none is read by year:
+    // absent means unspecified rather than finest, and a century of daily rows
+    // is not what somebody who said nothing asked for.
+    const scale: Scale = view.zoom ?? "year";
+    const range = resolveRange(view.range, now) ?? { from: HISTORY_FLOOR, to: now };
+    const spans = spansBetween(range.from, range.to, scale);
+
+    if (spans > MAX_SPANS_PER_REQUEST) {
+      throw new ValidationError(
+        `Counting that stretch by ${scale} would be ${spans} spans, and one request answers ${MAX_SPANS_PER_REQUEST}. Narrow the range, or ask for a coarser scale.`,
+        { field: "scale" },
+      );
+    }
+
+    const narrowing = narrowingFor(view, CONTEXTS, this.timeline.version, now);
 
     if (isOwn(viewerUserId, view)) {
       return this.timeline.ownBuckets(viewerUserId, scale, narrowing);

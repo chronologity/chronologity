@@ -1,7 +1,9 @@
 import type { ClickHouseClient } from "@clickhouse/client";
+import type { TimelineScale } from "@chronologity/contracts";
 import {
   asClickHouseDateTime,
   boundaryCondition,
+  clickHouseSpanStart,
   eligible,
   narrowingSql,
   orderFor,
@@ -34,8 +36,14 @@ import {
 /** Which way a page runs. */
 export type Direction = "older" | "newer";
 
-/** How coarsely history is being viewed. */
-export type Scale = "year" | "decade";
+/**
+ * How coarsely history is being viewed.
+ *
+ * The contract's own vocabulary rather than a narrower copy. A local list that
+ * named only two of the six is what let `month`, `week`, `day` and `century`
+ * fall through to a year here without any test noticing.
+ */
+export type Scale = TimelineScale;
 
 /** A count of Moments in one span of time. */
 export interface TimelineBucket {
@@ -272,8 +280,7 @@ export class TimelineReadRepository {
     scale: Scale,
     narrowing: ViewNarrowing = NOTHING,
   ): Promise<TimelineBucket[]> {
-    const years = scale === "decade" ? 10 : 1;
-    const bucket = `toDateTime64(concat(toString(intDiv(toYear(occurred_at), ${years}) * ${years}), '-01-01 00:00:00'), 3)`;
+    const bucket = clickHouseSpanStart(scale, "occurred_at");
 
     const result = await this.client.query({
       query: `SELECT ${bucket} AS starts_at, count() AS count
@@ -448,8 +455,7 @@ export class TimelineReadRepository {
     scale: Scale,
     narrowing: ViewNarrowing = NOTHING,
   ): Promise<TimelineBucket[]> {
-    const years = scale === "decade" ? 10 : 1;
-    const bucket = `toDateTime64(concat(toString(intDiv(toYear(occurred_at), ${years}) * ${years}), '-01-01 00:00:00'), 3)`;
+    const bucket = clickHouseSpanStart(scale, "occurred_at");
 
     const result = await this.client.query({
       query: `SELECT ${bucket} AS starts_at, count() AS count
