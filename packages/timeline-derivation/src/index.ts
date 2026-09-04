@@ -54,6 +54,13 @@ export {
 export { narrowingFor, narrowingSql, resolveRange, type ViewNarrowing } from "./narrowing.js";
 
 export {
+  clickHouseSpanStart,
+  postgresSpanStart,
+  WEEK_ANCHOR_DAYS_BEFORE_EPOCH,
+  WEEK_STARTS_ON,
+} from "./spans.js";
+
+export {
   asClickHouseDateTime,
   TIMELINE_VERSION,
   toRecord,
