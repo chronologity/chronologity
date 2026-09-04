@@ -518,8 +518,11 @@ export {
 export {
   HISTORY_FLOOR,
   MAX_SPANS_PER_REQUEST,
+  isSpanStart,
   REPRESENTATIVES_PER_SPAN,
+  spanEnd,
   spansBetween,
+  spanStart,
   timelineScaleSchema,
   type TimelineScale,
 } from "./spans.js";

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import type { TimelineScale } from "@chronologity/contracts";
+import { spanEnd, spanStart, type TimelineScale } from "@chronologity/contracts";
 import { clickHouseSpanStart, postgresSpanStart } from "@chronologity/timeline-derivation";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { createReadStore, type ReadStore } from "../read-models/clickhouse/client.js";
@@ -125,6 +125,48 @@ describe("where a span begins, in both stores at once", () => {
       });
     }
   }
+});
+
+describe("the arithmetic that decides a request, against the engines that answer it", () => {
+  // A third implementation of the same boundary, in TypeScript, because whether
+  // a request names a real span start has to be settled before any store is
+  // read. Three pieces of arithmetic written at different times will drift
+  // unless something says otherwise, and this is that something.
+  for (const { at, why } of INSTANTS) {
+    for (const scale of SCALES) {
+      it(`computes the ${scale} holding ${at} as both stores do — ${why}`, async () => {
+        const [clickhouse, postgres] = await Promise.all([
+          inClickHouse(at, scale),
+          inPostgres(at, scale),
+        ]);
+        const inTypeScript = spanStart(scale, new Date(at));
+
+        assert.equal(inTypeScript.getTime(), clickhouse.getTime(), "TypeScript disagrees with ClickHouse");
+        assert.equal(inTypeScript.getTime(), postgres.getTime(), "TypeScript disagrees with PostgreSQL");
+      });
+    }
+  }
+
+  it("ends each span one millisecond before the next one the stores would return", async () => {
+    for (const scale of SCALES) {
+      const start = spanStart(scale, new Date("1969-07-20T20:17:40.000Z"));
+      const next = new Date(spanEnd(scale, start).getTime() + 1);
+
+      // The instant after a span's last is the next span's first, in both
+      // engines. That is what makes a span a closed range a jump can be read
+      // over without overlapping its neighbour.
+      assert.equal(
+        (await inClickHouse(next.toISOString(), scale)).getTime(),
+        next.getTime(),
+        `${scale}: ClickHouse does not begin a span at ${next.toISOString()}`,
+      );
+      assert.equal(
+        (await inPostgres(next.toISOString(), scale)).getTime(),
+        next.getTime(),
+        `${scale}: PostgreSQL does not begin a span at ${next.toISOString()}`,
+      );
+    }
+  });
 });
 
 describe("the boundaries themselves", () => {

@@ -90,6 +90,102 @@ function startOfWeek(instant: Date): number {
 }
 
 /**
+ * Where the span holding an instant begins.
+ *
+ * **A third implementation of a boundary two stores already compute**, and that
+ * is a drift risk taken deliberately. Deciding whether somebody asked for a real
+ * span start has to happen before any store is read — a request that names the
+ * middle of a year as a year is malformed, and answering it would silently
+ * bucket from the wrong place. So this exists, and the agreement suite proves it
+ * against both engines rather than trusting that three pieces of arithmetic
+ * written at different times still say the same thing.
+ *
+ * @param scale - How coarsely history is being read.
+ * @param instant - Any instant.
+ * @returns The first instant of the span holding it, in UTC.
+ * @throws {RangeError} If the scale is not one of the six.
+ */
+export function spanStart(scale: TimelineScale, instant: Date): Date {
+  switch (scale) {
+    case "century":
+    case "decade":
+    case "year": {
+      const years = YEARS_PER_SPAN[scale];
+
+      return new Date(Date.UTC(Math.floor(instant.getUTCFullYear() / years) * years, 0, 1));
+    }
+
+    case "month":
+      return new Date(Date.UTC(instant.getUTCFullYear(), instant.getUTCMonth(), 1));
+
+    case "week":
+      return new Date(startOfWeek(instant));
+
+    case "day":
+      return new Date(startOfDay(instant));
+
+    default:
+      throw new RangeError(`Unknown timeline scale: ${String(scale)}`);
+  }
+}
+
+/**
+ * The last instant inside a span.
+ *
+ * Inclusive, because a range is read inclusively everywhere else in this system
+ * and an exclusive end would be the one boundary that behaved differently.
+ *
+ * @param scale - How coarsely history is being read.
+ * @param startsAt - The span's first instant. Not checked: a caller that has not
+ *   established this with `isSpanStart` is asking about a span that does not
+ *   exist.
+ * @returns The last instant the span holds, one millisecond before the next
+ *   span begins.
+ * @throws {RangeError} If the scale is not one of the six.
+ */
+export function spanEnd(scale: TimelineScale, startsAt: Date): Date {
+  const year = startsAt.getUTCFullYear();
+  let next: number;
+
+  switch (scale) {
+    case "century":
+    case "decade":
+    case "year":
+      next = Date.UTC(year + YEARS_PER_SPAN[scale], 0, 1);
+      break;
+
+    case "month":
+      next = Date.UTC(year, startsAt.getUTCMonth() + 1, 1);
+      break;
+
+    case "week":
+      next = startsAt.getTime() + 7 * DAY_MS;
+      break;
+
+    case "day":
+      next = startsAt.getTime() + DAY_MS;
+      break;
+
+    default:
+      throw new RangeError(`Unknown timeline scale: ${String(scale)}`);
+  }
+
+  return new Date(next - 1);
+}
+
+/**
+ * Whether an instant is where a span of this scale begins.
+ *
+ * @param scale - How coarsely history is being read.
+ * @param instant - The instant offered as a span start.
+ * @returns Whether it is one. The middle of a year is not a year.
+ * @throws {RangeError} If the scale is not one of the six.
+ */
+export function isSpanStart(scale: TimelineScale, instant: Date): boolean {
+  return spanStart(scale, instant).getTime() === instant.getTime();
+}
+
+/**
  * How many spans of a given scale a range covers, inclusive of both ends.
  *
  * Counts every span the range touches rather than the ones holding anything: it

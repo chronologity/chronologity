@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import {
   HISTORY_FLOOR,
+  isSpanStart,
   MAX_SPANS_PER_REQUEST,
   REPRESENTATIVES_PER_SPAN,
+  spanEnd,
   spansBetween,
+  spanStart,
   type TimelineScale,
 } from "./spans.js";
 
@@ -111,5 +114,105 @@ describe("spansBetween", () => {
       () => spansBetween(at("2026-01-01T00:00:00Z"), at("2026-01-02T00:00:00Z"), "fortnight" as TimelineScale),
       RangeError,
     );
+  });
+});
+
+describe("spanStart", () => {
+  it("finds the beginning of the span holding an instant, at every scale", () => {
+    const instant = at("2026-09-04T13:45:12.500Z");
+
+    assert.equal(spanStart("day", instant).toISOString(), "2026-09-04T00:00:00.000Z");
+    // 2026-09-04 is a Friday.
+    assert.equal(spanStart("week", instant).toISOString(), "2026-08-31T00:00:00.000Z");
+    assert.equal(spanStart("month", instant).toISOString(), "2026-09-01T00:00:00.000Z");
+    assert.equal(spanStart("year", instant).toISOString(), "2026-01-01T00:00:00.000Z");
+    assert.equal(spanStart("decade", instant).toISOString(), "2020-01-01T00:00:00.000Z");
+    assert.equal(spanStart("century", instant).toISOString(), "2000-01-01T00:00:00.000Z");
+  });
+
+  it("finds it the same way before the epoch", () => {
+    const instant = at("1901-06-15T12:34:56.789Z");
+
+    assert.equal(spanStart("day", instant).toISOString(), "1901-06-15T00:00:00.000Z");
+    assert.equal(spanStart("week", instant).toISOString(), "1901-06-10T00:00:00.000Z");
+    assert.equal(spanStart("month", instant).toISOString(), "1901-06-01T00:00:00.000Z");
+    assert.equal(spanStart("year", instant).toISOString(), "1901-01-01T00:00:00.000Z");
+    assert.equal(spanStart("decade", instant).toISOString(), "1900-01-01T00:00:00.000Z");
+    assert.equal(spanStart("century", instant).toISOString(), "1900-01-01T00:00:00.000Z");
+  });
+
+  it("leaves an instant that is already a span start where it is", () => {
+    for (const scale of SCALES) {
+      const start = spanStart(scale, at("1969-07-20T20:17:40.000Z"));
+
+      assert.equal(spanStart(scale, start).getTime(), start.getTime(), scale);
+    }
+  });
+
+  it("refuses a scale that is not one of the six", () => {
+    assert.throws(() => spanStart("fortnight" as TimelineScale, at("2026-01-01T00:00:00Z")), RangeError);
+  });
+});
+
+describe("spanEnd", () => {
+  it("ends one millisecond before the next span begins, at every scale", () => {
+    const instant = at("2026-09-04T13:45:12.500Z");
+
+    for (const scale of SCALES) {
+      const start = spanStart(scale, instant);
+      const end = spanEnd(scale, start);
+      const next = new Date(end.getTime() + 1);
+
+      assert.equal(spanStart(scale, next).getTime(), next.getTime(), `${scale} does not end at a boundary`);
+      assert.ok(end.getTime() > start.getTime(), `${scale} ends before it starts`);
+    }
+  });
+
+  it("keeps a leap February whole", () => {
+    assert.equal(
+      spanEnd("month", at("2024-02-01T00:00:00.000Z")).toISOString(),
+      "2024-02-29T23:59:59.999Z",
+    );
+  });
+
+  it("gives a non-leap February one day fewer", () => {
+    assert.equal(
+      spanEnd("month", at("2023-02-01T00:00:00.000Z")).toISOString(),
+      "2023-02-28T23:59:59.999Z",
+    );
+  });
+
+  it("ends a week seven days on, across the epoch", () => {
+    assert.equal(
+      spanEnd("week", at("1969-12-29T00:00:00.000Z")).toISOString(),
+      "1970-01-04T23:59:59.999Z",
+    );
+  });
+
+  it("ends a decade and a century on the year ending in zeros", () => {
+    assert.equal(spanEnd("decade", at("1960-01-01T00:00:00.000Z")).toISOString(), "1969-12-31T23:59:59.999Z");
+    assert.equal(spanEnd("century", at("1900-01-01T00:00:00.000Z")).toISOString(), "1999-12-31T23:59:59.999Z");
+  });
+
+  it("refuses a scale that is not one of the six", () => {
+    assert.throws(() => spanEnd("fortnight" as TimelineScale, at("2026-01-01T00:00:00Z")), RangeError);
+  });
+});
+
+describe("isSpanStart", () => {
+  it("accepts the instant a span begins at", () => {
+    for (const scale of SCALES) {
+      assert.ok(isSpanStart(scale, spanStart(scale, at("1998-07-04T19:30:00.000Z"))), scale);
+    }
+  });
+
+  it("refuses the middle of a span", () => {
+    // The middle of a year is not a year. A request naming one would otherwise
+    // bucket from somewhere nobody asked about.
+    assert.equal(isSpanStart("year", at("1998-06-15T00:00:00.000Z")), false);
+    assert.equal(isSpanStart("month", at("1998-06-15T00:00:00.000Z")), false);
+    assert.equal(isSpanStart("day", at("1998-06-15T00:00:00.001Z")), false);
+    assert.equal(isSpanStart("week", at("1998-06-15T00:00:00.000Z")), true);
+    assert.equal(isSpanStart("week", at("1998-06-16T00:00:00.000Z")), false);
   });
 });
