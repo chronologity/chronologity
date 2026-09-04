@@ -29,12 +29,17 @@
  * - **whether a comment may be read**, which is a different question about a
  *   different person and asks nothing about age;
  * - **how much of a place a reader is told**, because a privacy reduction
- *   written twice is a privacy reduction that will be widened in one copy.
+ *   written twice is a privacy reduction that will be widened in one copy;
+ * - **whether somebody may know a real-world Event exists**, which is derived
+ *   from the first of those rather than stored, because an Event belongs to
+ *   nobody and so has nobody whose setting a visibility flag would be.
  *
  * What is not here is either application's own queries. A rule is what they must
  * agree about; a statement is each one's own business.
  */
 export { commentReadableBy } from "./comment-access.js";
+
+export { realWorldEventVisibleTo } from "./event-access.js";
 
 export { moderationPermits, privacyPermits, visibleToViewer } from "./moment-access.js";
 
