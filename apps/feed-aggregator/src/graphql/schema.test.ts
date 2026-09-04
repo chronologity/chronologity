@@ -336,6 +336,70 @@ describe("significance", () => {
   });
 });
 
+describe("moving sideways", () => {
+  it("hands back a scope, so a client need not assemble one", async () => {
+    // The point of the field is "open that Timeline". A shape the client had to
+    // reconstruct a scope from would make its primary use its assembly job.
+    assert.deepEqual((await fieldsOf("HistoricalContext")).sort(), [
+      "adjacency",
+      "name",
+      "scope",
+    ]);
+  });
+
+  it("says why a context is there, rather than leaving it to the order", async () => {
+    // Order is not durable meaning: a client that sorts or re-pages loses it,
+    // and mere co-presence then reads as connection.
+    assert.deepEqual((await enumValuesOf("ContextAdjacency")).sort(), [
+      "SAME_PERIOD",
+      "SHARED_HISTORY",
+    ]);
+    assert.equal(await isRequired("HistoricalContext", "adjacency"), true);
+  });
+
+  it("offers no measure of how connected two contexts are", async () => {
+    // A number beside a context is the first vertebra of a ranking, and with
+    // the disclosure gate it would be a count over a superset of what survives.
+    const fields = await fieldsOf("HistoricalContext");
+
+    for (const absent of ["sharedMomentCount", "momentCount", "count", "strength", "score"]) {
+      assert.ok(!fields.includes(absent), `the axis exposed ${absent}`);
+    }
+  });
+
+  it("pages, because the axis does not run out", async () => {
+    assert.ok((await fieldsOf("HistoricalContextConnection")).includes("pageInfo"));
+    assert.ok((await fieldsOf("HistoricalContextConnection")).includes("edges"));
+  });
+});
+
+describe("an occurrence in the world", () => {
+  it("carries its names and its own places", async () => {
+    assert.deepEqual((await fieldsOf("RealWorldEvent")).sort(), [
+      "aliases",
+      "locations",
+      "name",
+      "occurrence",
+      "realWorldEventId",
+    ]);
+  });
+
+  it("says nothing about who recorded it, or when", async () => {
+    // Recording an occurrence is provenance and never ownership, and a field
+    // named for its creator is one somebody builds a permission around. When
+    // the record was made is not when the occurrence happened.
+    const fields = await fieldsOf("RealWorldEvent");
+
+    for (const absent of ["createdByUserId", "createdBy", "createdAt", "owner"]) {
+      assert.ok(!fields.includes(absent), `an occurrence exposed ${absent}`);
+    }
+  });
+
+  it("is null when it may not be had, so one refusal covers both reasons", async () => {
+    assert.equal(await isRequired("Query", "realWorldEvent"), false);
+  });
+});
+
 describe("what this phase did not add", () => {
   it("leaves Query with the fields that can be answered", async () => {
     // Types are defined here; the queries returning them arrive with the phases
@@ -343,8 +407,26 @@ describe("what this phase did not add", () => {
     // jump and a distribution are absent until something can answer one.
     assert.deepEqual(
       (await fieldsOf("Query")).sort(),
-      ["moment", "timeline", "timelineHead", "viewer"],
+      ["adjacentContexts", "moment", "realWorldEvent", "timeline", "timelineHead", "viewer"],
     );
+  });
+
+  it("offers no way to open a place directly", async () => {
+    // Deliberate. A REST endpoint already serves any authenticated caller a
+    // place in full, so a GraphQL rule withholding one would protect nothing —
+    // and deriving Location visibility would answer an open product question by
+    // implementation.
+    assert.ok(!(await fieldsOf("Query")).includes("location"));
+  });
+
+  it("offers no way to enumerate occurrences", async () => {
+    // The property ADR-100 called load-bearing: an occurrence is reachable by
+    // identifier or as somebody's adjacent context, and both are gated.
+    const fields = await fieldsOf("Query");
+
+    for (const absent of ["realWorldEvents", "searchRealWorldEvents", "events"]) {
+      assert.ok(!fields.includes(absent), `Query exposed ${absent}`);
+    }
   });
 
   it("still exposes no mutations and no subscriptions", async () => {

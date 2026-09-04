@@ -5,7 +5,10 @@ import type { TimelineEligibilityResolver } from "@chronologity/timeline-derivat
 import { RequestEligibility } from "../../auth/request-eligibility.js";
 import type { ReadStore } from "../../read-models/clickhouse/client.js";
 import { TimelineReadModel } from "../../read-models/clickhouse/timeline-read-model.js";
+import { ContextAxisReadModel } from "../../read-models/clickhouse/context-axis-read-model.js";
+import { ContextNameReadModel } from "../../read-models/postgres/context-name-read-model.js";
 import { MomentReadModel } from "../../read-models/postgres/moment-read-model.js";
+import { RealWorldEventReadModel } from "../../read-models/postgres/real-world-event-read-model.js";
 import type { GraphQLContext } from "./graphql-context.js";
 
 /**
@@ -40,6 +43,9 @@ export function createContext(
 ) {
   const timeline = new TimelineReadModel(store.client, store.projectionVersion);
   const moments = new MomentReadModel(directory);
+  const contextAxis = new ContextAxisReadModel(store.client, store.projectionVersion);
+  const contextNames = new ContextNameReadModel(directory);
+  const realWorldEvents = new RealWorldEventReadModel(directory);
 
   return function contextFor(request: FastifyRequest): GraphQLContext {
     const viewer = request.viewer ?? ANONYMOUS;
@@ -58,6 +64,9 @@ export function createContext(
       // sharing it cannot leak a Viewer between requests.
       timeline,
       moments,
+      contextAxis,
+      contextNames,
+      realWorldEvents,
     };
   };
 }

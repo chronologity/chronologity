@@ -88,6 +88,59 @@ describe("a comment position", () => {
   });
 });
 
+describe("a position on the horizontal axis", () => {
+  const shared = {
+    kind: "context",
+    tier: "shared",
+    shared: 4,
+    latest: AT,
+    contextType: "location",
+    contextId: MOMENT,
+  } as const;
+
+  it("survives a round trip", () => {
+    assert.deepEqual(decodePosition(encodePosition(shared)), shared);
+  });
+
+  it("remembers which tier it was in", () => {
+    // The axis runs in two, ordered differently, and the boundary is crossed
+    // exactly once — so paging has to know which one it is walking.
+    const period = {
+      kind: "context",
+      tier: "period",
+      shared: 0,
+      latest: AT,
+      contextType: "real_world_event",
+      contextId: COMMENT,
+    } as const;
+
+    assert.deepEqual(decodePosition(encodePosition(period)), period);
+  });
+
+  it("keeps a share count of zero, which the second tier always has", () => {
+    const none = { ...shared, tier: "period", shared: 0 } as const;
+
+    assert.deepEqual(decodePosition(encodePosition(none)), none);
+  });
+
+  it("is refused where a Timeline is paged", () => {
+    assert.throws(() => expectKind(decodePosition(encodePosition(shared)), "timeline"), ValidationError);
+  });
+
+  it("is refused where media is paged", () => {
+    assert.throws(() => expectKind(decodePosition(encodePosition(shared)), "media"), ValidationError);
+  });
+
+  it("refuses a tagged cursor missing its tier", () => {
+    const forged = Buffer.from(
+      JSON.stringify({ v: 1, k: "x", n: 1, t: AT.getTime(), ct: "location", ci: MOMENT }),
+      "utf8",
+    ).toString("base64url");
+
+    assert.throws(() => decodePosition(forged), CursorError);
+  });
+});
+
 describe("a cursor given to the wrong connection", () => {
   it("refuses a Timeline cursor where media is paged", () => {
     const timeline = decodePosition(encodePosition({ kind: "timeline", occurredAt: AT, momentId: MOMENT }));
@@ -99,6 +152,14 @@ describe("a cursor given to the wrong connection", () => {
     const media = decodePosition(encodePosition({ kind: "media", momentId: MOMENT, position: 1 }));
 
     assert.throws(() => expectKind(media, "timeline"), ValidationError);
+  });
+
+  it("refuses a Timeline cursor where the axis is paged", () => {
+    const timeline = decodePosition(
+      encodePosition({ kind: "timeline", occurredAt: AT, momentId: MOMENT }),
+    );
+
+    assert.throws(() => expectKind(timeline, "context"), ValidationError);
   });
 
   it("refuses a comment cursor where media is paged", () => {

@@ -43,8 +43,11 @@ export type GraphQLRollingUnit = "DAY" | "MONTH" | "YEAR";
  *
  * Written out rather than lower-cased, so that adding a kind of scope to either
  * side fails to compile instead of silently producing a context nothing holds.
+ *
+ * Exported because the horizontal axis names scopes too, and two copies of this
+ * map is exactly the drift it exists to prevent.
  */
-const CONTEXT_TYPES: Record<GraphQLScopeType, ViewContextType> = {
+export const CONTEXT_TYPES: Record<GraphQLScopeType, ViewContextType> = {
   PERSON: "person",
   LOCATION: "location",
   REAL_WORLD_EVENT: "real_world_event",

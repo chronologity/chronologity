@@ -105,12 +105,16 @@ export async function createMoment(
  * @param pool - The connection to arrange through.
  * @param momentId - Which Moment.
  * @param recordedByUserId - Who recorded the place.
+ * @param name - What it is called. Worth naming distinctly where a test asserts
+ *   that some place's name is *absent* from a response: every place sharing one
+ *   makes such an assertion match the wrong place.
  * @returns The Location's identifier.
  */
 export async function createPlace(
   pool: Pool,
   momentId: string,
   recordedByUserId: string,
+  name = "Madison Square Garden",
 ): Promise<string> {
   const locationId = randomUUID();
 
@@ -118,10 +122,10 @@ export async function createPlace(
     `INSERT INTO locations (location_id, recorded_by_user_id, name, latitude, longitude,
                             precision, neighbourhood, city, region, country, country_code,
                             source, created_at)
-     VALUES ($1, $2, 'Madison Square Garden', 40.7505, -73.9934, 'exact',
+     VALUES ($1, $2, $3, 40.7505, -73.9934, 'exact',
              'Midtown', 'New York', 'New York', 'United States', 'US',
              'explicit-selection', now())`,
-    [locationId, recordedByUserId],
+    [locationId, recordedByUserId, name],
   );
   await pool.query("INSERT INTO moment_locations (moment_id, location_id) VALUES ($1, $2)", [
     momentId,
@@ -215,6 +219,64 @@ export async function createComment(
 }
 
 /**
+ * Record an occurrence in the world.
+ *
+ * @param pool - The connection to arrange through.
+ * @param createdByUserId - Who recorded it. Provenance, never ownership.
+ * @param over - A name, other names it goes by, and where it happened.
+ * @returns The occurrence's identifier.
+ */
+export async function createRealWorldEvent(
+  pool: Pool,
+  createdByUserId: string,
+  over: { name?: string; aliases?: readonly string[]; locationIds?: readonly string[] } = {},
+): Promise<string> {
+  const realWorldEventId = randomUUID();
+
+  await pool.query(
+    `INSERT INTO real_world_events (real_world_event_id, created_by_user_id, name,
+                                    occurrence_start, occurrence_end, occurrence_precision)
+     VALUES ($1, $2, $3, '2026-11-20T00:00:00Z', '2026-11-22T23:59:59Z', 'day')`,
+    [realWorldEventId, createdByUserId, over.name ?? "Anime NYC 2026"],
+  );
+
+  for (const alias of over.aliases ?? []) {
+    await pool.query(
+      "INSERT INTO real_world_event_aliases (real_world_event_id, alias) VALUES ($1, $2)",
+      [realWorldEventId, alias],
+    );
+  }
+
+  for (const locationId of over.locationIds ?? []) {
+    await pool.query(
+      "INSERT INTO real_world_event_locations (real_world_event_id, location_id) VALUES ($1, $2)",
+      [realWorldEventId, locationId],
+    );
+  }
+
+  return realWorldEventId;
+}
+
+/**
+ * Say a Moment was part of an occurrence.
+ *
+ * @param pool - The connection to arrange through.
+ * @param momentId - Which Moment.
+ * @param realWorldEventId - Which occurrence.
+ * @returns Nothing.
+ */
+export async function attachToEvent(
+  pool: Pool,
+  momentId: string,
+  realWorldEventId: string,
+): Promise<void> {
+  await pool.query(
+    "INSERT INTO moment_real_world_events (moment_id, real_world_event_id) VALUES ($1, $2)",
+    [momentId, realWorldEventId],
+  );
+}
+
+/**
  * Withhold something, as moderation would.
  *
  * @param pool - The connection to arrange through.
@@ -274,10 +336,21 @@ export async function removePeople(pool: Pool, people: readonly Person[]): Promi
   ]);
   await pool.query("DELETE FROM moment_personal_significance WHERE user_id = ANY($1)", [userIds]);
   await pool.query("DELETE FROM moment_audience WHERE user_id = ANY($1)", [userIds]);
+  await pool.query("DELETE FROM moment_real_world_events WHERE moment_id = ANY($1)", [momentIds]);
   await pool.query("DELETE FROM moment_media WHERE moment_id = ANY($1)", [momentIds]);
   await pool.query("DELETE FROM moment_locations WHERE moment_id = ANY($1)", [momentIds]);
   await pool.query("DELETE FROM moments WHERE author_user_id = ANY($1)", [userIds]);
   await pool.query("DELETE FROM uploads WHERE owner_user_id = ANY($1)", [userIds]);
+  const events = await pool.query<{ real_world_event_id: string }>(
+    "SELECT real_world_event_id FROM real_world_events WHERE created_by_user_id = ANY($1)",
+    [userIds],
+  );
+  const eventIds = events.rows.map((row) => row.real_world_event_id);
+
+  await pool.query("DELETE FROM real_world_event_aliases WHERE real_world_event_id = ANY($1)", [eventIds]);
+  await pool.query("DELETE FROM real_world_event_locations WHERE real_world_event_id = ANY($1)", [eventIds]);
+  await pool.query("DELETE FROM moment_real_world_events WHERE real_world_event_id = ANY($1)", [eventIds]);
+  await pool.query("DELETE FROM real_world_events WHERE created_by_user_id = ANY($1)", [userIds]);
   await pool.query("DELETE FROM locations WHERE recorded_by_user_id = ANY($1)", [userIds]);
   await pool.query(
     "DELETE FROM user_blocks WHERE blocker_user_id = ANY($1) OR blocked_user_id = ANY($1)",

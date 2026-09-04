@@ -82,6 +82,41 @@ type Query {
   and knowing an identifier has never granted access to what it names.
   """
   moment(id: ID!): Moment
+
+  """
+  One occurrence in the world.
+
+  Null is the only refusal, and it means both reasons at once: there is no such
+  occurrence, or none of its history is yours to read. Telling them apart would
+  say one exists, which is itself the thing that may be sensitive.
+  """
+  realWorldEvent(id: ID!): RealWorldEvent
+
+  """
+  Where else this stretch of history reaches.
+
+  Contexts sharing history with the one named come first, marked as such; beyond
+  them the axis continues into whatever else was going on around the same time.
+  It does not run out.
+
+  Asking this of a person is refused rather than answered emptily: an empty
+  answer would itself be a claim about them.
+  """
+  adjacentContexts(
+    scope: TimelineScopeInput!
+
+    """
+    Where on the time axis the reader is standing.
+    """
+    at: DateTime!
+
+    """
+    How many at most. At least one, and at most fifty.
+    """
+    first: Int
+
+    after: Cursor
+  ): HistoricalContextConnection!
 }
 
 """

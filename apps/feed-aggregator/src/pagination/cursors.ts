@@ -30,7 +30,25 @@ import { ValidationError } from "../errors/aggregator-error.js";
 export type Position =
   | ({ readonly kind: "timeline" } & TimelinePosition)
   | { readonly kind: "media"; readonly momentId: string; readonly position: number }
-  | { readonly kind: "comment"; readonly createdAt: Date; readonly commentId: string };
+  | { readonly kind: "comment"; readonly createdAt: Date; readonly commentId: string }
+  | {
+      readonly kind: "context";
+      /**
+       * Which tier of the axis this position is in.
+       *
+       * The axis runs in two: contexts sharing history with where somebody is
+       * standing, then everything else whose history reaches the same period.
+       * Paging has to know which one it is walking, because the two are ordered
+       * differently and the boundary between them is crossed exactly once.
+       */
+      readonly tier: "shared" | "period";
+      /** How many Moments the two contexts share. Zero in the second tier. */
+      readonly shared: number;
+      /** The most recent Moment behind this context, which both tiers order by. */
+      readonly latest: Date;
+      readonly contextType: string;
+      readonly contextId: string;
+    };
 
 /** The kinds of thing a cursor can name. */
 export type PositionKind = Position["kind"];
@@ -41,7 +59,7 @@ const VERSION = 1;
 /** How a tagged cursor is written down. Short keys, because it travels. */
 interface Encoded {
   readonly v: number;
-  readonly k: "m" | "c";
+  readonly k: "m" | "c" | "x";
   /** The Moment a media page belongs to. */
   readonly i?: string;
   /** A media position within that Moment. */
@@ -50,6 +68,13 @@ interface Encoded {
   readonly t?: number;
   /** A comment's identifier. */
   readonly c?: string;
+  /** Which tier of the horizontal axis: `s` shared, `p` same period. */
+  readonly r?: "s" | "p";
+  /** How many Moments two contexts share. */
+  readonly n?: number;
+  /** A context's kind, and which one. */
+  readonly ct?: string;
+  readonly ci?: string;
 }
 
 /**
@@ -68,7 +93,17 @@ export function encodePosition(position: Position): string {
   const encoded: Encoded =
     position.kind === "media"
       ? { v: VERSION, k: "m", i: position.momentId, p: position.position }
-      : { v: VERSION, k: "c", t: position.createdAt.getTime(), c: position.commentId };
+      : position.kind === "comment"
+        ? { v: VERSION, k: "c", t: position.createdAt.getTime(), c: position.commentId }
+        : {
+            v: VERSION,
+            k: "x",
+            r: position.tier === "shared" ? "s" : "p",
+            n: position.shared,
+            t: position.latest.getTime(),
+            ct: position.contextType,
+            ci: position.contextId,
+          };
 
   return Buffer.from(JSON.stringify(encoded), "utf8").toString("base64url");
 }
@@ -106,7 +141,7 @@ export function decodePosition(cursor: string): Position {
     return { kind: "timeline", ...decodeCursor(cursor) };
   }
 
-  const { v, k, i, p, t, c } = parsed as Partial<Encoded>;
+  const { v, k, i, p, t, c, r, n, ct, ci } = parsed as Partial<Encoded>;
 
   if (v !== VERSION) {
     throw new CursorError("That cursor is from an older version of this Timeline");
@@ -118,6 +153,26 @@ export function decodePosition(cursor: string): Position {
 
   if (k === "c" && typeof t === "number" && Number.isFinite(t) && typeof c === "string") {
     return { kind: "comment", createdAt: new Date(t), commentId: c };
+  }
+
+  if (
+    k === "x" &&
+    (r === "s" || r === "p") &&
+    typeof n === "number" &&
+    Number.isInteger(n) &&
+    typeof t === "number" &&
+    Number.isFinite(t) &&
+    typeof ct === "string" &&
+    typeof ci === "string"
+  ) {
+    return {
+      kind: "context",
+      tier: r === "s" ? "shared" : "period",
+      shared: n,
+      latest: new Date(t),
+      contextType: ct,
+      contextId: ci,
+    };
   }
 
   throw new CursorError("That is not a usable cursor");

@@ -13,6 +13,7 @@ import {
   momentFields,
   momentQueries,
 } from "../graphql/resolvers/moment.resolver.js";
+import { contextQueries } from "../graphql/resolvers/context.resolver.js";
 import { queryResolvers } from "../graphql/resolvers/query.resolver.js";
 import {
   timelineEntryResolver,
@@ -63,7 +64,7 @@ export async function registerGraphql(app: FastifyInstance, wiring: GraphQLWirin
       resolvers: {
         // Merged field by field rather than by spreading two objects that both
         // carry a `Query`, which would keep only the last one.
-        Query: { ...queryResolvers.Query, ...timelineQueries, ...momentQueries },
+        Query: { ...queryResolvers.Query, ...timelineQueries, ...momentQueries, ...contextQueries },
         Moment: momentFields,
         TimelineEntry: timelineEntryResolver,
         Media: mediaTypeResolver,

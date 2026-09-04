@@ -1,0 +1,113 @@
+"""
+Why a context sits where it does on the horizontal axis.
+
+Carried as data rather than left to the order results arrive in, and that is a
+correctness requirement rather than a nicety. Order is not durable meaning: a
+client that sorts, filters or re-pages loses it, and mere co-presence then reads
+as connection. `timeline.md:112` is explicit that proximity proves nothing.
+"""
+enum ContextAdjacency {
+  """
+  A Moment belongs to both this context and the one being read.
+
+  Something somebody recorded, never something inferred.
+  """
+  SHARED_HISTORY
+
+  """
+  Its history reaches the same period. No claim beyond that.
+
+  Two stretches of history that were both going on. Not a relationship, and a
+  client must not present it as one.
+  """
+  SAME_PERIOD
+}
+
+"""
+Somewhere else to stand in history.
+
+Horizontal movement changes which history is being read without changing when
+anything happened. It is an axis rather than a list: a reader can always keep
+going, and relatedness decides what they reach first rather than whether there
+is anywhere to go at all.
+
+**A person is never one.** A place whose neighbours included people would be
+asserting who was there — and a Moment's accepted participants are not its
+author, so such a list would disclose participation the Moment itself withholds.
+"""
+type HistoricalContext {
+  """
+  Where to stand, ready to be handed straight back as a Timeline's scope.
+  """
+  scope: TimelineScope!
+
+  """
+  What to call it: a place's recorded name, or an occurrence's.
+
+  Enough to render a choice and no more. What a context *is* is answered by
+  going there.
+  """
+  name: String!
+
+  adjacency: ContextAdjacency!
+}
+
+"""
+One context in a stretch of the axis.
+"""
+type HistoricalContextEdge {
+  cursor: Cursor!
+  node: HistoricalContext!
+}
+
+"""
+A stretch of the horizontal axis.
+
+Paged rather than bounded, because the axis is not: beyond the contexts sharing
+history with where somebody is standing, it continues into whatever else reaches
+the same period.
+"""
+type HistoricalContextConnection {
+  edges: [HistoricalContextEdge!]!
+  pageInfo: PageInfo!
+}
+
+"""
+An occurrence in the world that Moments were part of.
+
+Not a container. Moments belong to whoever recorded them; an Event only says
+they share an occurrence, and grouping them never moves them from their own place
+in chronology.
+
+**Its name is a label, not an identity.** Two Events may carry the same one and
+be different occurrences — every night of a tour shares a name — so nothing here
+should be treated as a key.
+
+Reachable by identifier or as somebody's adjacent context, and in both cases only
+when this reader can see a Moment that was part of it. Nothing enumerates Events.
+"""
+type RealWorldEvent {
+  realWorldEventId: ID!
+  name: String!
+
+  """
+  The other names it goes by: a local name, a former one, an official one nobody
+  uses. None is more its identity than another.
+  """
+  aliases: [String!]!
+
+  """
+  When it happened, at the precision it is actually known at.
+  """
+  occurrence: Occurrence!
+
+  """
+  Where it happened, as recorded — a list, because a marathon is a route and a
+  launch happens in three cities at once.
+
+  The Event's own declaration of its places, never derived from where anybody's
+  Moments were: a place is here because somebody said the occurrence happened
+  there, not because somebody was photographed there.
+  """
+  locations: [Location!]!
+}

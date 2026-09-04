@@ -1,7 +1,10 @@
 import type { Viewer } from "../../auth/auth-context.js";
 import type { RequestEligibility } from "../../auth/request-eligibility.js";
 import type { Logger } from "../../observability/logger.js";
+import type { ContextAxisReadModel } from "../../read-models/clickhouse/context-axis-read-model.js";
+import type { ContextNameReadModel } from "../../read-models/postgres/context-name-read-model.js";
 import type { MomentReadModel } from "../../read-models/postgres/moment-read-model.js";
+import type { RealWorldEventReadModel } from "../../read-models/postgres/real-world-event-read-model.js";
 import type { TimelineReadModel } from "../../read-models/clickhouse/timeline-read-model.js";
 
 /**
@@ -42,6 +45,28 @@ export interface GraphQLContext {
    * it happens when somebody taps a Moment rather than while they scroll.
    */
   readonly moments: MomentReadModel;
+  /**
+   * Where the horizontal axis is found.
+   *
+   * ClickHouse, because the question is which contexts a Moment belongs to and
+   * that is what the projection's membership table holds.
+   */
+  readonly contextAxis: ContextAxisReadModel;
+  /**
+   * Where a context is given back its name, and where a place is confirmed.
+   *
+   * PostgreSQL, because the projection deliberately holds no names — and
+   * because whether a place may be named at all depends on what a Moment
+   * disclosed, which is not a fact the projection carries.
+   */
+  readonly contextNames: ContextNameReadModel;
+  /**
+   * Where an occurrence is read from.
+   *
+   * PostgreSQL, and gated by whether this reader may see a Moment that was part
+   * of it — the same derived rule the API applies, from the same package.
+   */
+  readonly realWorldEvents: RealWorldEventReadModel;
   /**
    * What this Viewer may see, resolved on demand and once per scope.
    *

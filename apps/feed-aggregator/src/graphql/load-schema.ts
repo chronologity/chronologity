@@ -35,6 +35,7 @@ const FILES = [
   "comment.graphql",
   "causality.graphql",
   "significance.graphql",
+  "context.graphql",
 ] as const;
 
 /**
