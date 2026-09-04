@@ -506,5 +506,61 @@ export class MomentReadModel {
 
     return result.rows;
   }
+
+  /**
+   * One named connection of this Moment.
+   *
+   * The same rule as `relationships`, asked about one row rather than a page.
+   * Separate because a jump names a relationship the reader may hold from any
+   * distance in the past, and finding it by paging the list would miss it for a
+   * Moment connected to more than a page's worth of history — a failure that
+   * would look like the relationship not existing.
+   *
+   * The privacy half still removes the row rather than marking it, so a
+   * relationship whose far end is not this reader's to see is indistinguishable
+   * here from one that was never asserted.
+   *
+   * @param moment - The Moment being travelled from, already proven readable.
+   * @param relationshipId - Which connection.
+   * @param viewerIsAdult - Whether the reader is old enough, which the
+   *   moderation half asks about the far end.
+   * @returns The claim, or undefined when there is no such connection of this
+   *   Moment or its far end is not this reader's to know about.
+   * @throws {Error} If PostgreSQL refuses the statement.
+   */
+  async findRelationship(
+    moment: AuthorizedMoment,
+    relationshipId: string,
+    viewerIsAdult: boolean,
+  ): Promise<RelationshipRow | undefined> {
+    const bind = new PositionalParameters();
+    const viewer = {
+      viewerUserId: bind.bind(moment.viewerUserId),
+      viewerIsAdult: bind.bind(viewerIsAdult),
+    };
+    const id = bind.bind(moment.row.moment_id);
+    const relationship = bind.bind(relationshipId);
+
+    const result = await this.pool.query<RelationshipRow>(
+      `SELECT r.relationship_id, r.source_moment_id, r.target_moment_id,
+              r.kind, r.origin, r.asserted_by_user_id, r.created_at,
+              NOT ${moderationPermits("other", viewer)} AS unavailable
+         FROM moment_relationships r
+         JOIN moments other
+           ON other.moment_id = CASE
+                WHEN r.source_moment_id = ${id} THEN r.target_moment_id
+                ELSE r.source_moment_id
+              END
+        WHERE r.relationship_id = ${relationship}::uuid
+          -- Of *this* Moment. Without it, knowing any relationship identifier
+          -- would let somebody travel from a Moment it has nothing to do with.
+          AND (r.source_moment_id = ${id} OR r.target_moment_id = ${id})
+          AND other.deleted_at IS NULL
+          AND ${privacyPermits("other", viewer)}`,
+      [...bind.values],
+    );
+
+    return result.rows[0];
+  }
 }
 
