@@ -196,6 +196,21 @@ describe("narrowingFor", () => {
     assert.equal(narrowing.params.version, "timeline-v7");
   });
 
+  it("binds a range as text ClickHouse can parse, including before the epoch", () => {
+    // Handing the client a Date looks right and works for every modern instant.
+    // For 1969 it produces "0-31536000", which ClickHouse refuses outright — so
+    // a Timeline narrowed to pre-epoch history failed while one narrowed to last
+    // month did not. Most of the history this product holds is pre-epoch.
+    const narrowing = narrowingFor(
+      view({ range: { kind: "fixed", from: "1969-01-01T00:00:00.000Z", to: "1969-12-31T23:59:59.000Z" } }),
+      "t",
+      VERSION,
+    );
+
+    assert.equal(narrowing.params.viewFrom, "1969-01-01 00:00:00.000");
+    assert.equal(narrowing.params.viewTo, "1969-12-31 23:59:59.000");
+  });
+
   it("binds nothing at all when the view narrows nothing", () => {
     const narrowing = narrowingFor(view(), "t", VERSION);
 

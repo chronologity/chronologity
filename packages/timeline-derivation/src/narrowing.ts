@@ -1,4 +1,5 @@
 import type { ViewSpecification } from "@chronologity/contracts";
+import { asClickHouseDateTime } from "./row.js";
 
 /**
  * Turning a View Specification into what the projection needs.
@@ -140,8 +141,13 @@ export function narrowingFor(
       `${alias}.occurred_at >= {viewFrom: DateTime64(3)}`,
       `${alias}.occurred_at <= {viewTo: DateTime64(3)}`,
     );
-    params.viewFrom = range.from;
-    params.viewTo = range.to;
+    // Formatted rather than handed over as a Date. The client serialises a Date
+    // its own way, and for an instant before 1970 that produces something
+    // ClickHouse refuses outright — measured: a 1969 range comes back as
+    // "value 0-31536000 cannot be parsed as DateTime64(3)". Most of the history
+    // this product exists to hold is pre-epoch, so the conversion is explicit.
+    params.viewFrom = asClickHouseDateTime(range.from);
+    params.viewTo = asClickHouseDateTime(range.to);
   }
 
   return conditions.length === 0 ? NOTHING : { conditions, params };
