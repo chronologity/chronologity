@@ -2784,6 +2784,8 @@ An Event must have a bounded occurrence. Ongoing Events — a war still being fo
 
 What makes it safe meanwhile is that nothing enumerates Events. There is no list endpoint, no search, and no Moment pointing at one, so an Event is reachable only by an identifier that is not guessable and that nothing hands out. That property is load-bearing: **the first surface that enumerates Events must resolve visibility first**, not alongside.
 
+*Partly superseded by ADR-143.* The clause about no Moment pointing at one stopped being true when Moments gained associations — `momentSchema` has carried `realWorldEvents` whole ever since — and this ADR was never updated to notice, so the safety argument it rests on had a hole in it for several phases. ADR-143 resolves the visibility deferred here rather than widening the hole: an Event is visible exactly when its reader can see a Moment that was part of it. Nothing enumerates Events still holds.
+
 Duplicate Events are permitted, and `name` carries no unique constraint. Two people recording the same convention produce two Events, which is correct — every night of a tour shares a name and each is its own occurrence. Reconciliation is a later phase and needs the duplicates to exist in order to have anything to reconcile.
 
 `created_by_user_id` is provenance and never ownership. It is commented as such in the migration and in the entity, because a column of that name invites exactly the opposite reading, and `real-world-events.md:549-563` is explicit that recording a public occurrence first confers no authority over anyone else's history of it.
@@ -5015,3 +5017,77 @@ Reactor lists; any derived significance score; DataLoader, which 9H brings and w
 The API caps relationships at a constant of 100 inside its own service while the aggregator reads the same bound from `packages/contracts`. Two copies of one number, left alone rather than unified, because the phase's remit was the security rule and this is a page bound. Worth collapsing when something else touches that service.
 
 `moment_comments` has no index on `moment_id` alone, so counting a whole discussion is a sequential scan — in the API too. `total` is a field resolver, so nobody pays for it unless they ask; the migration is a write-side change for a read-side need and was left out.
+
+---
+
+# ADR-143 — Horizontal Is a Continuous Axis, and Two Contexts Are Adjacent When a Moment Belongs to Both
+
+## Status
+
+Accepted. Settles `timeline.md`'s six open questions on horizontal context, its Scope Model question about which scopes are navigable, `projections.md`'s question about representing adjacency, `causality.md`'s question about relationships in Moment depth's neighbour, and the visibility ADR-100 deferred.
+
+## Context
+
+9C built the vertical axis and 9D built depth. Horizontal was the one left, and it could not be built as the roadmap described it.
+
+The documents agree that a horizontal neighbour is another *context* rather than another Moment — `timelines.md:127`, "the graph connects contexts, never Timelines" — but **no document says what makes two contexts neighbours.** `timeline.md:1736` asked outright and answered nothing; `timeline.md:954` said "the exact algorithm must be product-defined" and none was. No context-to-context edge table existed anywhere, and the only design for one was a write-side table with no phase in the roadmap.
+
+A second question had to be answered first. ADR-100 deferred Event visibility with a warning aimed squarely here: "the first surface that enumerates Events must resolve visibility first, not alongside."
+
+## Decision
+
+**Horizontal is an axis, not a list of related things.** A reader can always move along it. It runs in two tiers: contexts sharing history with where they are standing, then contexts whose own history reaches the same period. Relatedness decides what they reach first, never whether there is anywhere to go.
+
+**Which tier a context is in travels in the answer**, as `ContextAdjacency`.
+
+**Two contexts are adjacent when a Moment belongs to both and the reader may see that Moment.** Not geography, not containment, not authored edges.
+
+**People are never on the axis, in either direction.** An allowlist of place and occasion, and a person anchor is refused rather than answered emptily.
+
+**A place is named only when a Moment disclosed it.** For a shared-history neighbour, a Moment tying it to the anchor must have disclosed where it happened; for a same-period neighbour, its own history must have. Unconfirmed candidates are dropped.
+
+**An Event is visible exactly when its reader can see a Moment that was part of it**, plus whoever recorded it. Applied in GraphQL and in the API's existing endpoint, so the two agree.
+
+**`adjacentContexts` is a paged connection** taking the point in time the reader is standing at.
+
+## Alternatives Considered
+
+Geographic distance; containment hierarchy; user-authored edges; a bounded list rather than a connection; ordering the tiers without saying which is which; a `Location | RealWorldEvent` union for a neighbour; exposing how many Moments two contexts share; an explicit visibility field on an Event; deriving Location visibility the same way; a projected adjacency table.
+
+## Rationale
+
+**Shared history is the only candidate that is a recorded fact.** Somebody said this Moment happened at this place and was part of this occasion. Everything else on the list is an inference — and `timeline.md:112` forbids inventing relationships from proximity, while `timeline.md:958` warns against "similar content" logic wearing horizontal semantics as a costume.
+
+**The alternatives also do not work as built.** `locations` stores its areas as text, so "the city this is in" is a string rather than somewhere to go; building containment means inventing Location rows for administrative areas, which `locations.md:190` warns against. There is no spatial index — the migration says that was deliberate — and ADR-098 forbids the shape anyway: "a distance computed from coordinates that are themselves withheld discloses them." Authored edges need a write side, which a read phase does not have.
+
+**Privacy comes free, and that is the strongest argument for the rule.** An edge exists for a reader only if the Moment establishing it does, so the eligibility rule the rest of the service already uses is the whole of it. No second rule was written.
+
+**The tier is data because order is not durable meaning.** A client that sorts, filters or re-pages loses it, and mere co-presence then reads as connection.
+
+**People would leak participation.** The projection writes a person row for a Moment's author *and every accepted participant*, while `eligible()` tests only the author. A public Moment with a participant would surface that person as adjacent to the place — asserting who was there, which `real-world-events.md:775` refuses to infer and which Moment depth deliberately never says. Two further reasons: `eligible()` cannot express the person-scope rule at all, so somebody who closed their Timeline would appear anyway; and a blocked participant on an unblocked author's Moment passes the filter.
+
+**An Event has no owner, so it can have no setting.** ADR-100 is explicit that recording one confers no authority over anybody else's history of it. If two people recorded Moments at the same wedding and disagreed about whether the occasion was private, a flag would have to pick one. Derivation cannot fail that way, and it cannot produce the case `real-world-events.md:707` warns about — "a private wedding Event should not become publicly discoverable merely because one participant accidentally creates a public-facing association."
+
+**Location visibility is deliberately not derived.** `GET /locations/:locationId` already serves any authenticated caller a place in full, so a GraphQL rule withholding one would protect nothing. Events are the opposite: nothing enumerates them, so the derived rule is the first gate. ADR-098's flagged hole stays open; what this phase owed it was not widening it, which the disclosure gate honours.
+
+**No count is exposed.** With the disclosure gate the count is over a superset of surviving edges, so it would be wrong in the disclosing direction — and a strength number beside a context is the first vertebra of a ranking.
+
+## Consequences
+
+**The axis is a query, not a projection.** No edge table to build, rebuild or keep in step, which is why `projections.md`'s question about representing adjacency is answered by not representing it.
+
+**Two bugs were found by the integration suites and are worth recording.** The disclosure confirmation originally required a Moment tying a candidate place to the anchor — right for shared history, where the association is the secret, but same-period places have no such Moment by definition, so every one was silently dropped and the axis dead-ended through the contract while passing the read model's own tests. And a fixture that named every test place identically made "this place's name is absent" match a different place; the assertion was passing for the wrong reason.
+
+**Tier two under-reports, deliberately.** The audience list is bounded to the anchor's scope, so a context whose only readable Moments are restricted ones naming this reader will not appear. Widening it means the unbounded "every Moment naming me" list the eligibility rule refuses. It hides rather than reveals, which is the safe direction.
+
+**ADR-100's safety argument had a hole.** It said nothing enumerated Events including "no Moment pointing at one", which stopped being true when Moments gained associations. That is corrected in place.
+
+`Query` grows two fields, and `schema.test.ts` asserts the list.
+
+## Deliberately Not Here
+
+Landing at the same point in time when moving to a neighbour. `timeline.md:118` asks horizontal movement to preserve temporal orientation, and the axis takes the reader's position so orientation is kept — but landing near the closest Moment in the new context is an around-time read, whose machinery ADR-141 deferred to 9G. **9E answers "where can I go"; 9G answers "where do I land."** A client meanwhile opens a neighbour with `range` around where it was.
+
+Nearest-on-either-side ordering for the same-period tier: it scans outwards from an instant, prunes badly, and needs a window that widens when a page comes back short — the shape 9C removed from the architecture.
+
+Prefetching neighbour Timelines (9H/9I); any enumeration of Events; `Query.location(id)` and viewer-relative Location precision; changes to the projection or the projector; DataLoader; temporal distribution over a neighbour (9F); and a `contexts` field on `Moment`.

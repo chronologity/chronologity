@@ -746,22 +746,23 @@ Authority remains with the owning domain features.
 
 The feed aggregator exposes semantic GraphQL queries.
 
-Settled so far (ADR-141):
+Settled so far:
 
 ```text
-timeline        a page of history, as a connection
-timelineHead    where a Timeline opens
+timeline            a page of history, as a connection          (ADR-141)
+timelineHead        where a Timeline opens                      (ADR-141)
+moment              one Moment, in full                         (ADR-142)
+realWorldEvent      one occurrence in the world                 (ADR-143)
+adjacentContexts    where else this stretch of history reaches  (ADR-143)
 ```
 
-`timelineSlice` was the name this section suggested. A connection field is named for what it holds rather than for how it is assembled, and "slice" describes the second.
+`timelineSlice` was the name this section suggested. A connection field is named for what it holds rather than for how it is assembled, and "slice" describes the second. `timelineContextNeighbors` became `adjacentContexts` for three reasons: "adjacency" is this document's own term of art, "neighbourhood" already means a district on `GeographicContext`, and the `scope` argument already says which Timeline.
 
 Still to be named, each by the phase that can answer it:
 
 ```text
 timelineAroundMoment
 timelineAroundTime
-timelineContextNeighbors
-momentDepth
 temporalZoom
 historicalJump
 ```
@@ -1697,13 +1698,9 @@ The feed aggregator remains stateless/read-only apart from bounded caches and re
 
 ## Scope Model
 
-- What exact Timeline scopes ship at launch?
-- User?
-- Location?
-- Real-World Event?
-- Network?
-- Tag?
-- Which are horizontally navigable?
+Three scopes exist: a person, a Location, and a real-world Event. Of those, **a Location and a real-world Event are horizontally navigable and a person is not** (ADR-143).
+
+Still open: whether a network or a tag becomes a scope at all.
 
 ## Timeline Definitions
 
@@ -1726,12 +1723,17 @@ Still open: whether a future scope emerges that genuinely needs a persisted defi
 
 ## Horizontal Context
 
-- What exactly determines left/right adjacency?
-- Geographic?
-- Event relationship?
-- User-selected?
-- Can adjacency change over time?
-- How is it projected?
+Settled by ADR-143.
+
+**Horizontal is an axis rather than a list.** A reader can always move along it; relatedness decides what they reach first, not whether there is anywhere to go. It runs in two tiers: contexts sharing history with the one being read, then contexts whose own history reaches the same period. Which tier a context is in travels in the answer rather than being implied by order, because order does not survive a client sorting or re-paging and mere co-presence must never read as connection.
+
+**Adjacency is shared history**, and nothing else. Two contexts are adjacent when a Moment belongs to both and the reader may see that Moment. Not geographic — there is no spatial index, `locations` stores its areas as text rather than as references, and ADR-098 forbids deriving anything from coordinates that are withheld. Not containment — the same reason: a city is a string on a row, not somewhere to go. Not user-authored — that needs a write side.
+
+**It changes over time**, because it is derived rather than stored: an edge exists while a Moment establishing it does, and disappears when that Moment is erased or withheld.
+
+**It is not projected.** No edge table, no adjacency projection. The axis is a query over the membership the Timeline projection already holds, which is why `projections.md`'s question about representing adjacency has no answer beyond this one.
+
+**People are never on it**, in either direction. The projection carries a person row for a Moment's author *and every accepted participant*, while the eligibility rule tests only the author — so a place whose neighbours included people would assert who was there. Asking a person's history which places it touches is refused rather than answered emptily, because an empty answer would itself be a claim about them.
 
 ## Temporal Scale
 

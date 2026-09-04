@@ -97,6 +97,10 @@ Deterministic presentation order ≠ Known historical order
 
 Horizontal movement changes contextual perspective around a point in time.
 
+**The axis does not run out.** A reader can always move sideways and reach somewhere: contexts sharing history with where they are standing come first, and beyond those the axis continues into whatever else was going on around the same time. Relatedness decides what they reach first rather than whether there is anywhere to go, and a context connected to nothing still has neighbours (ADR-143).
+
+What travels with each of them is *why* it is there — history genuinely shared, or merely the same period. The two must be distinguishable, because being contemporary is not a relationship and a client must never present it as one.
+
 Initial contextual groupings may include locations and real-world events. Additional contexts should be introduced only when their semantics are explicit.
 
 Horizontal movement answers:

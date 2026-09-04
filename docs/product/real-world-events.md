@@ -1479,6 +1479,12 @@ One piece of context for whoever answers the hierarchy question: `timeline-first
 
 **One Moment may belong to several Events** (ADR-102). A photograph at a wedding that is also part of a family reunion is genuinely both, and the two occurrences do not conflict. When that is redundant rather than legitimate is left to judgement rather than to a constraint.
 
+**Whether somebody may know an Event exists is derived, not set** (ADR-143). An Event is visible to a reader exactly when they can see a Moment that was part of it — plus whoever recorded it, which is provenance granting what provenance should: you may read the record you caused to exist.
+
+There is deliberately no visibility flag, and the reason is that there is nobody whose flag it would be. An Event belongs to nobody (ADR-100), so if two people recorded Moments at the same wedding and disagreed about whether the occasion was private, a setting would have to pick one of them. Derivation also cannot produce the failure this document warns about above — one participant's public association making a private occasion discoverable — because an Event becomes visible only through history somebody was already entitled to read.
+
+An occurrence nobody has recorded a visible Moment for is unreachable, including by its creator's readers. That is accepted: an Event with no visible history is context for nothing.
+
 **Duplicate Events are permitted and expected.** Nothing prevents two people recording the same occurrence separately, because identity is the identifier rather than the name and reconciliation does not exist yet. Refusing the second would refuse real history to protect a guess.
 
 **An Event may be followed** (ADR-105). Anybody may ask to hear about Moments that become associated with it, and no approval is involved: an Event is shared history, and whoever recorded it first holds provenance rather than authority over who may watch it. Following grants no access to Moments that are not otherwise visible.

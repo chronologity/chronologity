@@ -633,6 +633,8 @@ These are read-model concerns.
 
 # Horizontal Context Projection
 
+Horizontal adjacency is **not** projected (ADR-143). It is a query over the membership the Timeline projection already holds — two contexts are adjacent when a Moment belongs to both — so there is no edge table to build, rebuild or keep in step. What follows described a projection that was considered and is not what was built.
+
 Horizontal adjacency may require projection of:
 
 - neighboring Locations;
@@ -1702,7 +1704,6 @@ A separate `apps/projections/` application should not be introduced unless scale
 - What is the partition key?
 - How are updates/corrections represented?
 - Which denormalized fields are required?
-- How is horizontal adjacency represented?
 
 ## Temporal Zoom
 

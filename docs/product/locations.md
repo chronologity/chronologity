@@ -576,6 +576,10 @@ Adjacent Timeline positions
 
 Location provides another dimension through which history can be explored without replacing chronological ordering.
 
+A place is therefore adjacent to an occasion, or to another place, when a Moment belongs to both and the reader may see it (ADR-143) — never because two places are near each other. That distinction is what the line above is protecting: nearness is a fact about geography, and adjacency here is a fact about history somebody recorded.
+
+A place is named as somewhere adjacent only when a Moment establishing that adjacency disclosed where it happened. A Moment can be perfectly readable while its place is withheld, and naming the place would say what its author chose not to.
+
 ## Spatial Exploration
 
 Chronologity may eventually allow Users to explore history geographically.
