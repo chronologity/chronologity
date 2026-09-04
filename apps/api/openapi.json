@@ -35732,8 +35732,11 @@
                         "type": "string",
                         "enum": [
                           "day",
+                          "week",
+                          "month",
                           "year",
-                          "decade"
+                          "decade",
+                          "century"
                         ]
                       },
                       "filters": {
@@ -35931,8 +35934,11 @@
                           "type": "string",
                           "enum": [
                             "day",
+                            "week",
+                            "month",
                             "year",
-                            "decade"
+                            "decade",
+                            "century"
                           ]
                         },
                         "filters": {
@@ -36403,8 +36409,11 @@
                                 "type": "string",
                                 "enum": [
                                   "day",
+                                  "week",
+                                  "month",
                                   "year",
-                                  "decade"
+                                  "decade",
+                                  "century"
                                 ]
                               },
                               "filters": {
@@ -36872,8 +36881,11 @@
                           "type": "string",
                           "enum": [
                             "day",
+                            "week",
+                            "month",
                             "year",
-                            "decade"
+                            "decade",
+                            "century"
                           ]
                         },
                         "filters": {
@@ -37394,8 +37406,11 @@
                           "type": "string",
                           "enum": [
                             "day",
+                            "week",
+                            "month",
                             "year",
-                            "decade"
+                            "decade",
+                            "century"
                           ]
                         },
                         "filters": {
@@ -39808,8 +39823,11 @@
                           "type": "string",
                           "enum": [
                             "day",
+                            "week",
+                            "month",
                             "year",
-                            "decade"
+                            "decade",
+                            "century"
                           ]
                         },
                         "filters": {
@@ -54672,7 +54690,7 @@
         "tags": [
           "Timeline"
         ],
-        "description": "Counts per year or per decade, for navigating at a scale where returning every Moment would be neither useful nor fast.\n\nSpans holding nothing are absent rather than zero: a century you recorded nothing in is not a hundred empty rows. Counts agree with what paging returns.\n\n**Going away.** Timeline reads move to the feed aggregator's GraphQL surface, which composes them for the client rather than returning one page at a time. This endpoint is removed once that surface is complete; nothing new should be built against it.",
+        "description": "Counts per span, at any scale from a day to a century, for navigating where returning every Moment would be neither useful nor fast. Refused rather than shortened when the stretch and the scale together would be too many spans to answer.\n\nSpans holding nothing are absent rather than zero: a century you recorded nothing in is not a hundred empty rows. Counts agree with what paging returns.\n\n**Going away.** Timeline reads move to the feed aggregator's GraphQL surface, which composes them for the client rather than returning one page at a time. This endpoint is removed once that surface is complete; nothing new should be built against it.",
         "parameters": [
           {
             "schema": {
@@ -54742,8 +54760,12 @@
             "schema": {
               "type": "string",
               "enum": [
+                "day",
+                "week",
+                "month",
                 "year",
-                "decade"
+                "decade",
+                "century"
               ]
             },
             "in": "query",
@@ -56470,7 +56492,7 @@
         "tags": [
           "Timeline"
         ],
-        "description": "Counts per year or per decade, over what you may see.\n\nCounts agree with what paging returns, which is the point: a bucket saying twelve where you may open four would advertise the eight. Spans holding nothing are absent rather than zero.\n\n**Going away.** Timeline reads move to the feed aggregator's GraphQL surface, which composes them for the client rather than returning one page at a time. This endpoint is removed once that surface is complete; nothing new should be built against it.",
+        "description": "Counts per span, at any scale from a day to a century, over what you may see.\n\nCounts agree with what paging returns, which is the point: a bucket saying twelve where you may open four would advertise the eight. Spans holding nothing are absent rather than zero.\n\n**Going away.** Timeline reads move to the feed aggregator's GraphQL surface, which composes them for the client rather than returning one page at a time. This endpoint is removed once that surface is complete; nothing new should be built against it.",
         "parameters": [
           {
             "schema": {
@@ -56540,8 +56562,12 @@
             "schema": {
               "type": "string",
               "enum": [
+                "day",
+                "week",
+                "month",
                 "year",
-                "decade"
+                "decade",
+                "century"
               ]
             },
             "in": "query",
@@ -58278,7 +58304,7 @@
         "tags": [
           "Timeline"
         ],
-        "description": "Counts per year or per decade, over what you may see.\n\nCounts agree with what paging returns, which is the point: a bucket saying twelve where you may open four would advertise the eight. Spans holding nothing are absent rather than zero.\n\n**Going away.** Timeline reads move to the feed aggregator's GraphQL surface, which composes them for the client rather than returning one page at a time. This endpoint is removed once that surface is complete; nothing new should be built against it.",
+        "description": "Counts per span, at any scale from a day to a century, over what you may see.\n\nCounts agree with what paging returns, which is the point: a bucket saying twelve where you may open four would advertise the eight. Spans holding nothing are absent rather than zero.\n\n**Going away.** Timeline reads move to the feed aggregator's GraphQL surface, which composes them for the client rather than returning one page at a time. This endpoint is removed once that surface is complete; nothing new should be built against it.",
         "parameters": [
           {
             "schema": {
@@ -58348,8 +58374,12 @@
             "schema": {
               "type": "string",
               "enum": [
+                "day",
+                "week",
+                "month",
                 "year",
-                "decade"
+                "decade",
+                "century"
               ]
             },
             "in": "query",
@@ -60086,7 +60116,7 @@
         "tags": [
           "Timeline"
         ],
-        "description": "Counts per year or per decade, over what you may see.\n\nCounts agree with what paging returns, which is the point: a bucket saying twelve where you may open four would advertise the eight. Spans holding nothing are absent rather than zero.\n\n**Their history is what they recorded together with what they agreed they were part of.** Somebody who was at an occasion but did not photograph it was still there, and a product where only the person holding the camera owns the memory would record who documented history rather than what happened.\n\n**You see only what you were already entitled to see.** Being on somebody's Timeline widens nothing: each Moment's own audience still decides, so this can never show you something you could not have opened one at a time.\n\n**A Timeline you may see nothing in answers empty rather than refusing** — as does one belonging to somebody who has turned theirs off, or blocked you, or been suspended. Refusing would itself say there is something here.\n\n**Going away.** Timeline reads move to the feed aggregator's GraphQL surface, which composes them for the client rather than returning one page at a time. This endpoint is removed once that surface is complete; nothing new should be built against it.",
+        "description": "Counts per span, at any scale from a day to a century, over what you may see.\n\nCounts agree with what paging returns, which is the point: a bucket saying twelve where you may open four would advertise the eight. Spans holding nothing are absent rather than zero.\n\n**Their history is what they recorded together with what they agreed they were part of.** Somebody who was at an occasion but did not photograph it was still there, and a product where only the person holding the camera owns the memory would record who documented history rather than what happened.\n\n**You see only what you were already entitled to see.** Being on somebody's Timeline widens nothing: each Moment's own audience still decides, so this can never show you something you could not have opened one at a time.\n\n**A Timeline you may see nothing in answers empty rather than refusing** — as does one belonging to somebody who has turned theirs off, or blocked you, or been suspended. Refusing would itself say there is something here.\n\n**Going away.** Timeline reads move to the feed aggregator's GraphQL surface, which composes them for the client rather than returning one page at a time. This endpoint is removed once that surface is complete; nothing new should be built against it.",
         "parameters": [
           {
             "schema": {
@@ -60156,8 +60186,12 @@
             "schema": {
               "type": "string",
               "enum": [
+                "day",
+                "week",
+                "month",
                 "year",
-                "decade"
+                "decade",
+                "century"
               ]
             },
             "in": "query",
