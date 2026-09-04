@@ -283,18 +283,56 @@ type TemporalDistribution {
 """
 Where a jump landed, and the history either side of it.
 
+A jump moves where you are reading, never what is there. What comes back is a
+*position* and the history around it, so ordinary navigation carries on the
+moment you arrive.
+
 The instant asked for need not be one anything happened at. When nothing did,
 `at` is null and the surrounding pages still answer — the position is preserved
 rather than quietly redefined as whichever Moment was nearest.
 """
 type TimelineAround {
   """
+  The position landed at.
+
+  Null only when the destination was not yours to reach, which is deliberately
+  the same answer as one that never existed. Non-null with a null `at` is the
+  ordinary case of jumping to a time nothing happened at.
+
+  Hand it straight back as `TimelineAnchorInput.instant` to come back here.
+  """
+  anchoredAt: DateTime
+
+  """
   The Moment at the position, or null when nothing happened there.
+
+  Also the first entry of `older`, which is where it is read from. It is not
+  removed from that page: a page that came back one shorter depending on whether
+  the destination happened to be a member would be short for a reason its size
+  could not explain.
   """
   at: TimelineEntry
 
   """
-  History before it.
+  Whose history this landed in.
+
+  What was landed in rather than what was asked for. A jump to a Moment, an
+  occasion or a place may cross into another Timeline, and this is how you find
+  out — hand it straight back as a view's scope.
+  """
+  scope: TimelineScope!
+
+  """
+  Why this jump was made.
+
+  Never a claim taken on trust: a causal reason is reported only after the
+  relationship was found and its far end reauthorized, and a significance reason
+  only after a Moment was actually chosen.
+  """
+  reason: TimelineJumpReason!
+
+  """
+  History at the position, and before it.
   """
   older: TimelineConnection!
 
@@ -302,6 +340,112 @@ type TimelineAround {
   History after it.
   """
   newer: TimelineConnection!
+}
+
+"""
+How a jump's destination came to be named.
+
+Carried in the answer so a client holding a back-stack knows what each entry
+was, without having to keep the request that produced it.
+"""
+enum TimelineJumpReason {
+  """An instant, named directly."""
+  INSTANT
+
+  """A Moment."""
+  MOMENT
+
+  """A place."""
+  LOCATION
+
+  """An occasion in the world."""
+  REAL_WORLD_EVENT
+
+  """A relationship followed from one Moment to another."""
+  CAUSAL_RELATIONSHIP
+
+  """What a span of history was about."""
+  HISTORICAL_SIGNIFICANCE
+}
+
+"""
+Where to jump to. Exactly one way, never several.
+
+The six ways of naming a destination come down to two coordinates: an instant,
+and sometimes a Moment sitting at one. Naming two destinations is refused rather
+than resolved by precedence — picking one would send you somewhere you did not
+ask to go.
+"""
+input TimelineAnchorInput {
+  """A Moment. Its occurrence is the position."""
+  moment: ID
+
+  """An instant, which need not be one anything happened at."""
+  instant: DateTime
+
+  """A place, which carries no instant of its own."""
+  location: PlaceAnchorInput
+
+  """An occasion, which does."""
+  realWorldEvent: OccasionAnchorInput
+
+  """A relationship to follow."""
+  causal: CausalAnchorInput
+
+  """What a span of history was about."""
+  significance: SignificanceAnchorInput
+}
+
+"""
+A place to stand, and when to stand there.
+"""
+input PlaceAnchorInput {
+  locationId: ID!
+
+  """
+  Where in that place's history to land.
+
+  A place has no instant of its own, so this is your own temporal orientation
+  carried across. Absent, the place opens where its history does.
+  """
+  at: DateTime
+}
+
+"""
+An occasion to stand in.
+"""
+input OccasionAnchorInput {
+  realWorldEventId: ID!
+
+  """Absent lands at the occasion's own recorded start."""
+  at: DateTime
+}
+
+"""
+A relationship to follow, from one end to the other.
+"""
+input CausalAnchorInput {
+  """
+  The Moment being travelled from, which decides which end is the far one — and
+  without which knowing any relationship's identifier would let somebody travel
+  from a Moment it has nothing to do with.
+  """
+  fromMomentId: ID!
+
+  relationshipId: ID!
+}
+
+"""
+A span of history, jumped to by what it was about.
+"""
+input SignificanceAnchorInput {
+  """
+  When the span begins. Must be where a span of this scale actually begins: the
+  middle of a year is not a year.
+  """
+  startsAt: DateTime!
+
+  scale: TimelineScale!
 }
 
 """

@@ -1,8 +1,11 @@
 import type { GraphQLResolveInfo } from "graphql";
 import { getTemporalDistribution } from "../../timelines/queries/get-temporal-distribution.query.js";
+import { getTimelineAround } from "../../timelines/queries/get-timeline-around.query.js";
 import { getTimelineHead } from "../../timelines/queries/get-timeline-head.query.js";
 import { getTimelineSlice } from "../../timelines/queries/get-timeline-slice.query.js";
+import type { TimelineAround } from "../../timelines/services/around-composer.js";
 import type { TemporalDistribution } from "../../timelines/services/distribution-composer.js";
+import type { TimelineAnchorArguments } from "../../timelines/services/jump-anchor.js";
 import type { GraphQLScale } from "../../timelines/services/distribution-request.js";
 import type { TimelineConnection, TimelineEntry } from "../../timelines/services/timeline-composer.js";
 import type {
@@ -33,6 +36,13 @@ interface TimelineArguments extends PagingArguments {
 /** What `Query.timelineHead` receives. */
 interface HeadArguments {
   readonly view: TimelineViewArguments;
+}
+
+/** What `Query.timelineAround` receives. */
+interface AroundArguments {
+  readonly view: TimelineViewArguments;
+  readonly anchor: TimelineAnchorArguments;
+  readonly first?: number | null;
 }
 
 /** What `Query.temporalDistribution` receives. */
@@ -111,6 +121,29 @@ export const timelineQueries = {
       selectsField(info, "representatives"),
       context,
     );
+  },
+
+  /**
+   * Somewhere else in history, arrived at directly.
+   *
+   * @param _parent - Unused; this is a root field.
+   * @param args - The view being read, how the destination was named, and how
+   *   much history to return either side.
+   * @param context - Carries the Viewer, what they may see, and the read models.
+   * @returns The position, what was at it, the Timeline landed in, and the
+   *   history either side.
+   * @throws {ValidationError} If the arguments do not describe a view, if no
+   *   destination was named or several were, if an instant falls before history
+   *   is held, or if a span was named that does not begin where its scale says.
+   * @throws {UnauthenticatedError} If the request offered no credential.
+   * @throws {OnboardingRequiredError} If onboarding is unfinished.
+   */
+  async timelineAround(
+    _parent: unknown,
+    args: AroundArguments,
+    context: GraphQLContext,
+  ): Promise<TimelineAround> {
+    return getTimelineAround(args.view, args.anchor, args.first ?? undefined, context);
   },
 };
 

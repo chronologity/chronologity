@@ -37,7 +37,13 @@ describe("paging a Timeline", () => {
 
     const connection = await getTimelineSlice(view, { first: 10, after }, context);
 
-    assert.deepEqual(asked.from, after);
+    // Resuming, not landing: the row the cursor names is excluded, or the next
+    // page repeats the last one's final entry.
+    assert.deepEqual(asked.from, {
+      kind: "position",
+      position: { occurredAt: after.occurredAt, momentId: after.momentId },
+      inclusive: false,
+    });
     assert.equal(connection.pageInfo.hasPreviousPage, true);
   });
 

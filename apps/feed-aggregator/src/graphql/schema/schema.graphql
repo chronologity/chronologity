@@ -139,6 +139,39 @@ type Query {
     """
     scale: TimelineScale!
   ): TemporalDistribution!
+
+  """
+  Go straight somewhere, without reading everything in between.
+
+  A Timeline spanning decades cannot be navigated only by scrolling. Name a
+  destination — a Moment, an instant, a place, an occasion, a relationship to
+  follow, or what a span of history was about — and this answers with the
+  position and the history either side of it, so ordinary navigation carries on
+  from where you land.
+
+  **The position is preserved rather than redefined.** Jumping to a time nothing
+  happened at lands at that time, with `at` null and the surrounding pages
+  showing what lies either side. It is not quietly reported as whichever Moment
+  happened to be nearest.
+
+  **A jump may cross into another Timeline** — a relationship pointing at
+  somebody else's Moment takes you to that Moment, not to your own history on the
+  same date — and `scope` says which one you arrived in.
+
+  Every destination is checked afresh for you on arrival. A destination that is
+  not yours to reach answers with an empty position, in the same shape as one
+  that never existed: knowing an identifier has never granted access to what it
+  names.
+  """
+  timelineAround(
+    view: TimelineViewInput!
+    anchor: TimelineAnchorInput!
+
+    """
+    How much history to return either side. At least one, and at most 200.
+    """
+    first: Int
+  ): TimelineAround!
 }
 
 """

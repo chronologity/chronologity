@@ -56,6 +56,7 @@ const typeNamed = async (name: string) => {
       query: `{
         __type(name: "${name}") {
           kind
+          inputFields { name type { kind name ofType { kind name } } }
           fields {
             name
             args { name }
@@ -493,11 +494,95 @@ describe("reading history span by span", () => {
   });
 });
 
+describe("arriving somewhere without travelling there", () => {
+  it("carries the position, what was at it, where it landed and why", async () => {
+    assert.deepEqual((await fieldsOf("TimelineAround")).sort(), [
+      "anchoredAt",
+      "at",
+      "newer",
+      "older",
+      "reason",
+      "scope",
+    ]);
+  });
+
+  it("lets the position exist with nothing at it, and lets there be no position", async () => {
+    // Two different nulls. A position with nothing at it is jumping to a time
+    // nothing happened at; no position at all is a destination that was not
+    // this reader's to reach.
+    assert.equal(await isRequired("TimelineAround", "anchoredAt"), false);
+    assert.equal(await isRequired("TimelineAround", "at"), false);
+  });
+
+  it("always says which Timeline it landed in, and why", async () => {
+    // A jump may cross scopes, so these cannot be optional: a client that could
+    // not tell where it arrived would have to assume it did not move.
+    assert.equal(await isRequired("TimelineAround", "scope"), true);
+    assert.equal(await isRequired("TimelineAround", "reason"), true);
+  });
+
+  it("offers every way of naming a destination, and no more", async () => {
+    const input = await typeNamed("TimelineAnchorInput");
+
+    assert.deepEqual(input.inputFields.map((one: { name: string }) => one.name).sort(), [
+      "causal",
+      "instant",
+      "location",
+      "moment",
+      "realWorldEvent",
+      "significance",
+    ]);
+  });
+
+  it("makes every anchor optional, because exactly one is a runtime rule", async () => {
+    // A required field would make "exactly one" unexpressible. The refusal
+    // happens in the resolver, before any store is read.
+    const input = await typeNamed("TimelineAnchorInput");
+
+    for (const field of input.inputFields) {
+      assert.notEqual(field.type.kind, "NON_NULL", `${field.name} is required`);
+    }
+  });
+
+  it("names only reasons the server can actually verify", async () => {
+    // No SEARCH_RESULT until something produces one. A reason the server could
+    // only echo back from a client's assertion would undo the property that
+    // makes returning it worth anything.
+    assert.deepEqual((await enumValuesOf("TimelineJumpReason")).sort(), [
+      "CAUSAL_RELATIONSHIP",
+      "HISTORICAL_SIGNIFICANCE",
+      "INSTANT",
+      "LOCATION",
+      "MOMENT",
+      "REAL_WORLD_EVENT",
+    ]);
+  });
+
+  it("requires a Moment to travel from when following a relationship", async () => {
+    // Without it, knowing any relationship's identifier would let somebody
+    // travel from a Moment it has nothing to do with.
+    const input = await typeNamed("CausalAnchorInput");
+    const from = input.inputFields.find((one: { name: string }) => one.name === "fromMomentId");
+
+    assert.equal(from.type.kind, "NON_NULL");
+  });
+
+  it("says nothing about how far away anything was, or how much it mattered", async () => {
+    // Significance may choose a destination and may never be shown. A distance
+    // would reintroduce the nearest-Moment semantics the product forbids.
+    const fields = await fieldsOf("TimelineAround");
+
+    for (const forbidden of ["score", "significance", "rank", "nearest", "distance", "foundExactly"]) {
+      assert.ok(!fields.includes(forbidden), `TimelineAround exposes ${forbidden}`);
+    }
+  });
+});
+
 describe("what this phase did not add", () => {
   it("leaves Query with the fields that can be answered", async () => {
     // Types are defined here; the queries returning them arrive with the phases
-    // that compose them. A field declared before then would answer null, so a
-    // jump is absent until something can answer one.
+    // that compose them. Every type this schema declares is now returned by
+    // something.
     assert.deepEqual(
       (await fieldsOf("Query")).sort(),
       [
@@ -506,6 +591,7 @@ describe("what this phase did not add", () => {
         "realWorldEvent",
         "temporalDistribution",
         "timeline",
+        "timelineAround",
         "timelineHead",
         "viewer",
       ],

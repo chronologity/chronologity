@@ -5,6 +5,7 @@ import {
   boundaryCondition,
   clickHouseSpanStart,
   eligible,
+  instantBoundary,
   narrowingFor,
   narrowingSql,
   orderFor,
@@ -49,6 +50,28 @@ const CONTEXTS = "timeline_moment_contexts";
  * discovering the end by receiving nothing, which is a wasted round trip on
  * every Timeline that ends.
  */
+/**
+ * Where a page begins.
+ *
+ * Two shapes, because a page begins in two genuinely different ways. **Resuming**
+ * from a cursor names a row and must exclude it, or the next page repeats the
+ * last. **Landing** names an instant that need not be one anything happened at,
+ * and must include everything sharing it — an instant cannot split Moments that
+ * occurred at the same time, because it names none of them.
+ *
+ * One type rather than two parameters so that a caller cannot supply an instant
+ * and an identifier that disagree, and so the statement binds exactly the
+ * parameters its condition names.
+ */
+export type TimelineBoundary =
+  | {
+      readonly kind: "position";
+      readonly position: TimelinePosition;
+      /** Whether the named row is itself part of the page. False for a cursor. */
+      readonly inclusive: boolean;
+    }
+  | { readonly kind: "instant"; readonly at: Date };
+
 /** How much history one span holds. */
 export interface BucketRow {
   /** The instant the span begins, as ClickHouse renders a naive DateTime64. */
@@ -143,7 +166,8 @@ export class TimelineReadModel {
    * @param viewer - What this Viewer may be shown, resolved before any row is
    *   read. Never taken from the view: a stored view is a request, never a
    *   grant.
-   * @param from - Where to resume, or undefined to start at the end the
+   * @param from - Where the page begins: a position to resume past, a position
+   *   to land on, or an instant to land at. Undefined starts at the end the
    *   direction implies.
    * @returns The rows, and whether history continues past them.
    * @throws {Error} If ClickHouse refuses the statement.
@@ -151,7 +175,7 @@ export class TimelineReadModel {
   async page(
     view: ViewSpecification,
     viewer: TimelineEligibility,
-    from: TimelinePosition | undefined,
+    from: TimelineBoundary | undefined,
   ): Promise<TimelineSlice> {
     const own = view.context.type === "person" && view.context.id === viewer.viewerUserId;
 
@@ -164,7 +188,12 @@ export class TimelineReadModel {
     }
 
     const narrowing = narrowingFor(view, CONTEXTS, this.version);
-    const boundary = from === undefined ? "" : boundaryCondition(view.direction);
+    const boundary =
+      from === undefined
+        ? ""
+        : from.kind === "instant"
+          ? instantBoundary(view.direction)
+          : boundaryCondition(view.direction, from.inclusive);
     const membership = own
       ? `AND context_type = 'person'
          AND context_id = {viewer: String}`
@@ -198,7 +227,12 @@ export class TimelineReadModel {
         limit: view.limit + 1,
         ...(from === undefined
           ? {}
-          : { at: asClickHouseDateTime(from.occurredAt), momentId: from.momentId }),
+          : from.kind === "instant"
+            ? { at: asClickHouseDateTime(from.at) }
+            : {
+                at: asClickHouseDateTime(from.position.occurredAt),
+                momentId: from.position.momentId,
+              }),
       },
       format: "JSONEachRow",
     });

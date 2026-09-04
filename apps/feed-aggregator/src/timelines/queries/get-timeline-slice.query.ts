@@ -40,7 +40,19 @@ export async function getTimelineSlice(
 ): Promise<TimelineConnection> {
   const request = specificationFor(view, paging);
   const viewer = await context.eligibility.forScope(scopeOf(request.view.context));
-  const slice = await context.timeline.page(request.view, viewer, request.from);
+  const slice = await context.timeline.page(
+    request.view,
+    viewer,
+    // A cursor resumes *past* the row it names, which is what stops the next
+    // page repeating the last one's final entry.
+    request.from === undefined
+      ? undefined
+      : {
+          kind: "position",
+          position: { occurredAt: request.from.occurredAt, momentId: request.from.momentId },
+          inclusive: false,
+        },
+  );
 
   return connectionFor(slice, request.view, request.from !== undefined);
 }

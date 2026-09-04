@@ -1,12 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { ViewSpecification } from "@chronologity/contracts";
-import type {
-  TimelineEligibility,
-  TimelinePosition,
-  TimelineReading,
-} from "@chronologity/timeline-derivation";
+import type { TimelineEligibility, TimelineReading } from "@chronologity/timeline-derivation";
 import type { GraphQLContext } from "../graphql/context/graphql-context.js";
 import type {
+  TimelineBoundary,
   TimelineReadModel,
   TimelineSlice,
 } from "../read-models/clickhouse/timeline-read-model.js";
@@ -57,7 +54,7 @@ export function reading(
 /** What was asked of the store, so a translation can be inspected. */
 export interface Asked {
   view?: ViewSpecification;
-  from?: TimelinePosition | undefined;
+  from?: TimelineBoundary | undefined;
 }
 
 /**
@@ -95,7 +92,7 @@ export function contextReturning(
       page: async (
         view: ViewSpecification,
         _viewer: TimelineEligibility,
-        from: TimelinePosition | undefined,
+        from: TimelineBoundary | undefined,
       ) => {
         asked.view = view;
         asked.from = from;
