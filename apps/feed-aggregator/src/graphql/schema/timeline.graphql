@@ -58,15 +58,19 @@ enum TimelineDirection {
 }
 
 """
-How coarsely history is being counted.
+How coarsely history is being read.
 
-Narrower than the scales somebody may ask for. What a client requests and what
-the projection can currently count are different questions, and this is the
-second.
+Finest to coarsest, which is the order somebody zooms out through. Below `day`
+is the Timeline itself, one Moment per row: a scale is a span of time, and the
+ungrouped slice is not one.
 """
 enum TimelineScale {
+  DAY
+  WEEK
+  MONTH
   YEAR
   DECADE
+  CENTURY
 }
 
 """
@@ -200,26 +204,79 @@ type TimelineConnection {
 }
 
 """
-How much history sits in one span of time.
-
-Counts what the reader may see and nothing else: a count is a way of revealing
-that something exists, so one taken before eligibility would tell somebody how
-much they are not being shown.
+One span of history, and a little of what was in it.
 """
 type TemporalBucket {
+  """
+  When the span begins. Where it ends follows from the distribution's scale.
+  """
   startsAt: DateTime!
-  scale: TimelineScale!
+
+  """
+  How much history the span holds.
+
+  Counts what the reader may be told about and nothing else: a count reveals that
+  something exists, so one taken before eligibility would tell somebody how much
+  they are not being shown. On a reader's own Timeline it does include Moments
+  they may not read, because paging their own history returns those redacted
+  rather than removing them — a count and the page it summarises must agree.
+
+  For conveying how full a span is, not for reading as a figure. It is never the
+  number of `representatives`, which is what may be *shown* and is fewer.
+  """
   count: Int!
+
+  """
+  A few of the Moments this span holds.
+
+  Chosen by historical significance, and never more than one per person, so that
+  somebody who recorded a single afternoon forty times does not become the whole
+  decade.
+
+  Always readable, on every Timeline including your own. A redacted entry carries
+  a date and nothing else, which is enough to say something happened and not
+  enough to say what a span was about — and since a span holds only a few,
+  offering one would displace a Moment that could actually speak for it.
+
+  Empty is an ordinary answer, not a failure: a span whose history is entirely
+  withheld from this reader still has a count. Never null.
+  """
+  representatives: [ReadableTimelineEntry!]!
 }
 
 """
 How history is distributed across a stretch of time.
 
+The same Timeline as `timeline`, at a coarser density — same axis, same
+chronological order, same direction of travel. Each row covers a stretch rather
+than an instant and carries a few of the Moments inside it. `timeline` is the
+finest rung of this ladder, one Moment per row.
+
 Spans holding nothing are absent rather than zero: a century of silence is not a
-hundred rows of nothing.
+hundred rows of nothing. A client draws the empty ones itself, from `scale` and
+the interval below.
 """
 type TemporalDistribution {
+  """
+  Oldest first, one per span that holds anything.
+  """
   buckets: [TemporalBucket!]!
+
+  """
+  How coarsely this was read. One scale for the whole answer.
+  """
+  scale: TimelineScale!
+
+  """
+  The earliest instant read, and the latest.
+
+  Returned rather than assumed, because a rolling range — "the last thirty days"
+  — resolves against the instant the request arrived, which a client cannot
+  recompute. Without these it could not know which empty spans to draw.
+  """
+  from: DateTime!
+  to: DateTime!
+
   scope: TimelineScope!
 }
 

@@ -183,7 +183,7 @@ export function positionOf(row: TimelineReading): Position {
  *   happens to be set to. `DateTime64` has no zone: it stores what it was
  *   given, and it was given UTC.
  */
-function instantOf(stored: string): Date {
+export function instantOf(stored: string): Date {
   return new Date(`${stored.replace(" ", "T")}Z`);
 }
 
@@ -195,6 +195,6 @@ function instantOf(stored: string): Date {
  *   uses. A value from neither vocabulary fails as an invalid enum rather than
  *   being quietly presented as something it is not.
  */
-function asEnum(value: string): string {
+export function asEnum(value: string): string {
   return value.toUpperCase();
 }

@@ -1,8 +1,9 @@
-import type { ViewSpecification } from "@chronologity/contracts";
+import type { TimelineScale, ViewSpecification } from "@chronologity/contracts";
 import type { ClickHouseClient } from "@clickhouse/client";
 import {
   asClickHouseDateTime,
   boundaryCondition,
+  clickHouseSpanStart,
   eligible,
   narrowingFor,
   narrowingSql,
@@ -48,6 +49,13 @@ const CONTEXTS = "timeline_moment_contexts";
  * discovering the end by receiving nothing, which is a wasted round trip on
  * every Timeline that ends.
  */
+/** How much history one span holds. */
+export interface BucketRow {
+  /** The instant the span begins, as ClickHouse renders a naive DateTime64. */
+  readonly starts_at: string;
+  readonly count: number;
+}
+
 export interface TimelineSlice {
   /** At most the limit the view asked for, in the order they were walked. */
   readonly rows: readonly TimelineReading[];
@@ -198,5 +206,76 @@ export class TimelineReadModel {
     const rows = await result.json<TimelineReading>();
 
     return { rows: rows.slice(0, view.limit), more: rows.length > view.limit };
+  }
+
+  /**
+   * How much history each span of a stretch holds.
+   *
+   * **Spans holding nothing are absent rather than zero.** A century of silence
+   * is not a hundred rows of nothing, and a client knows the scale and the
+   * interval it asked for, so it can draw the gaps itself. Emitting them would
+   * make the answer's size a function of the range rather than of the history.
+   *
+   * The same own-versus-scoped asymmetry as `page`, and for the same reason:
+   * `projections.md` requires that a count and the page it summarises agree.
+   * Somebody's own count includes what they may not read, because paging their
+   * own Timeline returns those rows redacted rather than removing them; every
+   * other count excludes what the Viewer may not see, because paging would too.
+   * A count that disagreed with its page would either promise history that never
+   * arrives or hide history that does.
+   *
+   * The stretch is not a parameter. It is already on the view as a fixed range,
+   * pinned when the request was assembled, so that this and the read choosing
+   * representatives are asked about exactly the same instants.
+   *
+   * @param view - What is being read, carrying the resolved range it covers.
+   * @param viewer - What this Viewer may be shown, resolved before any row is
+   *   read.
+   * @param scale - How coarsely to group. Bucketed by the shared generator, so
+   *   these boundaries are the ones the representative read finds too.
+   * @returns One row per span holding anything, oldest first.
+   * @throws {Error} If ClickHouse refuses the statement.
+   */
+  async buckets(
+    view: ViewSpecification,
+    viewer: TimelineEligibility,
+    scale: TimelineScale,
+  ): Promise<readonly BucketRow[]> {
+    const own = view.context.type === "person" && view.context.id === viewer.viewerUserId;
+
+    if (!own && !viewer.scopeIsOpen) {
+      return [];
+    }
+
+    const narrowing = narrowingFor(view, CONTEXTS, this.version);
+    const membership = own
+      ? `AND context_type = 'person'
+         AND context_id = {viewer: String}`
+      : `AND context_type = {contextType: String}
+         AND context_id = {contextId: String}
+         AND ${eligible(CONTEXTS)}`;
+
+    const result = await this.client.query({
+      query: `SELECT ${clickHouseSpanStart(scale, "occurred_at")} AS starts_at,
+                     toUInt32(count()) AS count
+                FROM ${CONTEXTS}
+               WHERE projection_version = {version: String}
+                 ${membership}
+                 ${narrowingSql(narrowing)}
+               GROUP BY starts_at
+               ORDER BY starts_at ASC`,
+      query_params: {
+        version: this.version,
+        viewer: viewer.viewerUserId,
+        blocked: viewer.blocked,
+        audience: viewer.audience,
+        isAdult: viewer.isAdult ? 1 : 0,
+        ...(own ? {} : { contextType: view.context.type, contextId: view.context.id }),
+        ...narrowing.params,
+      },
+      format: "JSONEachRow",
+    });
+
+    return await result.json<BucketRow>();
   }
 }

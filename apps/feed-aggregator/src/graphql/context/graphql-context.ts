@@ -5,6 +5,7 @@ import type { ContextAxisReadModel } from "../../read-models/clickhouse/context-
 import type { ContextNameReadModel } from "../../read-models/postgres/context-name-read-model.js";
 import type { MomentReadModel } from "../../read-models/postgres/moment-read-model.js";
 import type { RealWorldEventReadModel } from "../../read-models/postgres/real-world-event-read-model.js";
+import type { RepresentativeReadModel } from "../../read-models/postgres/representative-read-model.js";
 import type { TimelineReadModel } from "../../read-models/clickhouse/timeline-read-model.js";
 
 /**
@@ -67,6 +68,14 @@ export interface GraphQLContext {
    * of it — the same derived rule the API applies, from the same package.
    */
   readonly realWorldEvents: RealWorldEventReadModel;
+  /**
+   * Where the Moments standing for a span of history are chosen.
+   *
+   * PostgreSQL, because significance, occurrence and the authoritative
+   * visibility rule all live there — so choosing is one statement rather than a
+   * projection that would have to carry a score the schema refuses to show.
+   */
+  readonly representatives: RepresentativeReadModel;
   /**
    * What this Viewer may see, resolved on demand and once per scope.
    *

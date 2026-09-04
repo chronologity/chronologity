@@ -117,6 +117,28 @@ type Query {
 
     after: Cursor
   ): HistoricalContextConnection!
+
+  """
+  The same history, read span by span rather than Moment by Moment.
+
+  This is `timeline` zoomed out: the same axis in the same order, with each row
+  covering a stretch of time and carrying a few of the Moments inside it. Zooming
+  all the way in is `timeline` itself, one Moment per row.
+
+  The view must name a stretch of time, and the stretch and the scale together
+  must not be more spans than one request can answer — a decade day by day is
+  refused rather than cut short, because a distribution that was trimmed
+  misstates the shape of somebody's history and nothing in the answer would say
+  so. Ask for a shorter stretch, or read it more coarsely.
+  """
+  temporalDistribution(
+    view: TimelineViewInput!
+
+    """
+    How coarsely to read it.
+    """
+    scale: TimelineScale!
+  ): TemporalDistribution!
 }
 
 """

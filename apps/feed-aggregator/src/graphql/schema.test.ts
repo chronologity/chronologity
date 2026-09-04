@@ -56,7 +56,13 @@ const typeNamed = async (name: string) => {
       query: `{
         __type(name: "${name}") {
           kind
-          fields { name type { kind name ofType { kind name } } }
+          fields {
+            name
+            args { name }
+            # Deep enough to name the type inside a non-null list of non-nulls,
+            # which is what a list field's shape actually is.
+            type { kind name ofType { kind name ofType { kind name ofType { kind name } } } }
+          }
           possibleTypes { name }
           interfaces { name }
           enumValues { name }
@@ -75,6 +81,13 @@ const fieldsOf = async (name: string): Promise<string[]> =>
 /** The values an enum declares. */
 const enumValuesOf = async (name: string): Promise<string[]> =>
   ((await typeNamed(name))?.enumValues ?? []).map((value: { name: string }) => value.name);
+
+/** The type at the bottom of however many non-nulls and lists wrap it. */
+const namedTypeOf = (type: { name: string | null; ofType?: unknown }): string => {
+  const inner = type.ofType as { name: string | null; ofType?: unknown } | null | undefined;
+
+  return inner === null || inner === undefined ? (type.name ?? "") : namedTypeOf(inner);
+};
 
 /** Whether a field is non-null. */
 const isRequired = async (typeName: string, fieldName: string): Promise<boolean> => {
@@ -400,15 +413,121 @@ describe("an occurrence in the world", () => {
   });
 });
 
+describe("reading history span by span", () => {
+  it("offers every scale somebody zooms through", async () => {
+    assert.deepEqual((await enumValuesOf("TimelineScale")).sort(), [
+      "CENTURY",
+      "DAY",
+      "DECADE",
+      "MONTH",
+      "WEEK",
+      "YEAR",
+    ]);
+  });
+
+  it("reads at one scale for the whole answer, so a mixed one cannot be expressed", async () => {
+    // On the distribution rather than on each span. A scale per bucket would
+    // permit an answer mixing them, and permitting it is inviting it.
+    assert.ok((await fieldsOf("TemporalDistribution")).includes("scale"));
+    assert.ok(!(await fieldsOf("TemporalBucket")).includes("scale"));
+  });
+
+  it("says which interval it read, because a client draws the empty spans itself", async () => {
+    // A rolling range resolves against the instant the request arrived. Without
+    // these a client could not know which spans were silent and which were never
+    // asked about.
+    assert.deepEqual((await fieldsOf("TemporalDistribution")).sort(), [
+      "buckets",
+      "from",
+      "scale",
+      "scope",
+      "to",
+    ]);
+  });
+
+  it("carries a span, how much it holds, and a little of what was in it", async () => {
+    assert.deepEqual((await fieldsOf("TemporalBucket")).sort(), [
+      "count",
+      "representatives",
+      "startsAt",
+    ]);
+  });
+
+  it("says where a span begins and lets its scale say where it ends", async () => {
+    // A second instant per bucket would be a second thing to get wrong at a
+    // boundary, and it is already determined by `startsAt` and the scale.
+    assert.ok(!(await fieldsOf("TemporalBucket")).includes("endsAt"));
+  });
+
+  it("makes a withheld representative impossible to express", async () => {
+    const bucket = await typeNamed("TemporalBucket");
+    const field = bucket.fields.find((one: { name: string }) => one.name === "representatives");
+
+    // A list of the readable member, never the union and never `Moment`. The
+    // type is what enforces that a representative is always readable — a client
+    // cannot receive a redacted one because there is no shape for one — and
+    // never the depth type, which would cost a statement each.
+    assert.equal(field.type.kind, "NON_NULL");
+    assert.equal(field.type.ofType.kind, "LIST");
+
+    assert.equal(namedTypeOf(field.type), "ReadableTimelineEntry");
+  });
+
+  it("puts no score, rank or reason beside a span", async () => {
+    // Significance decides the order and never reaches a client. Order in the
+    // list is the only ranking signal there is.
+    const fields = await fieldsOf("TemporalBucket");
+
+    for (const forbidden of ["significance", "score", "rank", "density", "cursor", "reason"]) {
+      assert.ok(!fields.includes(forbidden), `TemporalBucket exposes ${forbidden}`);
+    }
+  });
+
+  it("does not split a count into what may and may not be read", async () => {
+    // The ratio is the disclosure. One count, whose meaning depends on whose
+    // Timeline it is rather than on which half a client adds up.
+    const fields = await fieldsOf("TemporalBucket");
+
+    assert.ok(!fields.includes("readableCount"));
+    assert.ok(!fields.includes("withheldCount"));
+  });
+});
+
 describe("what this phase did not add", () => {
   it("leaves Query with the fields that can be answered", async () => {
     // Types are defined here; the queries returning them arrive with the phases
     // that compose them. A field declared before then would answer null, so a
-    // jump and a distribution are absent until something can answer one.
+    // jump is absent until something can answer one.
     assert.deepEqual(
       (await fieldsOf("Query")).sort(),
-      ["adjacentContexts", "moment", "realWorldEvent", "timeline", "timelineHead", "viewer"],
+      [
+        "adjacentContexts",
+        "moment",
+        "realWorldEvent",
+        "temporalDistribution",
+        "timeline",
+        "timelineHead",
+        "viewer",
+      ],
     );
+  });
+
+  it("leaves the finest rung of the ladder exactly as it was", async () => {
+    // The temptation to fold zoom into `timeline` as an argument will recur. It
+    // cannot be done: a field's return type may not vary by argument, so the
+    // node would have to become a union and every client already written would
+    // acquire a case to handle at the scale it was already using.
+    const timeline = (await typeNamed("Query")).fields.find(
+      (one: { name: string }) => one.name === "timeline",
+    );
+
+    assert.deepEqual(timeline.args.map((one: { name: string }) => one.name).sort(), [
+      "after",
+      "before",
+      "first",
+      "last",
+      "view",
+    ]);
   });
 
   it("offers no way to open a place directly", async () => {

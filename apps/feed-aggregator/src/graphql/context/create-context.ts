@@ -9,6 +9,7 @@ import { ContextAxisReadModel } from "../../read-models/clickhouse/context-axis-
 import { ContextNameReadModel } from "../../read-models/postgres/context-name-read-model.js";
 import { MomentReadModel } from "../../read-models/postgres/moment-read-model.js";
 import { RealWorldEventReadModel } from "../../read-models/postgres/real-world-event-read-model.js";
+import { RepresentativeReadModel } from "../../read-models/postgres/representative-read-model.js";
 import type { GraphQLContext } from "./graphql-context.js";
 
 /**
@@ -46,6 +47,7 @@ export function createContext(
   const contextAxis = new ContextAxisReadModel(store.client, store.projectionVersion);
   const contextNames = new ContextNameReadModel(directory);
   const realWorldEvents = new RealWorldEventReadModel(directory);
+  const representatives = new RepresentativeReadModel(directory);
 
   return function contextFor(request: FastifyRequest): GraphQLContext {
     const viewer = request.viewer ?? ANONYMOUS;
@@ -67,6 +69,7 @@ export function createContext(
       contextAxis,
       contextNames,
       realWorldEvents,
+      representatives,
     };
   };
 }
