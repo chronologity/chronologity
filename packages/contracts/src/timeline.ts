@@ -149,7 +149,19 @@ export const timelineAroundRequestSchema = timelineNarrowingSchema.extend({
 
 export type TimelineAroundRequest = z.infer<typeof timelineAroundRequestSchema>;
 
-/** Where a jump landed, and the history either side of it. */
+/**
+ * Where a jump landed, and the history either side of it.
+ *
+ * **The REST shape, whose `at` means something the GraphQL surface's does not.**
+ * Here it is the Moment *nearest* the instant asked for, which redefines the
+ * position as whichever Moment was closest — the thing `timeline.md:367` asks
+ * navigation not to do. The read surface that replaces these routes preserves
+ * the position instead, and reports nothing at it when nothing happened there.
+ *
+ * Left as it is deliberately: these routes are deprecated and nothing consumes
+ * them, and changing what a surface means on its way out is risk with no
+ * beneficiary. Written down so nobody reads the two as agreeing.
+ */
 export const timelineAroundSchema = z.object({
   /** The nearest Moment, or absent when there is no history at all. */
   at: timelineEntrySchema.optional(),

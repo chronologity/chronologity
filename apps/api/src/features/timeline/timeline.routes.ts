@@ -272,7 +272,9 @@ export function timelineRoutes(timeline: TimelineService) {
         around: [
           "Finds the Moment nearest an instant among those you may see here, and returns the history either side of it.",
           "",
-          "The instant need not be one anything happened at. Nearest is decided after eligibility rather than before, so a jump never lands on something you cannot open, and never reports a gap that is only a gap for you.",
+          "The instant need not be one anything happened at. Nearest is decided after eligibility rather than before, so a jump never lands on something you cannot open.",
+          "",
+          "**This redefines the position as whichever Moment was nearest**, which `timeline.md:367` asks navigation not to do: a jump to a June nothing happened in is reported as the February before it, and nothing in the answer says so. The replacement surface preserves the position instead, returning it with nothing at it and the surrounding history either side. This is one of the reasons these routes are going away.",
           "",
           eligibility,
           "",
