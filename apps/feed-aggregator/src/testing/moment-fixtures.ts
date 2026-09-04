@@ -223,21 +223,36 @@ export async function createComment(
  *
  * @param pool - The connection to arrange through.
  * @param createdByUserId - Who recorded it. Provenance, never ownership.
- * @param over - A name, other names it goes by, and where it happened.
+ * @param over - A name, other names it goes by, where it happened, and when.
+ *   The occurrence defaults to a fixed modern span; a test about where a jump
+ *   lands needs its own, since an occasion is the one anchor carrying an
+ *   instant of its own.
  * @returns The occurrence's identifier.
  */
 export async function createRealWorldEvent(
   pool: Pool,
   createdByUserId: string,
-  over: { name?: string; aliases?: readonly string[]; locationIds?: readonly string[] } = {},
+  over: {
+    name?: string;
+    aliases?: readonly string[];
+    locationIds?: readonly string[];
+    occurrenceStart?: string;
+    occurrenceEnd?: string;
+  } = {},
 ): Promise<string> {
   const realWorldEventId = randomUUID();
 
   await pool.query(
     `INSERT INTO real_world_events (real_world_event_id, created_by_user_id, name,
                                     occurrence_start, occurrence_end, occurrence_precision)
-     VALUES ($1, $2, $3, '2026-11-20T00:00:00Z', '2026-11-22T23:59:59Z', 'day')`,
-    [realWorldEventId, createdByUserId, over.name ?? "Anime NYC 2026"],
+     VALUES ($1, $2, $3, $4, $5, 'day')`,
+    [
+      realWorldEventId,
+      createdByUserId,
+      over.name ?? "Anime NYC 2026",
+      over.occurrenceStart ?? "2026-11-20T00:00:00Z",
+      over.occurrenceEnd ?? "2026-11-22T23:59:59Z",
+    ],
   );
 
   for (const alias of over.aliases ?? []) {
