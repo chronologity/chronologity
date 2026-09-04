@@ -822,6 +822,33 @@ Representative Moments
 
 This allows Chronologity to compress history without turning temporal zoom into a popularity ranking.
 
+### What Temporal Zoom Settled
+
+**Each span carries at most three representative Moments, at every scale.** The
+number of spans already falls as somebody zooms out, so what reaches the screen
+falls with it; a second rule scaling the count as well would make the amount on
+screen depend on two things at once.
+
+**A span shows a given person once**, and it is their most significant Moment
+there. Without that rule somebody who photographed a single afternoon forty times
+becomes the whole decade, and the zoomed-out view stops conveying shape — which
+is the only thing it exists to convey.
+
+**The `personal` dimension never contributes.** It is one person's private mark
+copied into the derived table, in that person's own scope. Letting it rank a
+person's own Timeline would make the order of their representatives a readout of
+what they marked privately, shown to everybody who may open it: **ordering
+discloses exactly as a count does.**
+
+**A representative is always a Moment its reader may read**, on their own
+Timeline as much as anybody else's. A span whose history is entirely withheld
+from a reader still reports how much it holds, and offers nothing to stand for
+it. That is why a private significant Moment cannot reach a shared summary, and
+why the summary still says something happened.
+
+Coverage *within* a span is not yet decided, and a span whose three
+representatives fall in the same week is an accepted outcome for now.
+
 ## Temporal Coverage
 
 Significance alone is insufficient for representative selection.
@@ -1411,13 +1438,10 @@ The following questions require deliberate resolution:
 - Should Users be able to override representative Moment selection in their own Timeline?
 - Can a User pin a Moment so it always survives certain personal temporal zoom levels?
 - If pinning exists, is that a significance signal or merely a presentation preference?
-- How many representative Moments should appear at each temporal zoom level?
 - Should the number depend on screen size, device orientation, density, or user preference?
 - How should temporal coverage be balanced against significance?
 - How should diversity be defined for representative selection?
-- How aggressively should near-duplicate Moments be collapsed at broader zoom levels?
 - When several Moments represent the same Event, should Chronologity prefer one representative Moment or an Event-level representation?
-- How should private significant Moments affect a public or shared temporal summary?
 - Can Chronologity reveal that hidden significant history exists without revealing what it is?
 - Should significance influence search ranking?
 - Should significance influence discovery outside the chronological Feed?

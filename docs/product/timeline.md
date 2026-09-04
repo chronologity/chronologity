@@ -226,6 +226,27 @@ Moment
 
 The exact set of exposed zoom levels may be refined through interaction design, but the ability to move between broader and narrower temporal scales is foundational rather than optional.
 
+**As built, the ladder is century, decade, year, month, week, day, and then the
+Timeline itself.** Zooming in past a day opens the whole day rather than breaking
+it into hours.
+
+**Zoom is the vertical axis at a lower density, not a separate view.** Same axis,
+same chronological order, same direction of travel — a row covers a stretch of
+time instead of an instant, and carries a few of the Moments inside it. The
+finest rung is the ordinary Timeline, one Moment per row.
+
+**A span holding nothing is absent from the answer rather than reported as zero**
+— a century of silence is not a hundred rows of nothing. A client draws the empty
+spans itself, from the scale and the interval it asked for, both of which the
+answer carries back. It has to carry them: a rolling stretch such as "the last
+thirty days" resolves against the instant the request arrived, which a client
+cannot recompute.
+
+**A request too wide for its scale is refused rather than shortened.** A decade
+read day by day is thousands of spans, and a distribution that was quietly
+trimmed would misstate the shape of somebody's history with nothing in the answer
+saying so. The refusal names a coarser way to ask the same question.
+
 Zooming out should allow users to understand and traverse larger spans of history efficiently. Zooming in should progressively expose greater chronological detail until the user reaches individual Moments.
 
 A zoomed-out representation may summarize, cluster, or otherwise represent a period, but that representation must not be confused with an underlying Moment.

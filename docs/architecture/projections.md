@@ -595,6 +595,23 @@ Temporal zoom projections should preserve drill-down access to underlying Moment
 
 They are derived representations.
 
+**As built, there is no zoom projection.** Spans are grouped at query time over
+`timeline_moment_contexts`, by an expression shared with the read that chooses
+what represents them — no bucket table, no materialized view, and no significance
+copied into ClickHouse. Precomputing would require invalidation on authorization,
+privacy, deletion, causal, Event *and* significance changes, which is six sources
+to get right in exchange for an improvement nobody has measured a need for.
+
+Drill-down needs no cursor of its own: a span's start and the scale it was read
+at determine the interval behind it, so a client re-asks for the Timeline over
+that interval.
+
+A span's counts come from the projection and its representative Moments come from
+PostgreSQL, which means both stores must agree about where a span begins. They
+compute it independently from one generator rather than one asking the other, and
+the counts decide which spans exist — a representative for a span the projection
+did not return is dropped, which is what makes projection lag harmless here.
+
 ---
 
 # Historical Significance Projection

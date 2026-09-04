@@ -5091,3 +5091,63 @@ Landing at the same point in time when moving to a neighbour. `timeline.md:118` 
 Nearest-on-either-side ordering for the same-period tier: it scans outwards from an instant, prunes badly, and needs a window that widens when a page comes back short — the shape 9C removed from the architecture.
 
 Prefetching neighbour Timelines (9H/9I); any enumeration of Events; `Query.location(id)` and viewer-relative Location precision; changes to the projection or the projector; DataLoader; temporal distribution over a neighbour (9F); and a `contexts` field on `Moment`.
+
+---
+
+# ADR-144 — Temporal Zoom Is the Vertical Axis at Lower Density, and a Span Is Represented by Moments Its Reader May Read
+
+## Status
+
+Accepted. Settles `historical-significance.md`'s open questions on how many Moments represent a span and how aggressively near-duplicates are collapsed, and records a deliberate departure from ADR-130.
+
+## Context
+
+9C built the vertical axis, 9D depth, 9E the horizontal axis. Temporal zoom was read at first as a fourth thing — a separate view, reached by a pinch, showing clusters of history. Design mockups settled that it is not.
+
+**Zoom is the vertical Timeline's own density.** Same axis, same chronological order, same direction of travel. Zoomed all the way in, each row is one Moment with its date and time, which is what `Query.timeline` already returns. Zoomed out, each row covers a stretch of time and carries a few of the Moments inside it. So this phase adds coarser states beneath the one 9C built rather than a different screen.
+
+Two things were then forced. Reading a span means saying something about what was in it, so **9F chooses representative Moments** rather than only counting. And the projection counts in ClickHouse while significance, occurrence and the authoritative visibility rule all live in PostgreSQL — so one answer has to be assembled from two stores that must agree about where a span begins.
+
+## Decision
+
+**Six scales: day, week, month, year, decade, century.** Below `day` is the Timeline itself; a scale is a span of time and the ungrouped slice is not one. Zooming in past a day opens the whole day rather than breaking it into hours.
+
+**Three representative Moments per span, fixed at every scale**, and **one per person per span** — their most significant there.
+
+**ClickHouse counts, PostgreSQL chooses, and the two run in parallel.** A span's start is a pure function of an instant and a scale, so both compute it independently from one shared generator and meet on the result. **Counts decide which spans exist; representatives only decorate them**, and a representative for a span nothing counted is dropped.
+
+**Every representative is one the reader may read — including on their own Timeline.** This is a deliberate departure from ADR-130, which requires that a count and the page it summarises agree. A representative set is not a page.
+
+**A request too wide for its scale is refused, never truncated**, with a message naming a coarser way to ask. A range is required, and one reaching before 1900 is refused.
+
+**`temporalDistribution` is its own root field**, returning `scale` and the resolved interval alongside the spans. Spans holding nothing are absent; a client draws those itself.
+
+**The `personal` dimension of significance is excluded from ranking, unconditionally.**
+
+**`toStartOfYear`, `toStartOfMonth`, `toStartOfDay`, `toMonday` and `toStartOfWeek` may not be used.** Weeks are anchored at 1900-01-01. Decade and century are never `date_trunc`.
+
+## Alternatives Considered
+
+A `scale` argument on `timeline`; a `zoom` field on `TimelineViewInput`; representatives as full `Moment` objects, or as the `TimelineEntry` union; a withheld representative on one's own Timeline; `scale` on each bucket; truncating an over-wide request; emitting zero-count spans; a drill-down cursor per bucket; a significance summary or score beside a span; an hour scale; a week scale composed client-side from days; a bucket projection in ClickHouse; capping the count; a readable/withheld count split; `toMonday(toDate32(…))` as a readable week expression.
+
+## Rationale
+
+**A field's return type cannot vary by argument**, so folding zoom into `timeline` would force `TimelineEdge.node` to become a union and give every client already written a case to handle at the scale it was already using. The two are addressed differently besides: the fine Timeline is cursor-addressed because its extent is unknown, while a coarse read is range-addressed precisely so a client can draw its own gaps. One field would carry both sets of arguments with runtime mutual exclusions — the input shape ADR-141 refused — and its `pageInfo` would be permanently `hasNextPage: false`, which is a lie a client can be written against.
+
+**One per person per span is what makes a zoomed-out view convey shape.** Without it, somebody who photographed a single afternoon forty times becomes the whole decade. It is written as two window passes in SQL rather than applied to rows afterwards, so a later change to how the answer is assembled cannot quietly drop it.
+
+**A withheld representative would displace rather than add.** `WithheldTimelineEntry` carries an identifier and two instants — enough, in a page, because position is the information. A representative claims "this is what the span was about", which a date cannot; and since a span holds only three, offering one takes a slot from a Moment that could speak for it. Worse, the ordering is itself a disclosure: "the most significant Moment on your Timeline in 1998 is one you may not read" is a statement about withheld *content*, drawn from a score computed out of other people's history. Participation grants the fact that something happened, which the page already gives; it grants nothing about how it compares. The count still tells the reader everything they are owed, and paging in still returns the redacted entries ADR-130 promised. Reusing `ReadableTimelineEntry` makes this an invariant of the schema rather than of the resolver: there is no shape for a withheld representative.
+
+**Excluding the `personal` dimension is the phase's sharpest privacy finding, and it was verified rather than suspected.** `moment_significance` carries one row per person who marked a Moment, keyed to that person's own scope with `dimension = 'personal'` — a copy of a private mark in a derived table, whose own code comment says summing them "would make a private mark into a public tally". Matching significance to a person's scope without excluding it would make the order of representatives on their Timeline a readout of what they privately marked, shown to everybody who may open it. **Ordering discloses exactly as a count does**, and nothing about the answer's shape would reveal that it had. Excluded everywhere rather than for the person scope alone: a rule that is off in one place is one refactor from being off everywhere. The consequence is accepted openly — a person scope then has effectively only the `temporal` dimension, keyed on each Moment's author, so what somebody merely participated in falls through to the global scope.
+
+**A truncated distribution misstates the shape of somebody's history**, and nothing in the answer says it was cut — which is the one failure a zoom control cannot recover from, because the client has no way to know. The refusal is computed from the range and the scale, both of which the client sent, so it happens before a connection is opened and no history is read to produce it.
+
+**ClickHouse's calendar functions return `Date`, which is `UInt16` days from 1970 and cannot hold anything earlier.** Measured on 26.4.5: `toStartOfYear` maps 1901-06-15 to 1970-01-01, and `toMonday` does the same to 1969-12-25. Passing `Date32` does not rescue them — they still return `Date`. That is the mechanism behind the failures this codebase had already recorded, and it is predictive rather than anecdotal: every function in that family fails identically. Since most of the history this product exists to hold predates 1970, spans are built from calendar components instead.
+
+**1900-01-01 is a Monday and is also ClickHouse's floor**, so anchoring weeks there makes days-since-anchor non-negative for every instant the store can hold — which makes `intDiv`'s truncation toward zero *unreachable* rather than merely corrected. Anchoring near the epoch is not simply riskier: measured, `intDiv(-4, 7)` is 0, which places 1969-12-25 in a week beginning 1969-12-29, four days after the Moment inside it. `HISTORY_FLOOR` therefore does two jobs — it closes the year-zero hazard in the PostgreSQL expression *and* keeps the week arithmetic in the range where it is correct — and must not be relaxed for either.
+
+**PostgreSQL's century is 1901–2000**, so `date_trunc('century', '1969-06-01')` is 1901-01-01 where ClickHouse's arithmetic gives 1900-01-01. The two stores would disagree about which span most of the twentieth century belongs to. `date_trunc('decade')` happens to agree for the years this product can hold, which makes it more dangerous rather than less: it is one keystroke from the century form and would pass any test not reaching far enough back.
+
+**Both generators live in one file** because the risk is not that either expression is wrong alone — a count is a dot's size and a representative is a thumbnail — but that they drift apart, at which point a Moment appears under the wrong week and nothing reports it.
+
+**The counts are for conveying density, not for reading as a figure**, and that relaxes nothing about privacy. A dot sized for eleven where the reader may see two discloses nine withheld Moments at lower resolution, not at zero. ADR-130 is a disclosure rule rather than a rendering rule.
