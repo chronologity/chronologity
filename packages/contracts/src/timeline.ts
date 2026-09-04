@@ -185,3 +185,35 @@ export type TimelineBucketsRequest = z.infer<typeof timelineBucketsRequestSchema
 export const timelineBucketsSchema = z.object({ buckets: z.array(timelineBucketSchema) });
 
 export type TimelineBuckets = z.infer<typeof timelineBucketsSchema>;
+
+/**
+ * How a context sits beside the one somebody is standing in.
+ *
+ * Two tiers, and the distinction is load-bearing rather than descriptive.
+ * `SHARED_HISTORY` is a fact somebody recorded: a Moment belongs to both. Being
+ * in the same period is not a relationship at all — it says only that two
+ * stretches of history reach the same time, which `timeline.md:112` is explicit
+ * does not prove anything connects them.
+ *
+ * Carried as data rather than left to the order results arrive in, because order
+ * is not durable: a client that sorts or filters loses it, and mere co-presence
+ * then reads as connection.
+ */
+export const contextAdjacencySchema = z.enum(["shared_history", "same_period"]);
+
+export type ContextAdjacency = z.infer<typeof contextAdjacencySchema>;
+
+/**
+ * What a caller may ask for when moving sideways through history.
+ *
+ * Bounded because the axis is not. Horizontal movement never runs out — beyond
+ * the contexts sharing history with where somebody is standing, it continues
+ * into whatever else reaches the same period — so a page bound is what keeps one
+ * request from asking for the whole of it.
+ */
+export const listAdjacentContextsRequestSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+  cursor: z.string().max(500).optional(),
+});
+
+export type ListAdjacentContextsRequest = z.infer<typeof listAdjacentContextsRequestSchema>;
