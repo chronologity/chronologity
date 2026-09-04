@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { describe, it } from "vitest";
-import { boundaryCondition, CursorError, decodeCursor, encodeCursor, orderFor } from "./cursor.js";
+import {
+  boundaryCondition,
+  CursorError,
+  decodeCursor,
+  encodeCursor,
+  instantBoundary,
+  orderFor,
+} from "./cursor.js";
 
 /**
  * Cursors, exhaustively.
@@ -172,6 +179,39 @@ describe("resuming from a cursor", () => {
     }
   });
 
+  it("excludes the row a cursor names, which is what stops a page repeating it", () => {
+    // The default, and every existing caller relies on it. An inclusive resume
+    // would return the last row of the previous page as the first of the next.
+    assert.doesNotMatch(boundaryCondition("older"), /<=/);
+    assert.doesNotMatch(boundaryCondition("newer"), />=/);
+  });
+
+  it("is character-for-character what it was when asked for the default", () => {
+    // The parameter was added for landings. Every call site that predates it
+    // passes one argument, and those queries must not have changed at all.
+    assert.equal(
+      boundaryCondition("older"),
+      "AND (occurred_at, moment_id) < ({at: DateTime64(3)}, {momentId: String})",
+    );
+    assert.equal(
+      boundaryCondition("newer"),
+      "AND (occurred_at, moment_id) > ({at: DateTime64(3)}, {momentId: String})",
+    );
+    assert.equal(boundaryCondition("older"), boundaryCondition("older", false));
+    assert.equal(boundaryCondition("newer"), boundaryCondition("newer", false));
+  });
+
+  it("includes the row a landing names, because the landing is the first of its page", () => {
+    assert.equal(
+      boundaryCondition("older", true),
+      "AND (occurred_at, moment_id) <= ({at: DateTime64(3)}, {momentId: String})",
+    );
+    assert.equal(
+      boundaryCondition("newer", true),
+      "AND (occurred_at, moment_id) >= ({at: DateTime64(3)}, {momentId: String})",
+    );
+  });
+
   it("orders both columns, never occurrence alone", () => {
     // Occurrence alone leaves two Moments at the same instant in whatever order
     // the engine returns them, which changes between reads.
@@ -184,5 +224,41 @@ describe("resuming from a cursor", () => {
     // the first row of the page is not where the next cursor should be taken.
     assert.ok(boundaryCondition("older").includes("<") && orderFor("older").includes("DESC"));
     assert.ok(boundaryCondition("newer").includes(">") && orderFor("newer").includes("ASC"));
+  });
+});
+
+describe("bounding a page at an instant", () => {
+  it("puts everything at the instant on the older side, and nothing on the newer", () => {
+    // The partition a landing depends on. An instant names no Moment, so it
+    // cannot split Moments that share it — all of them belong to one side, and
+    // `older` is that side because its first row is where the jump landed.
+    assert.equal(instantBoundary("older"), "AND occurred_at <= {at: DateTime64(3)}");
+    assert.equal(instantBoundary("newer"), "AND occurred_at > {at: DateTime64(3)}");
+  });
+
+  it("covers the whole axis once, overlapping nowhere", () => {
+    // Read the two together: <= and > partition. Were both inclusive, a Moment
+    // at the instant would appear in both halves of one landing; were both
+    // strict, it would appear in neither.
+    const older = instantBoundary("older");
+    const newer = instantBoundary("newer");
+
+    assert.ok(older.includes("<="));
+    assert.ok(newer.includes(">") && !newer.includes(">="));
+  });
+
+  it("never names a Moment, so no caller can bind one", () => {
+    // Binding a parameter the statement does not name is an error in the
+    // driver, which is the point: the two forms cannot be confused at runtime.
+    for (const direction of ["older", "newer"] as const) {
+      assert.doesNotMatch(instantBoundary(direction), /momentId/);
+      assert.doesNotMatch(instantBoundary(direction), /moment_id/);
+    }
+  });
+
+  it("reads the same bound instant the tuple form does", () => {
+    for (const direction of ["older", "newer"] as const) {
+      assert.match(instantBoundary(direction), /\{at: DateTime64\(3\)\}/);
+    }
   });
 });

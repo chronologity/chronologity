@@ -142,14 +142,53 @@ export type TimelineDirection = "older" | "newer";
  * because ClickHouse compares tuples lexicographically and the sort key is that
  * tuple — so this is the form the index can use.
  *
+ * **Strict by default, and inclusive only for a landing.** Resuming from a
+ * cursor must exclude the row the cursor names, or paging repeats it. Landing at
+ * a Moment must include it, because the landing *is* the first row of the page
+ * before it — see `instantBoundary` for the half of this rule that concerns an
+ * instant.
+ *
  * @param direction - Which way the page runs.
+ * @param inclusive - Whether the named position is itself part of the page.
+ *   False for every cursor; true only where a page begins at a position rather
+ *   than resuming past one.
  * @returns A fragment beginning with `AND`, reading the `at` and `momentId`
  *   parameters the caller must bind from the decoded position.
  */
-export function boundaryCondition(direction: TimelineDirection): string {
-  const comparison = direction === "older" ? "<" : ">";
+export function boundaryCondition(direction: TimelineDirection, inclusive = false): string {
+  const comparison = `${direction === "older" ? "<" : ">"}${inclusive ? "=" : ""}`;
 
   return `AND (occurred_at, moment_id) ${comparison} ({at: DateTime64(3)}, {momentId: String})`;
+}
+
+/**
+ * The condition that bounds a page at an instant rather than at a position.
+ *
+ * **An instant has no tie to break, and that is the whole reason this exists.**
+ * The tuple comparison above splits Moments sharing one occurrence by identifier,
+ * which is exactly right when resuming from one of them. An instant names none of
+ * them, so it must put the whole instant — every Moment in it — on one side. A
+ * tuple comparison against a synthesised identifier would do that too, and was
+ * measured to work, but only for a reader who knows how identifiers happen to
+ * sort. This says what it means.
+ *
+ * The two directions are written to partition history exactly: `older` takes
+ * everything at or before the instant, `newer` everything strictly after, so
+ * together they cover the axis once and overlap nowhere. A landing is those two
+ * pages, and nothing is skipped between them or repeated across them.
+ *
+ * Older is the inclusive side because it runs newest-first from the boundary, so
+ * its first row is the landing itself — which is where a jump reads what it
+ * arrived at, and which still works when nothing came after.
+ *
+ * @param direction - Which way the page runs.
+ * @returns A fragment beginning with `AND`, reading the `at` parameter. It never
+ *   names `momentId`, so a caller must not bind one.
+ */
+export function instantBoundary(direction: TimelineDirection): string {
+  return direction === "older"
+    ? "AND occurred_at <= {at: DateTime64(3)}"
+    : "AND occurred_at > {at: DateTime64(3)}";
 }
 
 /**

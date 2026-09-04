@@ -36,6 +36,7 @@ export {
   CursorError,
   decodeCursor,
   encodeCursor,
+  instantBoundary,
   orderFor,
   type TimelineDirection,
   type TimelinePosition,
