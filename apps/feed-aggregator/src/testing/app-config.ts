@@ -56,6 +56,11 @@ export function testAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     telemetry: { endpoint: undefined, serviceName: "feed-aggregator" },
     graphql: {
       maxDepth: 12,
+      // Generous, because almost every suite is about correctness rather than
+      // admission. The suite that is about admission builds its own application
+      // with a real ceiling — the pattern ADR-119 established after a rate limit
+      // broke a suite before it protected anything.
+      maxCost: 10_000,
       // Off, so a suite never depends on the explorer's static assets being
       // present in whatever tree it runs from.
       graphiql: false,

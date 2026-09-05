@@ -20,6 +20,7 @@ import { cursorScalar } from "../graphql/scalars/cursor.scalar.js";
 import { dateTimeScalar } from "../graphql/scalars/date-time.scalar.js";
 import { authPlugin } from "../plugins/auth.plugin.js";
 import type { ReadStore } from "../read-models/clickhouse/client.js";
+import { costLimit } from "../graphql/cost/cost-rule.js";
 import { recordRefusal } from "../observability/metrics.js";
 import { instrument, type Instrumentable } from "../plugins/metrics.plugin.js";
 
@@ -92,6 +93,10 @@ export async function registerGraphql(app: FastifyInstance, wiring: GraphQLWirin
       // complexity budget belong with the queries they weigh, and those arrive
       // with Timeline composition.
       queryDepth: wiring.config.maxDepth,
+      // Beside depth rather than instead of it. Depth refuses a document that
+      // reaches too far down; this refuses one that asks for too much across.
+      // Both run before execution, which is the only place a refusal is free.
+      validationRules: [costLimit(wiring.config.maxCost, () => recordRefusal("cost"))],
       graphiql: wiring.config.graphiql,
       errorFormatter: formatErrors,
     });

@@ -214,7 +214,7 @@ describe("a query with credentials", () => {
 
 describe("query cost", () => {
   it("refuses a document deeper than the limit", async () => {
-    const instance = await appWith(closed, { graphql: { maxDepth: 1, graphiql: false } });
+    const instance = await appWith(closed, { graphql: { maxDepth: 1, maxCost: 10_000, graphiql: false } });
 
     const response = await ask(instance, "{ viewer { authenticated } }");
     const body = response.json();
@@ -224,7 +224,7 @@ describe("query cost", () => {
   });
 
   it("allows a document within the limit", async () => {
-    const instance = await appWith(closed, { graphql: { maxDepth: 2, graphiql: false } });
+    const instance = await appWith(closed, { graphql: { maxDepth: 2, maxCost: 10_000, graphiql: false } });
 
     const response = await ask(instance, "{ viewer { authenticated } }");
 

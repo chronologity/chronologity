@@ -36,6 +36,20 @@ export const envSchema = z.object({
    */
   FEED_AGGREGATOR_GRAPHQL_MAX_DEPTH: z.coerce.number().int().min(1).max(100).default(12),
 
+  /**
+   * How much one document may cost, counted in database reads.
+   *
+   * Depth bounds how deeply a document nests and nothing bounds how widely
+   * it spreads, which is the shape that actually costs: two hundred aliased
+   * Moments each asking for their discussion is a thousand statements at
+   * depth three. The weights are measured (`graphql/cost/weights.ts`).
+   *
+   * Configuration rather than a constant so a measurement harness can raise
+   * it — a limiter that cannot be raised turns a load test into a
+   * measurement of refusals, which `scripts/load.mjs` records happening.
+   */
+  FEED_AGGREGATOR_GRAPHQL_MAX_COST: z.coerce.number().int().min(1).default(100),
+
   CLICKHOUSE_URL: z.string().min(1),
   CLICKHOUSE_DATABASE: z.string().min(1),
   CLICKHOUSE_USERNAME: z.string().min(1),
