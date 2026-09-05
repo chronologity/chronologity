@@ -1,5 +1,6 @@
 import type { Viewer } from "../../auth/auth-context.js";
 import type { RequestEligibility } from "../../auth/request-eligibility.js";
+import type { RequestLoaders } from "../../loaders/create-loaders.js";
 import type { Logger } from "../../observability/logger.js";
 import type { ContextAxisReadModel } from "../../read-models/clickhouse/context-axis-read-model.js";
 import type { ContextNameReadModel } from "../../read-models/postgres/context-name-read-model.js";
@@ -87,6 +88,15 @@ export interface GraphQLContext {
    * Asking it refuses a request with no account: reading history requires one
    * (`moments.md:589`).
    */
+  /**
+   * What this request reads once rather than repeatedly.
+   *
+   * Per request, like eligibility and unlike the read models, because what they
+   * hold is answers about one Viewer. They are also the reason one request now
+   * holds one answer to "may this reader see this Moment" — two selections of the
+   * same Moment cannot disagree if only one of them asked.
+   */
+  readonly loaders: RequestLoaders;
   readonly eligibility: RequestEligibility;
 }
 

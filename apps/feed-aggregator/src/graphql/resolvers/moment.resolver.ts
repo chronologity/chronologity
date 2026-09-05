@@ -23,6 +23,7 @@ import {
 } from "../../moments/services/moment-request.js";
 import type { AuthorizedMoment } from "../../read-models/postgres/moment-read-model.js";
 import type { GraphQLContext } from "../context/graphql-context.js";
+import { load } from "../../loaders/create-loaders.js";
 
 /**
  * Reading one Moment.
@@ -146,12 +147,14 @@ export const momentFields = {
     context: GraphQLContext,
   ): Promise<Connection<CommentShape> & { total: () => Promise<number> }> {
     const request = commentRequestFrom(args);
-    const slice = await context.moments.comments(
-      parent.authorized,
-      request.limit,
-      request.after,
-      request.thread,
-    );
+    // Through the loader, so a document reading a hundred threads of one
+    // discussion costs one statement rather than a hundred.
+    const slice = await load(context.loaders.commentPage, {
+      moment: parent.authorized,
+      limit: request.limit,
+      after: request.after,
+      thread: request.thread,
+    });
 
     return {
       ...commentConnectionFor(slice, request.after !== undefined),

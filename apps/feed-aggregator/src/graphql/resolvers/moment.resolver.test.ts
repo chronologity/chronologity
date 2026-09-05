@@ -7,6 +7,9 @@ import type {
   MomentRow,
 } from "../../read-models/postgres/moment-read-model.js";
 import type { GraphQLContext } from "../context/graphql-context.js";
+import type { RequestEligibility } from "../../auth/request-eligibility.js";
+import { createLoaders } from "../../loaders/create-loaders.js";
+import type { Logger } from "../../observability/logger.js";
 import { mediaTypeResolver, momentFields, momentQueries } from "./moment.resolver.js";
 
 /**
@@ -68,25 +71,28 @@ interface Asked {
   relationships: number;
 }
 
-const contextFor = (found: MomentRow | undefined, asked: Asked): GraphQLContext =>
-  ({
-    viewer: { kind: "authenticated", identityId: randomUUID(), sessionId: randomUUID(), userId: VIEWER },
-    eligibility: {
-      forViewer: async () => ({ viewerUserId: VIEWER, isAdult: true }),
-    },
-    moments: {
-      findVisible: async (): Promise<AuthorizedMoment | undefined> => {
-        asked.authorizations += 1;
+const contextFor = (found: MomentRow | undefined, asked: Asked): GraphQLContext => {
+  const eligibility = {
+    forViewer: async () => ({ viewerUserId: VIEWER, isAdult: true }),
+  } as unknown as RequestEligibility;
+  // The plural forms, because the loaders are what the resolver reaches now.
+  // Real loaders over a stub read model rather than stub loaders: the batching
+  // is part of what these tests are about.
+  const moments = {
+    findVisibleMany: async (ids: readonly string[]): Promise<Map<string, AuthorizedMoment>> => {
+      asked.authorizations += 1;
 
-        return found === undefined ? undefined : { row: found, viewerUserId: VIEWER };
-      },
+      return found === undefined
+        ? new Map()
+        : new Map(ids.map((id) => [id, { row: { ...found, moment_id: id }, viewerUserId: VIEWER }]));
+    },
+    commentPages: async (keys: readonly unknown[]) => {
+      asked.comments += 1;
+
+      return keys.map(() => ({ rows: [], more: false }));
+    },
       media: async () => {
         asked.media += 1;
-
-        return { rows: [], more: false };
-      },
-      comments: async () => {
-        asked.comments += 1;
 
         return { rows: [], more: false };
       },
@@ -105,8 +111,22 @@ const contextFor = (found: MomentRow | undefined, asked: Asked): GraphQLContext 
 
         return [];
       },
-    } as unknown as MomentReadModel,
-  }) as unknown as GraphQLContext;
+  } as unknown as MomentReadModel;
+
+  return {
+    viewer: {
+      kind: "authenticated",
+      identityId: randomUUID(),
+      sessionId: randomUUID(),
+      userId: VIEWER,
+    },
+    eligibility,
+    moments,
+    loaders: createLoaders(moments, eligibility, {
+      debug: () => undefined,
+    } as unknown as Logger),
+  } as unknown as GraphQLContext;
+};
 
 const nothingAsked = (): Asked => ({
   authorizations: 0,

@@ -1,4 +1,5 @@
 import type { GraphQLContext } from "../../graphql/context/graphql-context.js";
+import { load } from "../../loaders/create-loaders.js";
 import type { AuthorizedMoment } from "../../read-models/postgres/moment-read-model.js";
 import { momentIdFrom } from "../services/moment-request.js";
 
@@ -33,8 +34,10 @@ export async function getMoment(
   context: GraphQLContext,
 ): Promise<AuthorizedMoment | null> {
   const momentId = momentIdFrom(id);
-  const viewer = await context.eligibility.forViewer();
-  const found = await context.moments.findVisible(momentId, viewer.viewerUserId, viewer.isAdult);
+  // Through the loader, so a document naming this Moment twice reads it once and
+  // cannot answer the two selections differently. The Viewer is resolved inside
+  // the batch, so a request with no account still fails here and first.
+  const found = await load(context.loaders.moment, momentId);
 
   return found ?? null;
 }

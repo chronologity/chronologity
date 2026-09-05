@@ -3,6 +3,7 @@ import type { Pool } from "pg";
 import { ANONYMOUS } from "../../auth/auth-context.js";
 import type { TimelineEligibilityResolver } from "@chronologity/timeline-derivation";
 import { RequestEligibility } from "../../auth/request-eligibility.js";
+import { createLoaders } from "../../loaders/create-loaders.js";
 import type { ReadStore } from "../../read-models/clickhouse/client.js";
 import { TimelineReadModel } from "../../read-models/clickhouse/timeline-read-model.js";
 import { ContextAxisReadModel } from "../../read-models/clickhouse/context-axis-read-model.js";
@@ -51,12 +52,17 @@ export function createContext(
 
   return function contextFor(request: FastifyRequest): GraphQLContext {
     const viewer = request.viewer ?? ANONYMOUS;
+    // Built per request and never shared. Nothing is resolved yet: a query
+    // that reads no history — `viewer`, say — should pay for none of it.
+    const requestEligibility = new RequestEligibility(eligibility, viewer);
 
     return {
       viewer,
-      // Built per request and never shared. Nothing is resolved yet: a query
-      // that reads no history — `viewer`, say — should pay for none of it.
-      eligibility: new RequestEligibility(eligibility, viewer),
+      eligibility: requestEligibility,
+      // Here rather than in the outer body, and that is the control rather than
+      // a preference: the Viewer exists only inside this closure, so a loader
+      // holding one cannot be hoisted to process scope — it would not compile.
+      loaders: createLoaders(moments, requestEligibility, request.log),
       traceId: request.traceId,
       // Already bound to this request, so a resolver logging a slow query
       // produces a line that can be found beside the rest of the request.
