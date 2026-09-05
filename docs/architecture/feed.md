@@ -435,21 +435,24 @@ Eligibility may depend on:
 
 ---
 
-# Candidate Selection Versus Eligibility
-
-A useful architecture distinction is:
+# Eligibility Is Not a Second Step
 
 ```text
-candidate selection
-        ↓
-eligibility filtering
+scope, order and eligibility
         ↓
 composition
 ```
 
-ClickHouse may efficiently identify Timeline candidates.
+ClickHouse identifies the rows and refuses the ineligible ones in the same
+statement. What it can do efficiently is scope and order; what it cannot do is
+know about a Block — so the Viewer's blocks, audience, age and the scope's
+openness are resolved from PostgreSQL once per request and bound in as
+parameters.
 
-Current Viewer-sensitive state may then remove ineligible items.
+The distinction worth keeping is therefore between *what the projection knows*
+and *what only PostgreSQL knows*, not between two passes over the same rows.
+Filtering after retrieval leaks through the result's size, which is why there is
+no second step — see "Pagination After Filtering" below.
 
 ---
 
@@ -947,7 +950,7 @@ It may have:
 - privacy risk;
 - difficult invalidation.
 
-Prefer caching shared authorization-neutral components.
+Nothing this service returns is authorization-neutral: reading history requires an account (ADR-139), and every statement carries the Viewer's blocks, audience and age. There are no shared components to cache (ADR-147).
 
 ---
 
@@ -1299,9 +1302,9 @@ Example:
 ```text
 resolve timeline
   ├── decode cursor
-  ├── query candidates
-  ├── eligibility filter
-  ├── batch enrich
+  ├── resolve eligibility (PostgreSQL)
+  ├── query timeline (ClickHouse)
+  ├── batch enrich (PostgreSQL, request-scoped loaders)
   └── map GraphQL response
 ```
 
@@ -1824,7 +1827,8 @@ Still open: what a depth read should say about a Moment's corrections, which `mo
 16. Viewer context is explicit and request scoped.
 17. Anonymous reads still enforce eligibility.
 18. Knowing an entity ID never grants access.
-19. Candidate selection and Viewer eligibility are distinct.
+19. Candidate selection and Viewer eligibility are the same statement. There is
+    no candidate set (ADR-141).
 20. Security-sensitive visibility may require stronger current-state checks.
 21. Filtering does not leak restricted metadata.
 22. Eligibility is applied inside the query, before the limit, never to a finished page.

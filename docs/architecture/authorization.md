@@ -282,12 +282,13 @@ A Timeline query may be allowed while individual Moments within the Timeline req
 ```text
 Viewer may access Timeline scope
         ↓
-retrieve candidate read rows
+retrieve the rows this Viewer may read
+   (eligibility inside the query, before the limit)
         ↓
-apply eligibility rules
-        ↓
-return only authorized Moments/context
+return them
 ```
+
+There is no candidate set and no step that removes rows afterwards. A person's own history is the exception and it does not filter either: readability comes back as a column, so the page is the same size whichever way each row is answered, and its size discloses nothing (ADR-130, ADR-141).
 
 Timeline access must not leak unauthorized content through counts, representative thumbnails, temporal clusters, historical-significance anchors, horizontal adjacency, Event labels, Location precision, or historical jumps.
 
@@ -553,11 +554,11 @@ Authorization-sensitive caching is dangerous.
 
 Caches must never allow one User's authorized result to leak to another.
 
-Where viewer-sensitive cache fragmentation would be excessive, prefer caching authorization-neutral data and filtering afterward.
+Where viewer-sensitive cache fragmentation would be excessive, the answer is to make the read cheaper rather than to share it. Caching unfiltered data and filtering afterward is not available: the size of a filtered result is itself a disclosure, so eligibility is applied inside the query (ADR-141).
 
 ## Request-Scoped DataLoader Caching
 
-In the feed aggregator, DataLoader/request caches must be request scoped unless the data is explicitly authorization-neutral.
+In the feed aggregator, DataLoader/request caches are request scoped. There is no exception: nothing this service reads is authorization-neutral, because reading history requires an account and every statement carries the Viewer's blocks, audience and age (ADR-147). What the process may hold instead is a closed list — the parsed schema, the parsed-document cache, the stateless read models, and configuration.
 
 Never reuse one Viewer’s authorization result for another Viewer.
 
@@ -618,7 +619,9 @@ Authorization does not replace domain invariants.
 
 ## Authorization for Reads
 
-Read authorization may occur before querying, during query construction, after candidate retrieval, through visibility-aware projections, or through a combination.
+Read authorization may occur before querying, during query construction, through visibility-aware projections, or through a combination.
+
+**Not after retrieval.** Chronologity's read paths authorize during query construction, because the size of a result filtered afterwards is itself a disclosure (ADR-141). An option listed here is an option somebody takes, so it is removed rather than annotated.
 
 The final result must contain only authorized information.
 

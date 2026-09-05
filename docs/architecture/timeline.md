@@ -990,7 +990,7 @@ DataLoaders should batch:
 - Location summaries;
 - other repeated reads.
 
-They are request scoped unless the data is authorization-neutral.
+They are request scoped, without exception: nothing this service reads is authorization-neutral, because every Timeline statement carries the Viewer's blocks, audience and age (ADR-147).
 
 ---
 
@@ -1414,15 +1414,19 @@ Timeline reads are eventually consistent.
 
 Security/privacy eligibility has tighter correctness requirements than ordinary freshness.
 
-If necessary:
+Eligibility is therefore evaluated against current state on every read. The
+Viewer's blocks, the restricted Moments naming them within the scope, their age
+and whether the scope is open at all are read from PostgreSQL per request and
+bound into the ClickHouse statement — so a lagging projection does not lag on
+authorization.
 
 ```text
-derived Timeline candidate set
+current authorization (PostgreSQL)
         ↓
-current authorization filter
+bound into the projection read
 ```
 
-may be applied at query time.
+There is no derived candidate set and no filter applied afterwards (ADR-141).
 
 ---
 

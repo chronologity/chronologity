@@ -36,6 +36,13 @@ Proposed
 
 `Superseded` decisions remain in the historical record but must not guide new implementation.
 
+An `Accepted` decision may carry an `## Amendments` section recording later
+decisions that changed one of its **consequences** without replacing the decision
+itself. Superseding would be wrong in that case — it would remove something still
+canonical from guidance — and a silent edit would be worse, because the stated
+purpose of this record is that the rationale stays discoverable after the
+conversation that produced it is gone. An amendment keeps both.
+
 ---
 
 # ADR-001 — Use a TypeScript Monorepo
@@ -614,7 +621,15 @@ The product is organized around history, not algorithmically generated per-User 
 
 Authorization/privacy eligibility must be efficient at read time.
 
-Candidate over-fetch must remain bounded.
+There is no candidate over-fetch to bound. Eligibility is applied inside the
+query, before the limit (ADR-141).
+
+## Amendments
+
+**2026-09 (ADR-141).** The consequence "Candidate over-fetch must remain bounded"
+was removed. It assumed a retrieve-then-filter read path that was never built.
+The decision itself — shared projections plus read-time eligibility rather than
+fan-out-on-write — is unchanged, and is what was built.
 
 ---
 

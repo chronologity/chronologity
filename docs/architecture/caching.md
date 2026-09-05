@@ -605,27 +605,28 @@ Per-Viewer Timeline caching is less attractive because:
 - cache cardinality grows;
 - invalidation becomes difficult.
 
-Prefer caching:
-
-```text
-shared candidate/read data
-```
-
-then applying Viewer-specific eligibility.
+**And there is no shared layer beneath it to cache instead.** Eligibility is
+applied inside the ClickHouse statement, before the limit — filtered in the
+`WHERE` for a place's or an occasion's history, and reported as a column for
+somebody's own — so there is no point at which rows exist that have not yet been
+narrowed to this reader (ADR-141). The answer to an expensive Timeline read is a
+narrower statement or a better data layout, not a cache of something that does
+not exist.
 
 ---
 
 # Candidate Cache
 
-The feed aggregator may cache authorization-neutral Timeline candidate sets for:
+There is none.
 
-- public scope;
-- time range;
-- temporal scale.
+The feed aggregator produces no candidate set. Eligibility is a predicate inside
+the statement rather than a filter over its result, so there is nothing between
+"these rows exist" and "these rows this reader may see" for a cache to hold.
 
-Viewer filtering occurs afterward.
-
-This improves cache reuse while preserving privacy.
+This section previously described caching authorization-neutral Timeline
+candidate sets and applying Viewer filtering afterwards. That architecture was
+not built, and filtering a finished page is the specific thing the design avoids:
+asking for twenty and receiving four says sixteen exist (ADR-141).
 
 ---
 
@@ -1468,7 +1469,9 @@ No distributed cache is required initially.
 7. Process-local caches may diverge across instances.
 8. Shared caching is introduced only for a concrete need.
 9. Redis is optional, not assumed.
-10. Response caching is easiest for public/authorization-neutral reads.
+10. Response caching is easiest for public/authorization-neutral reads. The feed
+    aggregator has none of either: reading history requires an account (ADR-139)
+    and eligibility is inside every statement (ADR-141).
 11. Personalized full-response caching is used cautiously.
 12. CDN caches are delivery optimization, not media authority.
 13. Mobile caches are UX state, not authority.
@@ -1485,7 +1488,8 @@ No distributed cache is required initially.
 24. Authorization caches do not replace authoritative/current checks for high-risk actions.
 25. Broad resource-access decisions are not cached without full context.
 26. Blocking cache staleness is privacy-sensitive.
-27. Timeline caches prioritize shared authorization-neutral data.
+27. Timeline caches have no shared authorization-neutral layer to prioritise. A
+    Timeline read is Viewer-dependent to its innermost predicate (ADR-147).
 28. Per-Viewer Timeline cache cardinality is minimized.
 29. Temporal aggregates are strong cache candidates.
 30. Historical jump caches must honor corrections/deletion.
