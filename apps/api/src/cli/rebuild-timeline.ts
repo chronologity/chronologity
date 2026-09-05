@@ -3,7 +3,7 @@
 // than something the runtime provides.
 import "reflect-metadata";
 
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { ConfigurationError } from "@chronologity/config";
@@ -20,6 +20,24 @@ const usage =
 
 /** What `timeline.rebuild.ts` uses when nothing says otherwise, for the record it writes. */
 const DEFAULT_PAGE = 500;
+
+/**
+ * Load the repository's `.env`, as the shell scripts beside this one do.
+ *
+ * Without it the documented invocation only works for a caller who has already
+ * sourced it, which is a reproducibility gap in a command whose whole purpose is
+ * that somebody else can reproduce a measurement. Existing variables win where
+ * one is already set.
+ *
+ * @returns Nothing.
+ */
+function loadEnvironment(): void {
+  const envFile = fileURLToPath(new URL("../../../../.env", import.meta.url));
+
+  if (existsSync(envFile)) {
+    process.loadEnvFile(envFile);
+  }
+}
 
 /**
  * Rebuild the Timeline projection from authoritative state.
@@ -59,6 +77,8 @@ const DEFAULT_PAGE = 500;
  * @throws {Error} If an argument is not recognised.
  */
 async function main(): Promise<void> {
+  loadEnvironment();
+
   const { values } = parseArgs({
     options: {
       only: { type: "string", multiple: true },

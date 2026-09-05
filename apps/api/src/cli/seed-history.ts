@@ -3,6 +3,9 @@
 // than something the runtime provides.
 import "reflect-metadata";
 
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { createHash } from "node:crypto";
 import { parseArgs } from "node:util";
 import { ConfigurationError } from "@chronologity/config";
@@ -663,6 +666,24 @@ async function seed(
 }
 
 /**
+ * Load the repository's `.env`, as the shell scripts beside this one do.
+ *
+ * Without it the documented invocation only works for a caller who has already
+ * sourced it, which is a reproducibility gap in a command whose whole purpose is
+ * that somebody else can reproduce a measurement. Existing variables win where
+ * one is already set.
+ *
+ * @returns Nothing.
+ */
+function loadEnvironment(): void {
+  const envFile = fileURLToPath(new URL("../../../../.env", import.meta.url));
+
+  if (existsSync(envFile)) {
+    process.loadEnvFile(envFile);
+  }
+}
+
+/**
  * Run the command.
  *
  * @returns Nothing.
@@ -670,6 +691,8 @@ async function seed(
  *   database already holds history and `--force` was not given.
  */
 async function main(): Promise<void> {
+  loadEnvironment();
+
   const { values } = parseArgs({
     options: {
       seed: { type: "string", default: "1" },
