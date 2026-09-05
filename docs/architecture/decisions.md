@@ -5392,3 +5392,83 @@ A harness at the repository root, like its two siblings; asserting durations in 
 **No projection changed.** If a later measurement points at denormalising presented columns into `timeline_moment_contexts`, that is a projector change plus a rebuild, and a bigger decision than a caching phase should make alone.
 
 **`scalability.md:559` and `search.md` were deliberately not touched**, and are named here so nobody reopens them: Discovery over-fetches for diversity and is bounded, and Search retrieves eligible candidates first and ranks afterwards — the *opposite* of the deleted design.
+
+---
+
+# ADR-148 — A Found Thing Is a Pointer, and the Server Earns the Right to Say So
+
+## Status
+
+Accepted. Closes ADR-145's deliberate deferral of `SEARCH_RESULT`, completes the Search-to-Timeline handoff `search.md:425-441` describes and `product/search.md:1005` records as Search's one outstanding item, and widens the aggregator's PostgreSQL exception by one question.
+
+## Context
+
+Search has been finished since 5O: `apps/api` owns retrieval, ranking, suggestions and the index, over REST, and `packages/contracts` carries the result shape. What has never existed is the arrival. Somebody searches for a place, taps the result, and there is nowhere for the app to take them — the aggregator had six ways of naming a destination and none of them was "the thing I just found".
+
+Two sentences shaped this phase, and both were written before it.
+
+`architecture/search.md:439` — "**A Search result reference is not proof the destination remains visible.**" What a search handed an app is a pointer, possibly minutes old. Between finding and tapping, its author can make it private, block the reader, delete it, or take it out of Search.
+
+And ADR-145, which declined to declare a `SEARCH_RESULT` reason on a landing because the server could not verify one: *"`SEARCH_RESULT` could only echo a client's assertion until something server-side produces a search entry point, and a value that cannot be verified would undo the property that makes the field worth having. **It arrives with 9J, coupled to the change that makes it truthful.**"* **Making it truthful is what this phase is.**
+
+## Decision
+
+**A seventh way of naming a destination, not a second query.** `TimelineAnchorInput` gains `searchResult: { entityType, entityId, at }`, carrying exactly what a search result carried. Everything after "where am I going" — the two pages, the reauthorization, the crossing into another Timeline — is ADR-145's machinery unchanged.
+
+**The server does the working out, and that is what earns the reason.** An app hands back a kind and an identifier rather than choosing an anchor itself. The server resolves which kind of destination that is, confirms it, and reports `SEARCH_RESULT` — naming work it performed rather than a claim it was given.
+
+**Two checks, in this order: still findable, then still visible.** Neither implies the other.
+
+**Findability reads only the intrinsic half of Search eligibility** — `deleted` and `searchable`, exactly the two conditions `apps/api`'s `eligibleForViewer` treats as intrinsic. `moderation_state` is deliberately not read here.
+
+**A person becomes a destination**, landing at the newest of their readable history, by the same route a place does.
+
+**Which index to trust comes from configuration**, `SEARCH_INDEX_VERSION`, required rather than defaulted.
+
+**Four refusals, one answer**, extending ADR-145's three.
+
+**Discovery gets nothing built, and that is recorded rather than left silent.**
+
+## Alternatives Considered
+
+A separate `entryPoint` root query; accepting a Search cursor rather than a reference; letting the client assert `SEARCH_RESULT` and trusting it; declining the reason entirely, as 9I declined a cache; checking visibility only and not findability; reading `moderation_state` too; importing `INDEX_VERSION` from `apps/api`; defaulting the version to `search-v1`; matching a document under any index version; giving a person anchor an `at`; surfacing Discovery recommendations beside an arrival; adding a `TIMELINE` entity type.
+
+## Rationale
+
+**A seventh arm rather than a second door, because the landing is the same landing.** ADR-145 built one root field taking one input with a runtime exactly-one rule, and everything downstream of anchor resolution — the inclusive `older` boundary, the shared eligibility across both halves, the cross-Timeline fallback, `nowhere()` — is indifferent to how the destination was named. A second query would either duplicate that or wrap it, and would hand Phase 10 two entrances to one room with a rule about which to use. The cost of the arm is one `case` and one enum value.
+
+**What makes the reason truthful is that the client no longer chooses the anchor.** Given `(LOCATION, id)` the server decides that this is a place, that a place carries no instant, and that the landing is therefore wherever that place's readable history reaches — and it refuses along the way if any of that fails. Compare the alternative that was declined: a `from: SEARCH` flag beside an existing anchor, which the server could neither confirm nor deny and would have to repeat back. ADR-145's objection was not that `SEARCH_RESULT` is unimportant but that an unverifiable value **devalues the five beside it**, since a reader cannot tell which kind they are holding. Every value in that enum now names something the server did.
+
+**The findability check is the phase's one genuinely contested decision, and it is worth being exact about what it buys.** "Visible" and "searchable" are separate states by product design — `glossary.md:549` — so someone may let you see a Moment while keeping it out of Search. Checking it means this door cannot open onto something Search itself would never have offered.
+
+**It is not an access boundary, and must not be recorded as one.** Everything reachable through a found reference is equally reachable through the place, Moment or occasion anchor, which apply visibility and no findability rule. Nothing is locked that was open before. **The check earns the label; it does not guard the data.** It follows that a client holding an identifier can call both doors and learn that something is visible but not searchable — a bounded disclosure about an author's indexing choice, on content that reader could already read. Recorded here rather than discovered later, and the reason the door is not treated as a security control anywhere in the code.
+
+**Intrinsic conditions only, and the schema drew the line before this phase needed it.** The migration that created `search_documents` says: "Intrinsic eligibility: what is true of the resource regardless of who is asking. The viewer-dependent half — blocks, age, the requesting surface — is resolved at query time and is deliberately absent." So the aggregator reads `deleted` and `searchable` and stops. **The first draft of the read model also tested `moderation_state = 'allowed'` and was wrong**: those states are read against the person asking — an age-restricted thing is findable by an adult, one restricted to an audience is findable by that audience — so testing it here would have refused for everybody what the API refuses only for some. That is precisely the copied-and-narrowed predicate ADR-120 named as the way this goes wrong: *"a Discovery query with its own copy of the access rule… One predicate, narrowed."* The viewer-dependent half is answered where this application already answers it, by reauthorizing the destination against authoritative tables. **The read model takes no Viewer, which is the structural guarantee that it cannot grow one.**
+
+**Findability is checked before the destination is resolved**, for ADR-145's reason: `timeline.md:678` counts a timestamp among the things an unreachable destination must not leak, so a thing Search would no longer offer must not have its instant computed at all. It is also the cheapest refusal — one indexed lookup on a composite primary key.
+
+**Asking cost nothing operationally, which is why the stricter option was affordable.** ADR-117 made the Search index a PostgreSQL table rather than a dedicated engine, so this is one more indexed read in a database the aggregator already holds a pool for. There is no second service whose being down would stop people arriving anywhere — and `search.md:451`'s degradation clause, which contemplates entity lookup falling back to authoritative PostgreSQL when the index is unavailable, describes a situation that cannot arise separately here.
+
+**A person had no anchor and now does, by copying the place rather than inventing a rule.** A person is not an occurrence and carries no instant, which is the problem the place anchor already solved: read a one-row page under the destination's own eligibility and land on its newest row. Both now go through one function. The consequence is the one the place path already accepts deliberately — **a person with no readable history answers exactly as a person who does not exist** — and that is the property, not a limitation of it. A person anchor takes no `at`, unlike a place: somewhere history happened is a thing you can ask for a date in, and a client wanting somebody's history at a date is asking for a Timeline rather than a jump.
+
+**The index version is configuration because the alternative is a second copy of a constant.** `apps/api` owns `INDEX_VERSION`, `monorepo.md:1123` forbids importing it, and defaulting it here would be that constant written twice in two applications that could disagree silently. It is required rather than defaulted for the reason `TIMELINE_PROJECTION_VERSION` is, and the deployment consequence is stated in `.env.example`: cut the API over first and the aggregator after, which degrades safely because documents for the old version outlive the cutover — a lagging aggregator gives a stale answer rather than refusing every arrival. Matching any version was declined: during a rebuild a half-built v2 exists, and answering from it would make things findable in an order determined by how far the rebuild had got.
+
+**Discovery needed nothing, and saying so is the work.** Its recommendations are built, ranked and returned by `apps/api` over REST. **This service returns no ranked list at all**, so `search.md:441`'s "never merged into a ranked result list" holds by construction rather than by care. Recorded the way 9I recorded its declines, so 9K does not read the silence as unfinished work. Surfacing recommendations beside an arrival was considered and declined: it would put recommendation logic in the read-only Timeline layer, which is where `search.md:67` says Search must not go for the same reason.
+
+**No Search cursor comes near a Timeline cursor.** `search.md:385` and ADR-118 are explicit that the families are not interchangeable — a Search cursor names a position in one answer to one question under one ranking, and a Timeline cursor names a position in chronology. The anchor takes an entity reference and never a cursor, and `pagination/cursors.ts` gains no arm.
+
+**There is no `TIMELINE` entity type**, because ADR-117 already settled that a Timeline has no identity to key a document on. What is found is the context an interface presents as one.
+
+## Consequences
+
+**The aggregator's PostgreSQL exception now answers a sixth kind of question**, and the narrowest one it has: a boolean, from a table it may never write, selecting no text. `monorepo.md` and the configuration comment describing that pool are corrected — the latter had claimed a single use since before the Moment, representative and context-name read models existed.
+
+**A Moment made private between being indexed and being opened returns nothing**, proved end to end — the property ADR-118 proves for Search itself, now proved for the arrival. So does one withdrawn from Search while staying readable, and the suite separately proves that Moment *is* still readable, so the new check cannot pass for the wrong reason.
+
+**`SEARCH_RESULT` is reported on refusals too**, echoed from the request rather than from the outcome, which is what keeps a thing no longer findable indistinguishable from one that was never there.
+
+**The reason enum is still asserted whole rather than for membership.** The assertion that guarded it — "names only reasons the server can actually verify" — was written to fail when somebody added a value, and it did exactly that when this phase added one. It keeps its shape so the next value has to argue for itself.
+
+**Nothing bounds how many references one document may open.** A found reference costs one index lookup plus the reads the matching anchor already cost, and ten aliased ones cost ten of each. That is the same unbounded breadth every other anchor has, and it stays 9K's to fix rather than acquiring a special case here.
+
+**A person entry point can be built for somebody who has never been searched for**, because the check is that a findable document exists, not that this reader could have found it — the viewer-dependent half is not consulted. A reader who could never have seen that person in results can still open them by identifier, and will then be refused or admitted by the destination's own eligibility exactly as they would be through any other door. This is the same bound the whole check has: it earns a label, it is not a gate.
