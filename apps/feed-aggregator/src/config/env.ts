@@ -72,6 +72,16 @@ export const envSchema = z.object({
    */
   SEARCH_INDEX_VERSION: z.string().min(1),
 
+  /**
+   * Where to send traces and metrics, or nothing at all.
+   *
+   * Optional, and absence means this process emits nothing — which is what a
+   * test run and a bare `pnpm dev` want, and what keeps a missing collector from
+   * being a startup failure. ADR-046 settled the instrumentation layer; the
+   * backend behind this endpoint is deliberately not this application's concern.
+   */
+  FEED_AGGREGATOR_OTLP_ENDPOINT: z.string().min(1).optional(),
+
   POSTGRES_HOST: z.string().min(1),
   POSTGRES_PORT: portSchema,
   POSTGRES_DATABASE: z.string().min(1),

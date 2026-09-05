@@ -6,6 +6,7 @@ import type {
 } from "@chronologity/timeline-derivation";
 import type { Viewer } from "./auth-context.js";
 import { accountFor } from "./require-account.js";
+import { withSpan } from "../observability/tracing.js";
 
 /**
  * What the Viewer may see, resolved once per scope for the length of a request.
@@ -111,7 +112,16 @@ export class RequestEligibility {
 
     // Stored before it settles, so two resolvers asking at once share one
     // round trip rather than racing to start a second.
-    const resolving = this.resolver.resolve(userId, scope);
+    //
+    // The span wraps the resolution rather than the method, so a second resolver
+    // arriving at a memo already in flight does not open a second span for work
+    // nobody is doing twice. `scope.type` is a bounded dimension; the identifier
+    // beside it is not, and is deliberately absent (`observability.md:410`).
+    const resolving = withSpan(
+      "resolve eligibility (PostgreSQL)",
+      () => this.resolver.resolve(userId, scope),
+      { "chronologity.scope_type": scope.type },
+    );
 
     this.resolved.set(key, resolving);
 

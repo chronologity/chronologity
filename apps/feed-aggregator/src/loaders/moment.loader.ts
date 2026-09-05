@@ -1,7 +1,11 @@
 import DataLoader from "dataloader";
 import type { RequestEligibility } from "../auth/request-eligibility.js";
 import type { Logger } from "../observability/logger.js";
-import type { AuthorizedMoment, MomentReadModel } from "../read-models/postgres/moment-read-model.js";
+import type {
+  AuthorizedMoment,
+  MomentReadModel,
+} from "../read-models/postgres/moment-read-model.js";
+import { withSpan } from "../observability/tracing.js";
 
 /**
  * Reading Moments once each, however often a request asks.
@@ -46,29 +50,42 @@ export function createMomentLoader(
   log: Logger,
 ): DataLoader<string, AuthorizedMoment | undefined> {
   return new DataLoader<string, AuthorizedMoment | undefined>(
-    async (momentIds) => {
-      const began = Date.now();
-      const facts = await eligibility.forViewer();
-      const found = await moments.findVisibleMany(
-        momentIds as readonly string[],
-        facts.viewerUserId,
-        facts.isAdult,
-      );
+    async (momentIds) =>
+      withSpan(
+        "batch enrich (PostgreSQL)",
+        async () => {
+          const began = Date.now();
+          const facts = await eligibility.forViewer();
+          const found = await moments.findVisibleMany(
+            momentIds as readonly string[],
+            facts.viewerUserId,
+            facts.isAdult,
+          );
 
-      // Positional, and the order is the caller's rather than the store's. A
-      // batch answered in the order rows happened to come back would hand each
-      // caller somebody else's Moment — silently, and only when the fixture was
-      // not already sorted.
-      // The shape and never the keys: a Moment identifier is exactly what the
-      // logger redacts from query variables, and an array of them here would
-      // walk around the redaction it exists to enforce.
-      log.debug(
-        { loader: "moment", keys: momentIds.length, statements: 1, durationMs: Date.now() - began },
-        "batched",
-      );
-
-      return momentIds.map((momentId) => found.get(momentId));
-    },
+          // Positional, and the order is the caller's rather than the store's. A
+          // batch answered in the order rows happened to come back would hand each
+          // caller somebody else's Moment — silently, and only when the fixture was
+          // not already sorted.
+          // The shape and never the keys: a Moment identifier is exactly what the
+          // logger redacts from query variables, and an array of them here would
+          // walk around the redaction it exists to enforce.
+          log.debug(
+            {
+              loader: "moment",
+              keys: momentIds.length,
+              statements: 1,
+              durationMs: Date.now() - began,
+            },
+            "batched",
+          );
+    
+          return momentIds.map((momentId) => found.get(momentId));
+        },
+        // How many keys, never which. `feed.md:1289` asks for batch size as a
+        // signal, and the size is the signal — the identifiers are what the
+        // logger already redacts, and a span is no safer a place for them.
+        { "chronologity.loader": "moment", "chronologity.keys": momentIds.length },
+      ),
     { maxBatchSize: MOST },
   );
 }

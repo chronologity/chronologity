@@ -1,4 +1,5 @@
 import type { GraphQLContext } from "../../graphql/context/graphql-context.js";
+import { withSpan } from "../../observability/tracing.js";
 import { connectionFor, type TimelineConnection } from "../services/timeline-composer.js";
 import {
   scopeOf,
@@ -38,7 +39,34 @@ export async function getTimelineSlice(
   paging: PagingArguments,
   context: GraphQLContext,
 ): Promise<TimelineConnection> {
-  const request = specificationFor(view, paging);
+  return withSpan("resolve timeline", () => page(view, paging, context));
+}
+
+/**
+ * The four steps, inside a span that names each of them.
+ *
+ * Split from the entry point only so the span wraps the whole composition rather
+ * than part of it. The stages beneath — eligibility, the ClickHouse read, the
+ * enrichment the loaders do — open their own spans where they happen, so a trace
+ * shows which of them a slow page spent its time in (`feed.md:1303-1308`).
+ *
+ * @param view - Whose history, which lens, what narrowing.
+ * @param paging - Where the reader is and how much they want.
+ * @param context - Carries the Viewer, what they may see, and the read model.
+ * @returns The page.
+ * @throws {ValidationError} If the arguments do not describe a view.
+ * @throws {UnauthenticatedError} If the request offered no credential.
+ * @throws {OnboardingRequiredError} If the account is unfinished.
+ */
+async function page(
+  view: TimelineViewArguments,
+  paging: PagingArguments,
+  context: GraphQLContext,
+): Promise<TimelineConnection> {
+  // Named as a stage though it touches no store: a cursor this service did not
+  // issue is refused here, and a trace that stopped at "the request failed"
+  // would not say that reading the client's own position is where it failed.
+  const request = await withSpan("decode cursor", async () => specificationFor(view, paging));
   const viewer = await context.eligibility.forScope(scopeOf(request.view.context));
   const slice = await context.timeline.page(
     request.view,
@@ -54,5 +82,7 @@ export async function getTimelineSlice(
         },
   );
 
-  return connectionFor(slice, request.view, request.from !== undefined);
+  return withSpan("map GraphQL response", async () =>
+    connectionFor(slice, request.view, request.from !== undefined),
+  );
 }

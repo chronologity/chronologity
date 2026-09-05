@@ -51,6 +51,9 @@ export function testAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     search: {
       indexVersion: process.env["SEARCH_INDEX_VERSION"] ?? "search-v1",
     },
+    // Off unless a suite asks for it. A test that exported spans to a
+    // collector nobody started would spend its time on failing HTTP calls.
+    telemetry: { endpoint: undefined, serviceName: "feed-aggregator" },
     graphql: {
       maxDepth: 12,
       // Off, so a suite never depends on the explorer's static assets being

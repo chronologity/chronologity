@@ -1,5 +1,6 @@
 import { ConfigurationError } from "@chronologity/config";
 import { loadConfig } from "./config/app-config.js";
+import { startTelemetry } from "./observability/tracing.js";
 import { composeApp } from "./server/compose.js";
 import { startServer } from "./server/server.js";
 
@@ -12,9 +13,21 @@ import { startServer } from "./server/server.js";
  */
 async function main(): Promise<void> {
   const config = loadConfig();
+
+  // Before anything is composed, so a span opened while the application is
+  // being built has somewhere to go. Emits nothing when no endpoint is
+  // configured, which is what a local run and every test want.
+  const telemetry = startTelemetry(config.telemetry);
   const { app, dependencies } = await composeApp(config);
 
-  await startServer({ app, config, resources: dependencies });
+  await startServer({
+    app,
+    config,
+    // Telemetry first, so it closes last: resources are closed in reverse, and
+    // flushing before the stores have finished emitting would lose exactly the
+    // spans describing the shutdown.
+    resources: [{ name: "telemetry", close: () => telemetry.shutdown() }, ...dependencies],
+  });
 
   // Connectivity is reported rather than required at startup. A service that
   // refused to boot while ClickHouse was briefly unavailable could not serve

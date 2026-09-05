@@ -220,6 +220,43 @@ services:
       # about thirty seconds locally — far longer than the other services.
       start_period: 40s
 
+  # ───────────────────────────────────────────────────────────────
+  # OpenTelemetry collector — where the feed aggregator reports what it
+  # observed about itself (Phase 9K, ADR-046).
+  #
+  # It forwards nowhere and stores nothing: the `debug` exporter prints what it
+  # received. That is the point of having it locally — instrumentation nobody
+  # has ever watched arrive is instrumentation nobody knows is wrong — and it is
+  # deliberately not a backend. Which backend receives this in production is a
+  # Phase 16 decision, and the collector is the seam that keeps it one.
+  #
+  # Only the HTTP receiver is enabled. The aggregator exports OTLP over HTTP
+  # with JSON payloads, so the gRPC port would be a listener nothing speaks to.
+  # ───────────────────────────────────────────────────────────────
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.160.0
+    restart: unless-stopped
+    command: ["--config=/etc/otel-collector.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otel-collector.yaml:ro
+    ports:
+      - "${OTLP_HTTP_PORT:-4318}:4318"
+    healthcheck:
+      # The image carries no shell and no wget, so health is asked of the
+      # collector's own OTLP endpoint the only way available: a GET, which it
+      # answers 405 because the receiver takes POST. A 405 proves the listener
+      # is bound and serving, which is the whole question.
+      test:
+        [
+          "CMD",
+          "/otelcol-contrib",
+          "components",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
 volumes:
   postgres-data:
   kafka-data:

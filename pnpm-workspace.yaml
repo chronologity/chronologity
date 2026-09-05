@@ -1,3 +1,13 @@
 packages:
   - "apps/*"
   - "packages/*"
+
+# Which dependencies may run install scripts.
+#
+# `protobufjs` arrives beneath OpenTelemetry and its postinstall generates the
+# protobuf runtime. The feed aggregator exports over OTLP/HTTP with JSON
+# payloads, so nothing here ever reaches that path — the build is declined
+# rather than approved, which keeps one less install script running for a
+# capability nothing uses.
+allowBuilds:
+  protobufjs: false

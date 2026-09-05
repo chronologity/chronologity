@@ -18,7 +18,8 @@
     "test:unit": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "measure": "node scripts/measure-reads.mjs"
+    "measure": "node scripts/measure-reads.mjs",
+    "load": "node scripts/load-reads.mjs"
   },
   "dependencies": {
     "@chronologity/config": "workspace:*",
@@ -28,6 +29,14 @@
     "@clickhouse/client": "^1.23.1",
     "@fastify/cors": "^11.3.0",
     "@fastify/helmet": "^13.1.0",
+    "@fastify/rate-limit": "11.2.0",
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/exporter-metrics-otlp-http": "0.222.0",
+    "@opentelemetry/exporter-trace-otlp-http": "0.222.0",
+    "@opentelemetry/resources": "2.11.0",
+    "@opentelemetry/sdk-metrics": "2.11.0",
+    "@opentelemetry/sdk-node": "0.222.0",
+    "@opentelemetry/semantic-conventions": "1.43.0",
     "dataloader": "^2.2.3",
     "fastify": "^5.12.0",
     "fastify-plugin": "^6.0.0",
@@ -39,9 +48,12 @@
   },
   "devDependencies": {
     "@chronologity/tsconfig": "workspace:*",
+    "@opentelemetry/sdk-trace-base": "2.11.0",
+    "@opentelemetry/sdk-trace-node": "2.11.0",
     "@types/node": "^24.0.0",
     "@types/pg": "^8.21.0",
     "@vitest/coverage-v8": "^4.1.10",
+    "autocannon": "8.0.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   }

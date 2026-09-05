@@ -14,6 +14,7 @@ import {
   type TimelinePosition,
   type TimelineReading,
 } from "@chronologity/timeline-derivation";
+import { withSpan } from "../../observability/tracing.js";
 
 /**
  * Reading history in the order it happened.
@@ -201,9 +202,12 @@ export class TimelineReadModel {
          AND context_id = {contextId: String}
          AND ${eligible(CONTEXTS)}`;
 
-    const result = await this.client.query({
-      query: withMoments(
-        `SELECT moment_id, occurred_at,
+    const result = await withSpan(
+      "query timeline (ClickHouse)",
+      async () =>
+        this.client.query({
+          query: withMoments(
+            `SELECT moment_id, occurred_at,
                 ${own ? eligible(CONTEXTS) : "1"} AS readable
            FROM ${CONTEXTS}
           WHERE projection_version = {version: String}
@@ -212,30 +216,39 @@ export class TimelineReadModel {
             ${boundary}
           ORDER BY ${orderFor(view.direction)}
           LIMIT {limit: UInt32}`,
-        orderFor(view.direction, "moment"),
-      ),
-      query_params: {
-        version: this.version,
-        viewer: viewer.viewerUserId,
-        blocked: viewer.blocked,
-        audience: viewer.audience,
-        isAdult: viewer.isAdult ? 1 : 0,
-        ...(own ? {} : { contextType: view.context.type, contextId: view.context.id }),
-        ...narrowing.params,
-        // One beyond the page. Never returned; its presence is how the far side
-        // of `pageInfo` is answered without a second count.
-        limit: view.limit + 1,
-        ...(from === undefined
-          ? {}
-          : from.kind === "instant"
-            ? { at: asClickHouseDateTime(from.at) }
-            : {
-                at: asClickHouseDateTime(from.position.occurredAt),
-                momentId: from.position.momentId,
-              }),
+            orderFor(view.direction, "moment"),
+          ),
+          query_params: {
+            version: this.version,
+            viewer: viewer.viewerUserId,
+            blocked: viewer.blocked,
+            audience: viewer.audience,
+            isAdult: viewer.isAdult ? 1 : 0,
+            ...(own ? {} : { contextType: view.context.type, contextId: view.context.id }),
+            ...narrowing.params,
+            // One beyond the page. Never returned; its presence is how the far side
+            // of `pageInfo` is answered without a second count.
+            limit: view.limit + 1,
+            ...(from === undefined
+              ? {}
+              : from.kind === "instant"
+                ? { at: asClickHouseDateTime(from.at) }
+                : {
+                    at: asClickHouseDateTime(from.position.occurredAt),
+                    momentId: from.position.momentId,
+                  }),
+          },
+          format: "JSONEachRow",
+        }),
+      // Bounded dimensions only. The scope's identifier and the reader's are
+      // what make a metric useless and a trace private (`observability.md:410`);
+      // which axis, which way and how far are what a slow read is explained by.
+      {
+        "chronologity.scope_type": view.context.type,
+        "chronologity.direction": view.direction,
+        "chronologity.limit": view.limit,
       },
-      format: "JSONEachRow",
-    });
+    );
 
     const rows = await result.json<TimelineReading>();
 

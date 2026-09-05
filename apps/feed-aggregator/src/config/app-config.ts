@@ -5,6 +5,7 @@ import { toDatabaseConfig, type DatabaseConfig } from "./database-config.js";
 import { envSchema, type Env } from "./env.js";
 import { toGraphQLConfig, type GraphQLConfig } from "./graphql-config.js";
 import { toSearchConfig, type SearchConfig } from "./search-config.js";
+import { toTelemetryConfig, type TelemetryConfig } from "./telemetry-config.js";
 
 /**
  * The aggregator's fully assembled configuration.
@@ -32,6 +33,8 @@ export interface AppConfig {
   readonly graphql: GraphQLConfig;
   /** Which Search index to ask whether a found thing is still findable. */
   readonly search: SearchConfig;
+  /** Where this process reports what it observed about itself, if anywhere. */
+  readonly telemetry: TelemetryConfig;
 }
 
 /**
@@ -58,5 +61,6 @@ export function loadConfig(source: Record<string, string | undefined> = process.
     auth: toAuthConfig(env),
     graphql: toGraphQLConfig(env),
     search: toSearchConfig(env),
+    telemetry: toTelemetryConfig(env),
   };
 }

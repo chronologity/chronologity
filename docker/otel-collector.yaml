@@ -1,0 +1,49 @@
+# OpenTelemetry collector — local development only.
+#
+# The seam ADR-046 describes: applications speak OTLP to a collector, and where
+# the collector forwards to is an infrastructure decision Phase 16 makes. Having
+# one here is what makes instrumentation verifiable rather than merely written —
+# a span tree nobody has ever seen arrive is a span tree nobody knows is wrong.
+#
+# It forwards nowhere. `debug` prints what it received, which is exactly what a
+# developer wants and exactly what a production deployment must not do.
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        # All interfaces, because the sender is a process on the host reaching a
+        # container. Local development only; nothing here is exposed anywhere.
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Bounded so a burst cannot make the collector the thing that runs out of
+  # memory. A dropped span is a worse diagnostic than a slow one and a much
+  # better outcome than a dead container.
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 128
+    spike_limit_mib: 32
+
+exporters:
+  # `detailed` so a span's attributes are printed, which is what the tracing
+  # tests and a person debugging a trace both need to see.
+  debug:
+    verbosity: detailed
+
+service:
+  telemetry:
+    logs:
+      level: info
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [debug]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [debug]
