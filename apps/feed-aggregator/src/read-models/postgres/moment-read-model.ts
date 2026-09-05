@@ -142,6 +142,25 @@ export interface RelationshipRow {
   readonly unavailable: boolean;
 }
 
+/** One page of a discussion, asked for. */
+export interface CommentPageKey {
+  /** The Moment, already proven readable, carrying who proved it. */
+  readonly moment: AuthorizedMoment;
+  readonly limit: number;
+  readonly after: { readonly createdAt: Date; readonly commentId: string } | undefined;
+  /** A top-level comment whose replies are wanted, or undefined for the top level. */
+  readonly thread: string | undefined;
+}
+
+/**
+ * Where a page with no cursor resumes from.
+ *
+ * A sentinel rather than an `IS NULL OR`, so the keyset stays a row comparison
+ * the index can range-scan. Nothing outside the statement ever sees either.
+ */
+const BEFORE_ALL_TIME = "-infinity";
+const NO_COMMENT = "00000000-0000-0000-0000-000000000000";
+
 /** A page of rows, and whether the sequence continues past it. */
 export interface Slice<Row> {
   readonly rows: readonly Row[];
@@ -199,12 +218,46 @@ export class MomentReadModel {
     viewerUserId: string,
     viewerIsAdult: boolean,
   ): Promise<AuthorizedMoment | undefined> {
+    return (await this.findVisibleMany([momentId], viewerUserId, viewerIsAdult)).get(momentId);
+  }
+
+  /**
+   * The same check, asked about several Moments at once.
+   *
+   * **The plural form is the producer, and the singular one delegates to it.**
+   * That ordering is what keeps ADR-142's guarantee true now that a request can
+   * reach the same check more than once: the guarantee was never about arity, it
+   * was that exactly one statement text carries `visibleToViewer` — and there is
+   * still exactly one. Adding a second statement for the batch would have been
+   * adding a second place for the rule to be wrong.
+   *
+   * A Moment absent from the result is absent from the map, so a refusal is
+   * still `undefined` and still means every reason at once.
+   *
+   * @param momentIds - Which Moments. Duplicates are harmless; the answer is
+   *   keyed, not positional.
+   * @param viewerUserId - Who is asking.
+   * @param viewerIsAdult - Whether they are old enough for age-restricted
+   *   history.
+   * @returns The Moments this Viewer may read, by identifier. Absent keys were
+   *   refused or never existed, which are deliberately the same answer.
+   * @throws {Error} If PostgreSQL refuses the statement.
+   */
+  async findVisibleMany(
+    momentIds: readonly string[],
+    viewerUserId: string,
+    viewerIsAdult: boolean,
+  ): Promise<Map<string, AuthorizedMoment>> {
+    if (momentIds.length === 0) {
+      return new Map();
+    }
+
     const bind = new PositionalParameters();
     const viewer = {
       viewerUserId: bind.bind(viewerUserId),
       viewerIsAdult: bind.bind(viewerIsAdult),
     };
-    const id = bind.bind(momentId);
+    const ids = bind.bind([...momentIds]);
 
     const result = await this.pool.query<MomentRow>(
       `SELECT ${MOMENT_COLUMNS}
@@ -214,15 +267,13 @@ export class MomentReadModel {
          LEFT JOIN locations l ON l.location_id = ml.location_id
          LEFT JOIN moment_personal_significance s
                 ON s.moment_id = m.moment_id AND s.user_id = ${viewer.viewerUserId}
-        WHERE m.moment_id = ${id}
+        WHERE m.moment_id = ANY(${ids}::uuid[])
           AND m.deleted_at IS NULL
           AND ${visibleToViewer("m", viewer)}`,
       [...bind.values],
     );
 
-    const row = result.rows[0];
-
-    return row === undefined ? undefined : { row, viewerUserId };
+    return new Map(result.rows.map((row) => [row.moment_id, { row, viewerUserId }]));
   }
 
   /**
@@ -308,28 +359,136 @@ export class MomentReadModel {
     after: { createdAt: Date; commentId: string } | undefined,
     thread: string | undefined,
   ): Promise<Slice<CommentRow>> {
-    const bind = new PositionalParameters();
-    const viewer = { viewerUserId: bind.bind(moment.viewerUserId) };
-    const id = bind.bind(moment.row.moment_id);
-    const level =
-      thread === undefined
-        ? "c.thread_comment_id IS NULL"
-        : `c.thread_comment_id = ${bind.bind(thread)}`;
-    const resume =
-      after === undefined
-        ? ""
-        : `AND (c.created_at, c.comment_id) > (${bind.bind(after.createdAt)}, ${bind.bind(after.commentId)})`;
-    const probe = bind.bind(limit + 1);
+    const pages = await this.commentPages([{ moment, limit, after, thread }]);
 
-    const result = await this.pool.query<CommentRow>(
-      `SELECT c.comment_id, c.moment_id, c.author_user_id, c.body, c.deleted_at,
-              c.thread_comment_id, c.in_reply_to_comment_id, c.created_at, c.edited_at,
+    return pages[0] as Slice<CommentRow>;
+  }
+
+  /**
+   * Several pages of discussion, in one statement per level.
+   *
+   * **Two statements at most, and the split is by which index applies rather
+   * than by anything about the request.** `moment_comments` carries two partial
+   * indexes — one over `(moment_id, created_at, comment_id)` for top-level
+   * comments and one over `(thread_comment_id, created_at, comment_id)` for
+   * replies. Matching the level with a comparison the planner cannot prove
+   * implies either `WHERE` loses both, and the batch becomes a sequential scan
+   * per key: strictly worse than the statements it replaced. So the level is
+   * written as a literal, once per group.
+   *
+   * **`after` binds a sentinel rather than becoming an `IS NULL OR`.** The
+   * disjunction is correct and defeats the index, which would turn this into
+   * exactly the thing it exists to prevent. A key with no cursor resumes from
+   * before all time.
+   *
+   * **The ordinal is load-bearing.** Two keys can name the same Moment and
+   * thread and differ only in how many they want, and nothing else tells their
+   * rows apart.
+   *
+   * Every predicate deciding *which rows the page is* — readability, the
+   * tombstone rule, the keyset — stays inside the lateral, above the `LIMIT`.
+   * Outside it, a page of `limit` rows could contain rows the reader may not
+   * read. The enrichment joins hang off the already-limited page instead of the
+   * whole candidate set, so mentions and reactions are computed for what is
+   * returned rather than for everything the scan touched.
+   *
+   * @param keys - What to read. Every key must have been proven for the same
+   *   Viewer; the loader that calls this asserts it.
+   * @returns One page per key, in the order the keys were given.
+   * @throws {Error} If PostgreSQL refuses a statement.
+   */
+  async commentPages(keys: readonly CommentPageKey[]): Promise<Slice<CommentRow>[]> {
+    const answers: Slice<CommentRow>[] = keys.map(() => ({ rows: [], more: false }));
+    const levels: { threaded: boolean; at: number[] }[] = [
+      { threaded: false, at: [] },
+      { threaded: true, at: [] },
+    ];
+
+    keys.forEach((key, index) => {
+      (key.thread === undefined ? levels[0] : levels[1])?.at.push(index);
+    });
+
+    for (const level of levels) {
+      if (level.at.length === 0) {
+        continue;
+      }
+
+      const chosen = level.at.map((index) => keys[index] as CommentPageKey);
+      const rows = await this.commentPagesAt(chosen, level.threaded);
+
+      level.at.forEach((index, position) => {
+        const key = keys[index] as CommentPageKey;
+        const found = rows.get(position + 1) ?? [];
+
+        answers[index] = { rows: found.slice(0, key.limit), more: found.length > key.limit };
+      });
+    }
+
+    return answers;
+  }
+
+  /**
+   * One level's worth of pages, in one statement.
+   *
+   * @param keys - The keys at this level, all of them threaded or none.
+   * @param threaded - Which partial index this statement is written to match.
+   * @returns The rows by their key's ordinal, oldest first within each.
+   * @throws {Error} If PostgreSQL refuses the statement.
+   */
+  private async commentPagesAt(
+    keys: readonly CommentPageKey[],
+    threaded: boolean,
+  ): Promise<Map<number, CommentRow[]>> {
+    const bind = new PositionalParameters();
+    const first = keys[0] as CommentPageKey;
+    const viewer = { viewerUserId: bind.bind(first.moment.viewerUserId) };
+    const moments = bind.bind(keys.map((key) => key.moment.row.moment_id));
+    const threads = threaded ? bind.bind(keys.map((key) => key.thread)) : undefined;
+    // Before all time, so the keyset is unconditionally a row comparison and
+    // stays an index range scan. Never encoded into a cursor, never returned.
+    // Bound as text so one array can hold both an instant and `-infinity`,
+    // which PostgreSQL understands and no `Date` can express.
+    const afterAt = bind.bind(
+      keys.map((key) => key.after?.createdAt.toISOString() ?? BEFORE_ALL_TIME),
+    );
+    const afterId = bind.bind(keys.map((key) => key.after?.commentId ?? NO_COMMENT));
+    const probes = bind.bind(keys.map((key) => key.limit + 1));
+    const columns = threaded
+      ? `unnest(${moments}::uuid[], ${threads}::uuid[], ${afterAt}::timestamptz[], ${afterId}::uuid[], ${probes}::int[])
+           WITH ORDINALITY AS k(moment_id, thread_comment_id, after_created_at, after_comment_id, probe, ordinal)`
+      : `unnest(${moments}::uuid[], ${afterAt}::timestamptz[], ${afterId}::uuid[], ${probes}::int[])
+           WITH ORDINALITY AS k(moment_id, after_created_at, after_comment_id, probe, ordinal)`;
+    const level = threaded ? "c.thread_comment_id = k.thread_comment_id" : "c.thread_comment_id IS NULL";
+
+    const result = await this.pool.query<CommentRow & { ordinal: number }>(
+      `WITH keys AS (SELECT * FROM ${columns})
+       SELECT k.ordinal::int AS ordinal,
+              page.comment_id, page.moment_id, page.author_user_id, page.body, page.deleted_at,
+              page.thread_comment_id, page.in_reply_to_comment_id, page.created_at, page.edited_at,
               a.handle, a.display_name, a.biography, a.created_at AS author_created_at,
               mentioned.list AS mentions,
               responses.counts,
               responses.yours
-         FROM moment_comments c
-         LEFT JOIN users a ON a.user_id = c.author_user_id
+         FROM keys k
+         CROSS JOIN LATERAL (
+           SELECT c.comment_id, c.moment_id, c.author_user_id, c.body, c.deleted_at,
+                  c.thread_comment_id, c.in_reply_to_comment_id, c.created_at, c.edited_at
+             FROM moment_comments c
+            WHERE ${level}
+              AND c.moment_id = k.moment_id
+              AND (c.created_at, c.comment_id) > (k.after_created_at, k.after_comment_id)
+              AND ${commentReadableBy("c", viewer)}
+              AND (
+                c.deleted_at IS NULL
+                OR EXISTS (
+                  SELECT 1 FROM moment_comments r
+                   WHERE r.thread_comment_id = c.comment_id AND r.deleted_at IS NULL
+                )
+              )
+            ORDER BY c.created_at ASC, c.comment_id ASC
+            LIMIT k.probe
+         ) page
+         LEFT JOIN users a ON a.user_id = page.author_user_id
          LEFT JOIN LATERAL (
            -- The handle as it stands now, which may not be the one that was
            -- typed: a mention is resolved to identity, so a rename does not
@@ -338,7 +497,7 @@ export class MomentReadModel {
                            ORDER BY mu.handle) AS list
              FROM comment_mentions cm
              JOIN users mu ON mu.user_id = cm.user_id
-            WHERE cm.comment_id = c.comment_id
+            WHERE cm.comment_id = page.comment_id
          ) mentioned ON true
          LEFT JOIN LATERAL (
            SELECT json_agg(json_build_object('kind', k.kind, 'count', k.count)) AS counts,
@@ -357,27 +516,26 @@ export class MomentReadModel {
                       )::int AS count,
                       max(cr.kind) FILTER (WHERE cr.user_id = ${viewer.viewerUserId}) AS mine
                  FROM comment_reactions cr
-                WHERE cr.comment_id = c.comment_id
+                WHERE cr.comment_id = page.comment_id
                 GROUP BY cr.kind
              ) k
          ) responses ON true
-        WHERE c.moment_id = ${id}
-          AND ${level}
-          AND ${commentReadableBy("c", viewer)}
-          AND (
-            c.deleted_at IS NULL
-            OR EXISTS (
-              SELECT 1 FROM moment_comments r
-               WHERE r.thread_comment_id = c.comment_id AND r.deleted_at IS NULL
-            )
-          )
-          ${resume}
-        ORDER BY c.created_at ASC, c.comment_id ASC
-        LIMIT ${probe}`,
+        ORDER BY k.ordinal, page.created_at ASC, page.comment_id ASC`,
       [...bind.values],
     );
+    const byOrdinal = new Map<number, CommentRow[]>();
 
-    return { rows: result.rows.slice(0, limit), more: result.rows.length > limit };
+    for (const { ordinal, ...row } of result.rows) {
+      const found = byOrdinal.get(ordinal);
+
+      if (found === undefined) {
+        byOrdinal.set(ordinal, [row as CommentRow]);
+      } else {
+        found.push(row as CommentRow);
+      }
+    }
+
+    return byOrdinal;
   }
 
   /**
