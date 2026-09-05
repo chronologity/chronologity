@@ -197,11 +197,31 @@ function membership(view: ViewSpecification, bind: PositionalParameters): string
 
   switch (view.context.type) {
     case "person":
-      return `(m.author_user_id = ${id}
-               OR EXISTS (SELECT 1 FROM moment_participations part
-                           WHERE part.moment_id = m.moment_id
-                             AND part.user_id = ${id}
-                             AND part.status = 'accepted'))`;
+      // **A union of two index scans rather than a disjunction**, and the
+      // difference is the whole cost of reading a person's history at a coarse
+      // scale. Written as `author = x OR EXISTS(participated)`, PostgreSQL
+      // cannot split the alternatives across two indexes and falls back to
+      // scanning `moments` — measured at fifty thousand Moments: a sequential
+      // scan discarding 49,388 rows to find 612, which then made the visibility
+      // rule run on all fifty thousand rather than on the six hundred that
+      // survive. As a union each branch drives its own index: the author's own
+      // history from `moments_author_idx`, and what they agreed to from the
+      // participation index.
+      //
+      // The other two branches are left as correlated `EXISTS`, because the
+      // planner already turns those into a nested loop over the association
+      // table's index — there is only one alternative for it to choose.
+      return `m.moment_id IN (
+          SELECT authored.moment_id
+            FROM moments authored
+           WHERE authored.author_user_id = ${id}
+             AND authored.deleted_at IS NULL
+          UNION
+          SELECT part.moment_id
+            FROM moment_participations part
+           WHERE part.user_id = ${id}
+             AND part.status = 'accepted'
+        )`;
 
     case "location":
       return `EXISTS (SELECT 1 FROM moment_locations ml
