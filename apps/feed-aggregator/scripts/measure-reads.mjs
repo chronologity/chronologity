@@ -35,6 +35,8 @@
 // Usage: measure                 measure and print
 //        measure --save          measure and write the baseline
 //        measure --compare <file> print deltas against an earlier baseline
+//        measure --seed "<args>"  the seed:history invocation that built the corpus
+//                                 (required with --save)
 
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -53,7 +55,11 @@ if (existsSync(envFile)) {
 }
 
 const { values } = parseArgs({
-  options: { save: { type: "boolean", default: false }, compare: { type: "string" } },
+  options: {
+    save: { type: "boolean", default: false },
+    compare: { type: "string" },
+    seed: { type: "string" },
+  },
 });
 
 const LOCAL = new Set(["localhost", "127.0.0.1", "::1", "postgres", "clickhouse"]);
@@ -535,7 +541,12 @@ const report = {
   // run against uncommitted work names a commit that never produced these
   // numbers, and nothing in the artefact would say so — which is how a baseline
   // stops being reproducible without anybody noticing.
-  dirty: execSync("git status --porcelain").toString().trim().length > 0,
+  //
+  // Scoped to `apps/` and `packages/` rather than the whole tree, because this
+  // artefact is normally written in the same change as the documentation that
+  // explains it. A flag that went true for an edit to a Markdown file would be
+  // true on every honest run, and a warning that is always on is not read.
+  dirty: execSync("git status --porcelain -- apps packages").toString().trim().length > 0,
   machine: {
     platform: process.platform,
     arch: process.arch,
@@ -546,6 +557,11 @@ const report = {
   caveat:
     "Measured on one developer machine against local containers, through the service's own GraphQL surface with app.inject(). Comparable to another run on the same machine; not to anything else. Trust p50, and read every number against databaseRoundTripMs — on this machine much of it is the container network rather than this service.",
   projectionVersion: config.clickhouse.projectionVersion,
+  // The invocation that built the corpus, verbatim. The counts under `corpus`
+  // describe what was measured; this is how to get it back. Recorded because the
+  // alternative is somebody's shell history, and the first time this artefact was
+  // regenerated the arguments had to be recovered from a log file.
+  seed: values.seed ?? null,
   graphql: { maxDepth: config.graphql.maxDepth },
   databaseRoundTripMs: trip,
   corpus: held,
@@ -588,6 +604,15 @@ if (values.compare !== undefined && existsSync(values.compare)) {
 }
 
 if (values.save) {
+  if (values.seed === undefined) {
+    console.error(
+      "\nRefusing to save without --seed. A baseline whose corpus cannot be rebuilt\n" +
+        "is a number nobody can reproduce or compare against. Pass the seed:history\n" +
+        "invocation that built this corpus, verbatim.",
+    );
+    process.exit(1);
+  }
+
   const broken = measurements.filter((one) => one.errors !== undefined || !one.returned);
 
   if (broken.length > 0) {
