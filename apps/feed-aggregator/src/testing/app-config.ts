@@ -48,6 +48,9 @@ export function testAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       issuer: process.env["AUTH_JWT_ISSUER"] ?? "chronologity",
       audience: process.env["AUTH_JWT_AUDIENCE"] ?? "chronologity-clients",
     },
+    search: {
+      indexVersion: process.env["SEARCH_INDEX_VERSION"] ?? "search-v1",
+    },
     graphql: {
       maxDepth: 12,
       // Off, so a suite never depends on the explorer's static assets being

@@ -22,6 +22,7 @@ const required = (): Record<string, string> => ({
   CLICKHOUSE_USERNAME: "chronologity",
   CLICKHOUSE_PASSWORD: "chronologity",
   TIMELINE_PROJECTION_VERSION: "timeline-v1",
+  SEARCH_INDEX_VERSION: "search-v1",
   POSTGRES_HOST: "localhost",
   POSTGRES_PORT: "5432",
   POSTGRES_DATABASE: "chronologity",
@@ -51,6 +52,7 @@ describe("loadConfig", () => {
     assert.equal(config.nodeEnv, "test");
     assert.equal(config.clickhouse.url, "http://localhost:8123");
     assert.equal(config.clickhouse.projectionVersion, "timeline-v1");
+    assert.equal(config.search.indexVersion, "search-v1");
     assert.equal(config.database.host, "localhost");
     assert.equal(config.database.port, 5432);
     assert.equal(config.auth.issuer, "chronologity");
@@ -157,5 +159,14 @@ describe("loadConfig", () => {
 
     assert.ok(issues.some((issue) => issue.includes("AUTH_JWT_SECRET")));
     assert.ok(issues.every((issue) => !issue.includes("too-short")));
+  });
+
+  it("refuses to start without a Search index version, rather than guessing one", () => {
+    // The failure this prevents is quiet: defaulted, the aggregator would ask a
+    // version the API may have stopped serving and refuse every arrival, or
+    // answer from an index built under rules nobody is applying any more.
+    const issues = issuesFor(withEnv({ SEARCH_INDEX_VERSION: undefined }));
+
+    assert.ok(issues.some((issue) => issue.includes("SEARCH_INDEX_VERSION")), issues.join("; "));
   });
 });

@@ -55,6 +55,23 @@ export const envSchema = z.object({
    */
   TIMELINE_PROJECTION_VERSION: z.string().min(1),
 
+  /**
+   * Which Search index version this process asks about.
+   *
+   * Read to answer one question and no other: whether a thing somebody says
+   * they found is still findable. Documents for two versions live side by side
+   * while a rebuild runs, so naming the wrong one would answer about an index
+   * nobody is serving.
+   *
+   * Required rather than defaulted, for the reason the projection version is:
+   * `apps/api` owns the constant naming the current version, and a default here
+   * would be a second copy of it that could disagree without anybody noticing.
+   * A cutover moves the API first and this after, which degrades safely —
+   * documents for the old version outlive the cutover, so a lagging reader gets
+   * a stale answer rather than refusing every arrival.
+   */
+  SEARCH_INDEX_VERSION: z.string().min(1),
+
   POSTGRES_HOST: z.string().min(1),
   POSTGRES_PORT: portSchema,
   POSTGRES_DATABASE: z.string().min(1),
