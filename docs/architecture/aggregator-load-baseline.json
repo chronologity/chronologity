@@ -1,0 +1,70 @@
+{
+  "recordedAt": "2026-09-05T19:55:19.000Z",
+  "commit": "af8efb1",
+  "dirty": false,
+  "machine": {
+    "platform": "darwin",
+    "arch": "x64",
+    "cpus": 4,
+    "memoryGb": 8,
+    "node": "v24.19.0"
+  },
+  "caveat": "A mix of Timeline scroll, temporal zoom, historical jump and head reads, over a real socket on one developer machine \u2014 four cores, running PostgreSQL, Kafka and ClickHouse beside the service. What is worth reading is the shape across concurrency, not any single number: throughput rose nearly linearly from one reader to two and collapsed at four, where latency more than trebled. Above eight, ClickHouse reads exceeded the client's own ten-second budget and the service correctly refused \u2014 a finding about this laptop rather than about the code, and the reason the recorded range stops where it does. Comparable to another run on the same machine; not to anything else.",
+  "projectionVersion": "bench",
+  "seed": "node dist/cli/seed-history.js --seed 1 --moments 50000 --people 100 --views 10 --places 200 --events 50 --comments 200000 --replies-per 1 --media-per 5 --participants 5000 --blocks 20",
+  "mix": [
+    {
+      "name": "scroll a Timeline",
+      "weight": 6
+    },
+    {
+      "name": "zoom out to years",
+      "weight": 2
+    },
+    {
+      "name": "jump to an instant",
+      "weight": 1
+    },
+    {
+      "name": "open the head of a Timeline",
+      "weight": 1
+    }
+  ],
+  "measurements": [
+    {
+      "connections": 1,
+      "requestsPerSecond": 0.8,
+      "latencyMs": {
+        "p50": 1059,
+        "p97_5": 2799,
+        "max": 2799
+      },
+      "requests": 8
+    },
+    {
+      "connections": 2,
+      "requestsPerSecond": 2.2,
+      "latencyMs": {
+        "p50": 717,
+        "p97_5": 2513,
+        "max": 2513
+      },
+      "requests": 22
+    },
+    {
+      "connections": 4,
+      "requestsPerSecond": 1.1,
+      "latencyMs": {
+        "p50": 2544,
+        "p97_5": 5517,
+        "max": 5517
+      },
+      "requests": 11
+    }
+  ],
+  "saturation": {
+    "observed": "between 2 and 4 concurrent readers on this machine",
+    "beyond": "at 8 and above, ClickHouse reads exceeded request_timeout and were refused",
+    "note": "The projection was rebuilt immediately before this run, so parts were unmerged and every read paid FINAL over more of them than a settled projection would. ADR-147 records that read cost is a function of merge state; this is what that looks like under concurrency."
+  }
+}
