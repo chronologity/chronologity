@@ -290,6 +290,32 @@ describe("what a Moment costs", () => {
     assert.equal(withTotal.cost, withoutTotal.cost + 1);
   });
 
+  it("counts ten times the discussion in the same one statement", async () => {
+    // The count reads `moment_comments` by `moment_id`, which is now indexed.
+    // An index changes what a statement costs and not how many are issued, so
+    // what this pins is the shape the index was added under: one statement,
+    // whatever the discussion grew to. The alternative — a count that walked the
+    // rows it had already fetched, or asked once per page — would still be
+    // correct and would still be fast here, and would be N per document against
+    // a Timeline.
+    const author = await signedInPerson();
+    const momentId = await momentWith(author, 40);
+
+    const withTotal = await costOf(
+      `query WithTotal($id: ID!) { moment(id: $id) { comments(first: 10) { total edges { node { commentId } } } } }`,
+      momentId,
+      author.token,
+    );
+    const withoutTotal = await costOf(
+      `query WithoutTotal($id: ID!) { moment(id: $id) { comments(first: 10) { edges { node { commentId } } } } }`,
+      momentId,
+      author.token,
+    );
+
+    assert.equal(withTotal.body.errors, undefined, JSON.stringify(withTotal.body.errors));
+    assert.equal(withTotal.cost, withoutTotal.cost + 1);
+  });
+
   it("asks nothing about reactions that are switched off", async () => {
     const author = await signedInPerson();
     const on = await createMoment(directory.pool, author.userId);
