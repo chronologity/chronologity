@@ -65,6 +65,20 @@ export function createDirectory(config: DatabaseConfig): Directory {
     // what happens here — history is read from ClickHouse.
     max: 10,
     connectionTimeoutMillis: 5_000,
+    // **The bound `data-storage.md:1389` requires and nothing in this
+    // repository had**: "All remote datastore operations require explicit
+    // timeouts. A hung database call should not consume request/worker capacity
+    // indefinitely."
+    //
+    // Connection acquisition was already bounded; the statement itself was not,
+    // so a query that never returned held one of ten connections until the
+    // process ended. Ten of those and this service answers nothing while every
+    // health check still passes.
+    //
+    // Applied per connection rather than per statement because `pg` offers no
+    // mid-statement cancellation to hang a request's own signal on — the gap
+    // recorded in ADR-151, and the reason this is the bound that stands in.
+    statement_timeout: 10_000,
     idleTimeoutMillis: 30_000,
   });
 

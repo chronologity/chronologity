@@ -51,6 +51,31 @@ export function createReadStore(config: ClickHouseConfig): ReadStore {
     // read that has taken ten seconds has already failed the person waiting.
     request_timeout: 10_000,
     clickhouse_settings: {
+      // **A query budget, which `scalability.md:1434` defines as four dials:
+      // rows scanned, duration, memory, and page size.** The fourth is bounded
+      // elsewhere — `viewSpecificationSchema` caps a page at two hundred — so
+      // three are set here.
+      //
+      // These are ceilings rather than tuning. `request_timeout` above bounds
+      // how long this *client* waits and leaves the server working; these bound
+      // what the server will do, which is the difference between a reader
+      // giving up and a query stopping. Without them one broad temporal zoom
+      // can monopolise ClickHouse for every ordinary scroll behind it
+      // (`scalability.md:265`).
+      //
+      // Chosen against `aggregator-read-baseline.json`: the heaviest measured
+      // read is the horizontal axis at 577ms over a fifty-thousand-Moment
+      // corpus, so ten seconds is roughly twenty times the worst legitimate
+      // read. Deliberately not derived from a latency target — there is no SLO
+      // (ADR-147), and a ceiling and a target are different things.
+      max_execution_time: 10,
+      // Enough for a corpus far larger than anything measured, and far less
+      // than a full scan of a projection that has grown for years. A read that
+      // reaches this is asking a question the sort key cannot answer, which is
+      // a defect rather than a busy moment.
+      max_rows_to_read: "50000000",
+      // One query must not be able to take the server down for the others.
+      max_memory_usage: "2000000000",
       // Reads of a `ReplacingMergeTree` must collapse duplicate rows, and every
       // projection table is one. Deduplication otherwise happens only when
       // parts merge, which is to say at a time nobody controls — so a Timeline
