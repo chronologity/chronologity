@@ -530,6 +530,7 @@ describe("arriving somewhere without travelling there", () => {
       "location",
       "moment",
       "realWorldEvent",
+      "searchResult",
       "significance",
     ]);
   });
@@ -545,9 +546,13 @@ describe("arriving somewhere without travelling there", () => {
   });
 
   it("names only reasons the server can actually verify", async () => {
-    // No SEARCH_RESULT until something produces one. A reason the server could
+    // SEARCH_RESULT was withheld until something server-side produced one, and
+    // 9J is that: the reference arrives as a kind and an identifier, and the
+    // server confirms the thing is still findable, reauthorizes it, and works
+    // out where it sits. The reason names that work. A reason the server could
     // only echo back from a client's assertion would undo the property that
-    // makes returning it worth anything.
+    // makes returning it worth anything, which is why this list is asserted
+    // whole rather than merely checked for what it contains.
     assert.deepEqual((await enumValuesOf("TimelineJumpReason")).sort(), [
       "CAUSAL_RELATIONSHIP",
       "HISTORICAL_SIGNIFICANCE",
@@ -555,7 +560,33 @@ describe("arriving somewhere without travelling there", () => {
       "LOCATION",
       "MOMENT",
       "REAL_WORLD_EVENT",
+      "SEARCH_RESULT",
     ]);
+  });
+
+  it("names only the kinds of thing Search keeps a document about", async () => {
+    // No TIMELINE. A Timeline is never stored or owned, so it has no identity
+    // to hand back; what is found is the context an interface presents as one.
+    // Adding a value here that the index cannot key on would produce a
+    // reference nothing could ever resolve.
+    assert.deepEqual((await enumValuesOf("SearchEntityType")).sort(), [
+      "EVENT",
+      "LOCATION",
+      "MOMENT",
+      "USER",
+    ]);
+  });
+
+  it("requires both halves of a reference, because neither alone identifies anything", async () => {
+    // An identifier without its kind would have to be looked for in four
+    // tables, and a kind without an identifier names everything of that kind.
+    const input = await typeNamed("SearchResultAnchorInput");
+    const required = input.inputFields
+      .filter((one: { type: { kind: string } }) => one.type.kind === "NON_NULL")
+      .map((one: { name: string }) => one.name)
+      .sort();
+
+    assert.deepEqual(required, ["entityId", "entityType"]);
   });
 
   it("requires a Moment to travel from when following a relationship", async () => {

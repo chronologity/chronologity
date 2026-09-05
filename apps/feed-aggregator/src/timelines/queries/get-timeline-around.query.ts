@@ -172,5 +172,13 @@ function reasonFor(anchor: TimelineAnchorArguments): ResolvedAnchor["reason"] {
     return "HISTORICAL_SIGNIFICANCE";
   }
 
+  // Reported for a refused reference too, which is what keeps a thing no longer
+  // findable indistinguishable from one that was never there. The reason travels
+  // with the request rather than with the outcome, so it says nothing about
+  // which of the refusals happened.
+  if (anchor.searchResult !== undefined && anchor.searchResult !== null) {
+    return "SEARCH_RESULT";
+  }
+
   return "INSTANT";
 }

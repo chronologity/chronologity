@@ -366,12 +366,23 @@ enum TimelineJumpReason {
 
   """What a span of history was about."""
   HISTORICAL_SIGNIFICANCE
+
+  """
+  Something found, handed back to be opened.
+
+  Reported only after the server resolved the reference itself: confirmed the
+  thing is still findable, reauthorized it for whoever is asking, and worked
+  out where it sits. It is never an echo of a client saying where it had
+  been — a value nothing verified would make every other value here worth
+  less.
+  """
+  SEARCH_RESULT
 }
 
 """
 Where to jump to. Exactly one way, never several.
 
-The six ways of naming a destination come down to two coordinates: an instant,
+The seven ways of naming a destination come down to two coordinates: an instant,
 and sometimes a Moment sitting at one. Naming two destinations is refused rather
 than resolved by precedence — picking one would send you somewhere you did not
 ask to go.
@@ -394,6 +405,9 @@ input TimelineAnchorInput {
 
   """What a span of history was about."""
   significance: SignificanceAnchorInput
+
+  """Something found, named by what kind it is and which one."""
+  searchResult: SearchResultAnchorInput
 }
 
 """
@@ -589,4 +603,46 @@ input TimelineViewInput {
   The stretch of history to read, or the whole of it when absent.
   """
   range: TimelineRangeInput
+}
+
+"""
+What kind of thing was found.
+
+The four kinds Search keeps documents about. There is deliberately no timeline:
+a Timeline is never stored or owned, so it has no identity to hand back. What is
+found instead is the context an interface presents as one — an occasion or a
+place.
+"""
+enum SearchEntityType {
+  MOMENT
+  USER
+  EVENT
+  LOCATION
+}
+
+"""
+Something found, handed back to be opened.
+
+The kind and the identifier are exactly what a search result carried, so an app
+hands back what it was given rather than working out which anchor applies. That
+is the point: the server does the working out, which is what lets it say the
+landing came from a search rather than taking a client's word for it.
+
+**Holding one of these is not permission to arrive.** It is a pointer, possibly
+minutes old, and between finding and opening it the author may have made it
+private, blocked you, deleted it, or taken it out of search. All of that is
+checked again now, and every refusal answers identically to a thing that never
+existed.
+"""
+input SearchResultAnchorInput {
+  entityType: SearchEntityType!
+  entityId: ID!
+
+  """
+  Where in its history to land, for a kind that spans one.
+
+  Optional, and read the way a place or an occasion reads it. Ignored for a
+  Moment, whose own occurrence is the position.
+  """
+  at: DateTime
 }

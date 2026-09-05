@@ -33,6 +33,8 @@ export interface GraphQLWiring {
   readonly eligibility: TimelineEligibilityResolver;
   /** The read-only pool a Moment's own detail is read through. */
   readonly directory: Pool;
+  /** Which Search index answers whether a found thing is still findable. */
+  readonly searchIndexVersion: string;
 }
 
 /**
@@ -75,7 +77,12 @@ export async function registerGraphql(app: FastifyInstance, wiring: GraphQLWirin
         Cursor: cursorScalar,
         DateTime: dateTimeScalar,
       },
-      context: createContext(wiring.store, wiring.eligibility, wiring.directory),
+      context: createContext(
+        wiring.store,
+        wiring.eligibility,
+        wiring.directory,
+        wiring.searchIndexVersion,
+      ),
       // No mutations, and `defineMutation` stays off so the schema does not
       // grow an empty one. A read service that advertised a mutation type
       // would be inviting the first person in a hurry to add one.

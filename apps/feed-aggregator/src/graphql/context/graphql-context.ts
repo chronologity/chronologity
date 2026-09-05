@@ -7,6 +7,7 @@ import type { ContextNameReadModel } from "../../read-models/postgres/context-na
 import type { MomentReadModel } from "../../read-models/postgres/moment-read-model.js";
 import type { RealWorldEventReadModel } from "../../read-models/postgres/real-world-event-read-model.js";
 import type { RepresentativeReadModel } from "../../read-models/postgres/representative-read-model.js";
+import type { SearchDocumentReadModel } from "../../read-models/postgres/search-document-read-model.js";
 import type { TimelineReadModel } from "../../read-models/clickhouse/timeline-read-model.js";
 
 /**
@@ -77,6 +78,19 @@ export interface GraphQLContext {
    * projection that would have to carry a score the schema refuses to show.
    */
   readonly representatives: RepresentativeReadModel;
+  /**
+   * Where a found thing is confirmed to still be findable.
+   *
+   * PostgreSQL, because ADR-117 made the Search index a table rather than a
+   * separate engine — so asking costs one indexed lookup in a database this
+   * application already reads, and there is no second service whose being
+   * down would stop somebody arriving somewhere.
+   *
+   * It answers one boolean and cannot return a document. This application
+   * does not own Search (`architecture/search.md:65`), and a read model that
+   * could return titles or snippets would be the beginning of owning it.
+   */
+  readonly searchDocuments: SearchDocumentReadModel;
   /**
    * What this Viewer may see, resolved on demand and once per scope.
    *

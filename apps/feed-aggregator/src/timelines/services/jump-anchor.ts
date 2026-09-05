@@ -1,5 +1,6 @@
 import {
   HISTORY_FLOOR,
+  identifierSchema,
   isSpanStart,
   spanEnd,
   viewSpecificationSchema,
@@ -9,16 +10,17 @@ import {
 import type { TimelineScopeRef } from "@chronologity/timeline-derivation";
 import { ValidationError } from "../../errors/aggregator-error.js";
 import type { GraphQLContext } from "../../graphql/context/graphql-context.js";
+import type { SearchEntityType } from "../../read-models/postgres/search-document-read-model.js";
 import type { GraphQLScale } from "./distribution-request.js";
 
 /**
  * Working out where somebody asked to go.
  *
- * Six ways of naming a destination, and only two coordinates: an instant, and
- * sometimes a Moment sitting at it. The other four are ways of computing one of
+ * Seven ways of naming a destination, and only two coordinates: an instant, and
+ * sometimes a Moment sitting at it. The other five are ways of computing one of
  * those — an occasion carries its own start, a place carries none, a
- * relationship carries its far end, and what a span was about is what temporal
- * zoom already picked.
+ * relationship carries its far end, what a span was about is what temporal zoom
+ * already picked, and something found is whichever of those its kind makes it.
  *
  * **Every destination is reauthorized here, before its instant is used
  * anywhere.** That ordering is the point rather than an implementation detail:
@@ -40,7 +42,8 @@ export type GraphQLJumpReason =
   | "LOCATION"
   | "REAL_WORLD_EVENT"
   | "CAUSAL_RELATIONSHIP"
-  | "HISTORICAL_SIGNIFICANCE";
+  | "HISTORICAL_SIGNIFICANCE"
+  | "SEARCH_RESULT";
 
 /** What `TimelineAnchorInput` arrives as, once GraphQL has coerced it. */
 export interface TimelineAnchorArguments {
@@ -58,6 +61,11 @@ export interface TimelineAnchorArguments {
   readonly significance?: {
     readonly startsAt: Date;
     readonly scale: GraphQLScale;
+  } | null;
+  readonly searchResult?: {
+    readonly entityType: GraphQLSearchEntityType;
+    readonly entityId: string;
+    readonly at?: Date | null;
   } | null;
 }
 
@@ -78,6 +86,22 @@ export interface ResolvedAnchor {
   readonly scope: TimelineScopeRef;
   readonly reason: GraphQLJumpReason;
 }
+
+/** What kind of thing was found, as the schema names it. */
+export type GraphQLSearchEntityType = "MOMENT" | "USER" | "EVENT" | "LOCATION";
+
+/**
+ * The kinds, as the schema spells them against the Search index's.
+ *
+ * `EVENT` rather than `REAL_WORLD_EVENT` because that is what a Search result
+ * carries, and an app should hand back what it was given rather than translate.
+ */
+const ENTITY_TYPES: Record<GraphQLSearchEntityType, SearchEntityType> = {
+  MOMENT: "moment",
+  USER: "user",
+  EVENT: "event",
+  LOCATION: "location",
+};
 
 /** The scales, as the schema spells them against the contract's. */
 const SCALES: Record<GraphQLScale, TimelineScale> = {
@@ -101,13 +125,21 @@ const SCALES: Record<GraphQLScale, TimelineScale> = {
  */
 function soleAnchor(anchor: TimelineAnchorArguments): keyof TimelineAnchorArguments {
   const named = (
-    ["moment", "instant", "location", "realWorldEvent", "causal", "significance"] as const
+    [
+      "moment",
+      "instant",
+      "location",
+      "realWorldEvent",
+      "causal",
+      "significance",
+      "searchResult",
+    ] as const
   ).filter((key) => anchor[key] !== undefined && anchor[key] !== null);
   const only = named[0];
 
   if (only === undefined) {
     throw new ValidationError(
-      "A jump needs somewhere to go: a Moment, an instant, a place, an occasion, a relationship, or what a span was about",
+      "A jump needs somewhere to go: a Moment, an instant, a place, an occasion, a relationship, what a span was about, or something you found",
     );
   }
 
@@ -272,67 +304,75 @@ export async function resolveAnchor(
         : atMoment(first.moment_id, view, facts, context, "HISTORICAL_SIGNIFICANCE");
     }
 
-    case "realWorldEvent": {
-      const asked = anchor.realWorldEvent as { realWorldEventId: string; at?: Date | null };
-      const occasion = await context.realWorldEvents.findVisible(
-        asked.realWorldEventId,
-        facts.viewerUserId,
-        facts.isAdult,
+    case "realWorldEvent":
+      return atOccasion(
+        anchor.realWorldEvent as { realWorldEventId: string; at?: Date | null },
+        facts,
+        context,
+        "REAL_WORLD_EVENT",
       );
 
-      if (occasion === undefined) {
+    case "location":
+      return atPlace(
+        anchor.location as { locationId: string; at?: Date | null },
+        view,
+        context,
+        "LOCATION",
+      );
+
+    case "searchResult": {
+      const found = anchor.searchResult as {
+        entityType: GraphQLSearchEntityType;
+        entityId: string;
+        at?: Date | null;
+      };
+      const parsed = identifierSchema.safeParse(found.entityId);
+
+      if (!parsed.success) {
+        throw new ValidationError("That is not something that can be found");
+      }
+
+      // **Findability first, and the order is the whole argument.** It is the
+      // cheapest refusal — one indexed lookup — and it must come before the
+      // destination is resolved, because a thing Search would no longer offer
+      // must not have its instant computed at all. Same rule as reauthorization,
+      // for the same reason `timeline.md:678` gives: a timestamp is one of the
+      // things an unreachable destination must not leak.
+      //
+      // Intrinsic only. Whether *this reader* may see it is asked below, by the
+      // same reauthorization every other anchor performs — never by a second
+      // copy of the API's Search eligibility, which is the mistake ADR-120 named.
+      if (!(await context.searchDocuments.findable(ENTITY_TYPES[found.entityType], parsed.data))) {
         return undefined;
       }
 
-      const scope: TimelineScopeRef = { type: "real_world_event", id: asked.realWorldEventId };
+      // **The server works out which kind of destination this is**, rather than
+      // an app choosing an anchor and asserting where it came from. That is what
+      // earns `SEARCH_RESULT`: the reason names work done here, so it cannot be
+      // an echo of something unverified (ADR-145, ADR-148).
+      switch (found.entityType) {
+        case "MOMENT":
+          return atMoment(parsed.data, view, facts, context, "SEARCH_RESULT");
 
-      // The one destination carrying an instant of its own: an occasion's start
-      // is its own declaration rather than anything derived from Moments.
-      return {
-        instant: withinHistory(asked.at ?? occasion.occurrence_start),
-        momentId: undefined,
-        authorUserId: undefined,
-        scope,
-        reason: "REAL_WORLD_EVENT",
-      };
-    }
+        case "LOCATION":
+          return atPlace(
+            { locationId: parsed.data, ...(found.at == null ? {} : { at: found.at }) },
+            view,
+            context,
+            "SEARCH_RESULT",
+          );
 
-    case "location": {
-      const asked = anchor.location as { locationId: string; at?: Date | null };
-      const scope: TimelineScopeRef = { type: "location", id: asked.locationId };
+        case "EVENT":
+          return atOccasion(
+            { realWorldEventId: parsed.data, ...(found.at == null ? {} : { at: found.at }) },
+            facts,
+            context,
+            "SEARCH_RESULT",
+          );
 
-      if (asked.at !== undefined && asked.at !== null) {
-        return {
-          instant: withinHistory(asked.at),
-          momentId: undefined,
-          authorUserId: undefined,
-          scope,
-          reason: "LOCATION",
-        };
+        case "USER":
+          return atPerson(parsed.data, view, context, "SEARCH_RESULT");
       }
-
-      // **A place carries no instant**, so with none supplied the jump opens it
-      // where its history does. That read is authorized as the destination,
-      // which is what makes a place with nothing readable in it answer exactly
-      // as one that does not exist.
-      const destination = viewFor(view, scope);
-      const viewer = await context.eligibility.forScope(scope);
-      const head = await context.timeline.page(
-        { ...destination, limit: 1, direction: "older" },
-        viewer,
-        undefined,
-      );
-      const newest = head.rows[0];
-
-      return newest === undefined
-        ? undefined
-        : {
-            instant: new Date(`${newest.occurred_at.replace(" ", "T")}Z`),
-            momentId: undefined,
-            authorUserId: undefined,
-            scope,
-            reason: "LOCATION",
-          };
     }
   }
 }
@@ -377,6 +417,158 @@ async function atMoment(
     scope: view.context,
     reason,
   };
+}
+
+
+/**
+ * Land in an occasion.
+ *
+ * The one destination carrying an instant of its own: an occasion's start is its
+ * own declaration rather than anything derived from the Moments recorded of it.
+ *
+ * @param asked - Which occasion, and optionally when within it.
+ * @param facts - Who is asking.
+ * @param context - Carries the occasion read model.
+ * @param reason - How the destination came to be named.
+ * @returns Where to land, or undefined when no part of it is this reader's to
+ *   know about — an occasion's existence is exactly as private as the history
+ *   establishing it.
+ * @throws {ValidationError} If the instant falls before history is held.
+ */
+async function atOccasion(
+  asked: { readonly realWorldEventId: string; readonly at?: Date | null },
+  facts: { readonly viewerUserId: string; readonly isAdult: boolean },
+  context: GraphQLContext,
+  reason: GraphQLJumpReason,
+): Promise<ResolvedAnchor | undefined> {
+  const occasion = await context.realWorldEvents.findVisible(
+    asked.realWorldEventId,
+    facts.viewerUserId,
+    facts.isAdult,
+  );
+
+  if (occasion === undefined) {
+    return undefined;
+  }
+
+  return {
+    instant: withinHistory(asked.at ?? occasion.occurrence_start),
+    momentId: undefined,
+    authorUserId: undefined,
+    scope: { type: "real_world_event", id: asked.realWorldEventId },
+    reason,
+  };
+}
+
+/**
+ * Land in a place.
+ *
+ * **A place carries no instant**, so with none supplied the jump opens it where
+ * its history does.
+ *
+ * @param asked - Which place, and optionally when.
+ * @param view - What was being read.
+ * @param context - Carries the Timeline read model and this request's
+ *   eligibility.
+ * @param reason - How the destination came to be named.
+ * @returns Where to land, or undefined when nothing in it is readable — which is
+ *   deliberately the same answer as a place that does not exist.
+ * @throws {ValidationError} If the instant falls before history is held.
+ */
+async function atPlace(
+  asked: { readonly locationId: string; readonly at?: Date | null },
+  view: ViewSpecification,
+  context: GraphQLContext,
+  reason: GraphQLJumpReason,
+): Promise<ResolvedAnchor | undefined> {
+  const scope: TimelineScopeRef = { type: "location", id: asked.locationId };
+
+  if (asked.at !== undefined && asked.at !== null) {
+    return {
+      instant: withinHistory(asked.at),
+      momentId: undefined,
+      authorUserId: undefined,
+      scope,
+      reason,
+    };
+  }
+
+  const newest = await newestIn(scope, view, context);
+
+  return newest === undefined
+    ? undefined
+    : { instant: newest, momentId: undefined, authorUserId: undefined, scope, reason };
+}
+
+/**
+ * Land in a person's own history.
+ *
+ * **A person is not an occurrence**, so like a place they carry no instant of
+ * their own and the landing is wherever their history reaches. Deliberately the
+ * same shape as a place rather than a second way of solving one problem: it is
+ * the destination's own eligibility that decides, which is what makes a person
+ * with nothing readable answer exactly as one who does not exist.
+ *
+ * No `at`, unlike a place. A place is somewhere history happened and asking for
+ * a date in it is ordinary; a person is not a stretch of time, and a client
+ * wanting their history at a date is asking for a Timeline rather than a jump.
+ *
+ * @param userId - Whose history.
+ * @param view - What was being read.
+ * @param context - Carries the Timeline read model and this request's
+ *   eligibility.
+ * @param reason - How the destination came to be named.
+ * @returns Where to land, or undefined when none of their history is this
+ *   reader's to see.
+ * @throws {ValidationError} If the destination is somehow not one a Timeline can
+ *   be read for.
+ */
+async function atPerson(
+  userId: string,
+  view: ViewSpecification,
+  context: GraphQLContext,
+  reason: GraphQLJumpReason,
+): Promise<ResolvedAnchor | undefined> {
+  const scope: TimelineScopeRef = { type: "person", id: userId };
+  const newest = await newestIn(scope, view, context);
+
+  return newest === undefined
+    ? undefined
+    : { instant: newest, momentId: undefined, authorUserId: undefined, scope, reason };
+}
+
+/**
+ * When a scope's history most recently reached.
+ *
+ * One row, read newest-first, **authorized as the destination rather than as the
+ * Timeline in hand**. That is the load-bearing part: a scope the reader may not
+ * open, one holding nothing they may see, and one that was never there all come
+ * back the same way, so no instant is produced for any of them.
+ *
+ * @param scope - Whose history.
+ * @param view - What was being read, which supplies the stretch of time and the
+ *   limit but not the lens.
+ * @param context - Carries the Timeline read model and this request's
+ *   eligibility.
+ * @returns The newest readable occurrence, or undefined when there is none.
+ * @throws {ValidationError} If the destination is not one a Timeline can be read
+ *   for.
+ */
+async function newestIn(
+  scope: TimelineScopeRef,
+  view: ViewSpecification,
+  context: GraphQLContext,
+): Promise<Date | undefined> {
+  const destination = viewFor(view, scope);
+  const viewer = await context.eligibility.forScope(scope);
+  const head = await context.timeline.page(
+    { ...destination, limit: 1, direction: "older" },
+    viewer,
+    undefined,
+  );
+  const newest = head.rows[0];
+
+  return newest === undefined ? undefined : new Date(`${newest.occurred_at.replace(" ", "T")}Z`);
 }
 
 export { viewFor };

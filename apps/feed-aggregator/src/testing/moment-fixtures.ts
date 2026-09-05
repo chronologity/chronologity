@@ -315,6 +315,50 @@ export async function moderate(
 }
 
 /**
+ * Put something in the Search index.
+ *
+ * The aggregator reads this table to ask one question — whether a thing is still
+ * findable — and never writes it. `apps/api` owns the indexer; a suite that
+ * wanted to exercise this application's half of the handoff would otherwise have
+ * to run a Kafka consumer to get a row.
+ *
+ * Only the columns the aggregator's question reads are set meaningfully. The
+ * rest take their defaults, which is honest about what this fixture stands for:
+ * it is not a document the API would have built, and nothing here should assert
+ * that it is.
+ *
+ * @param pool - The connection to arrange through.
+ * @param entityType - What kind of thing. One of the four the table's own check
+ *   constraint permits.
+ * @param entityId - Which one.
+ * @param over - Anything this document needs different: the index version it
+ *   belongs to, or the two states that stop it being findable.
+ * @returns Nothing.
+ */
+export async function indexDocument(
+  pool: Pool,
+  entityType: "moment" | "user" | "event" | "location",
+  entityId: string,
+  over: { indexVersion?: string; searchable?: boolean; deleted?: boolean } = {},
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO search_documents (index_version, entity_type, entity_id, title,
+                                   search_vector, searchable, deleted)
+     VALUES ($1, $2, $3, $4, to_tsvector('simple', $4), $5, $6)
+     ON CONFLICT (index_version, entity_type, entity_id) DO UPDATE
+        SET searchable = EXCLUDED.searchable, deleted = EXCLUDED.deleted`,
+    [
+      over.indexVersion ?? "search-v1",
+      entityType,
+      entityId,
+      `a document about ${entityType}`,
+      over.searchable ?? true,
+      over.deleted ?? false,
+    ],
+  );
+}
+
+/**
  * Remove everything these people ever touched.
  *
  * Innermost first. Several of these references are `RESTRICT` rather than
@@ -335,6 +379,17 @@ export async function removePeople(pool: Pool, people: readonly Person[]): Promi
     [userIds],
   );
   const momentIds = moments.rows.map((row) => row.moment_id);
+  const places = await pool.query<{ location_id: string }>(
+    "SELECT location_id FROM locations WHERE recorded_by_user_id = ANY($1)",
+    [userIds],
+  );
+
+  // Derived state with no foreign keys of its own, so it goes first rather than
+  // in constraint order. It must go: a document surviving a suite would leave
+  // the next run's identifiers findable before anything indexed them.
+  await pool.query("DELETE FROM search_documents WHERE entity_id = ANY($1)", [
+    [...momentIds, ...userIds, ...places.rows.map((row) => row.location_id)],
+  ]);
 
   await pool.query("DELETE FROM moderation_states WHERE subject_id = ANY($1)", [momentIds]);
   await pool.query(
@@ -362,6 +417,7 @@ export async function removePeople(pool: Pool, people: readonly Person[]): Promi
   );
   const eventIds = events.rows.map((row) => row.real_world_event_id);
 
+  await pool.query("DELETE FROM search_documents WHERE entity_id = ANY($1)", [eventIds]);
   await pool.query("DELETE FROM real_world_event_aliases WHERE real_world_event_id = ANY($1)", [eventIds]);
   await pool.query("DELETE FROM real_world_event_locations WHERE real_world_event_id = ANY($1)", [eventIds]);
   await pool.query("DELETE FROM moment_real_world_events WHERE real_world_event_id = ANY($1)", [eventIds]);

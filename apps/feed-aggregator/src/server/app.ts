@@ -118,6 +118,7 @@ export async function buildApp({
       store: graphql.store,
       eligibility: graphql.eligibility,
       directory: graphql.directory,
+      searchIndexVersion: config.search.indexVersion,
     });
   }
 

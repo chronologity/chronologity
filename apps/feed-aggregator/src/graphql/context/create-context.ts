@@ -11,6 +11,7 @@ import { ContextNameReadModel } from "../../read-models/postgres/context-name-re
 import { MomentReadModel } from "../../read-models/postgres/moment-read-model.js";
 import { RealWorldEventReadModel } from "../../read-models/postgres/real-world-event-read-model.js";
 import { RepresentativeReadModel } from "../../read-models/postgres/representative-read-model.js";
+import { SearchDocumentReadModel } from "../../read-models/postgres/search-document-read-model.js";
 import type { GraphQLContext } from "./graphql-context.js";
 
 /**
@@ -35,6 +36,9 @@ import type { GraphQLContext } from "./graphql-context.js";
  * @param directory - The read-only PostgreSQL pool, for the reads that cannot
  *   come from the Timeline projection: a Moment's own detail, which the
  *   projection deliberately does not hold.
+ * @param searchIndexVersion - Which Search index to ask whether a found thing
+ *   is still findable. Named by configuration because `apps/api` owns the
+ *   constant, and this application must not carry a second copy of it.
  * @returns A function Mercurius calls once per request, producing the context
  *   every resolver receives.
  */
@@ -42,6 +46,7 @@ export function createContext(
   store: ReadStore,
   eligibility: TimelineEligibilityResolver,
   directory: Pool,
+  searchIndexVersion: string,
 ) {
   const timeline = new TimelineReadModel(store.client, store.projectionVersion);
   const moments = new MomentReadModel(directory);
@@ -49,6 +54,7 @@ export function createContext(
   const contextNames = new ContextNameReadModel(directory);
   const realWorldEvents = new RealWorldEventReadModel(directory);
   const representatives = new RepresentativeReadModel(directory);
+  const searchDocuments = new SearchDocumentReadModel(directory, searchIndexVersion);
 
   return function contextFor(request: FastifyRequest): GraphQLContext {
     const viewer = request.viewer ?? ANONYMOUS;
@@ -76,6 +82,7 @@ export function createContext(
       contextNames,
       realWorldEvents,
       representatives,
+      searchDocuments,
     };
   };
 }
