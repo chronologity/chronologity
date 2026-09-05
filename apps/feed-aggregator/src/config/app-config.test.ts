@@ -167,6 +167,9 @@ describe("loadConfig", () => {
     // answer from an index built under rules nobody is applying any more.
     const issues = issuesFor(withEnv({ SEARCH_INDEX_VERSION: undefined }));
 
-    assert.ok(issues.some((issue) => issue.includes("SEARCH_INDEX_VERSION")), issues.join("; "));
+    assert.ok(
+      issues.some((issue) => issue.includes("SEARCH_INDEX_VERSION")),
+      issues.join("; "),
+    );
   });
 });

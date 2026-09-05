@@ -5472,3 +5472,203 @@ A separate `entryPoint` root query; accepting a Search cursor rather than a refe
 **Nothing bounds how many references one document may open.** A found reference costs one index lookup plus the reads the matching anchor already cost, and ten aliased ones cost ten of each. That is the same unbounded breadth every other anchor has, and it stays 9K's to fix rather than acquiring a special case here.
 
 **A person entry point can be built for somebody who has never been searched for**, because the check is that a findable document exists, not that this reader could have found it — the viewer-dependent half is not consulted. A reader who could never have seen that person in results can still open them by identifier, and will then be refused or admitted by the destination's own eligibility exactly as they would be through any other door. This is the same bound the whole check has: it earns a label, it is not a gate.
+
+---
+
+# ADR-149 — A Service That Could Not Say Where Its Time Went
+
+## Status
+
+Accepted. Implements ADR-046 for the first time anywhere in this repository, closes the deferrals ADR-146 and ADR-147 made to 9K, and creates `src/observability/` files the canonical tree has named since `monorepo.md:1027`.
+
+## Context
+
+Everything this service does, it did invisibly. It wrote structured log lines with a trace identifier and **recorded no duration at all** — the only timings that existed came from a benchmark script run by hand, against a corpus seeded by hand, on one laptop. ADR-147 stated the position plainly at the end of 9I: "The service still records no duration of its own. The harness's counters belong to a script; metrics and tracing are 9K, and **half an observability story is worse than none**."
+
+ADR-046 chose OpenTelemetry as the instrumentation layer and has been Accepted and unimplemented since Phase 4. `apps/api` has none either, so this is the first instrumentation in the system.
+
+## Decision
+
+**OpenTelemetry, traces and metrics, through one SDK.** The API and the SDK only — no vendor library — so the backend stays the Phase 16 decision `observability.md:493` says it is.
+
+**A collector in `docker/compose.yaml`**, pinned like every other image, forwarding nowhere and printing what it receives.
+
+**Spans are opened by hand, at composition stages, never automatically.**
+
+**Six instruments carry the thirteen signals `observability.md:687-699` names.**
+
+**The `operation` dimension is the root field selected, not the GraphQL operation name.**
+
+**No SLO, no latency target.**
+
+## Alternatives Considered
+
+Metrics without traces; a Prometheus scrape endpoint instead of OTLP; automatic instrumentation of Fastify and `pg`; durations in log lines and nothing else; deferring all of it to Phase 15's full-system pass; one instrument per signal in the canonical list; the GraphQL operation name as the `operation` label; a `/metrics` route on this service.
+
+## Rationale
+
+**Automatic instrumentation would have produced the thing the architecture forbids.** `feed.md:1311` says "avoid one opaque resolver span", and wrapping Fastify produces exactly one span per request with the resolvers invisible inside it. The stages that matter — resolving eligibility in PostgreSQL, reading history from ClickHouse, enriching through the loaders — have entirely different reasons to be slow, and a trace that cannot separate them answers "was it slow" rather than "which part". Manual instrumentation is also the *smaller* option: the five-stage tree `feed.md:1303-1308` describes is five call sites, against four more packages and a shape nobody chose.
+
+**A collector locally is what makes this real rather than written.** Instrumentation nobody has watched arrive is instrumentation nobody knows is wrong, and the failure is silent by construction — an exporter pointed at nothing drops spans without complaining. The collector forwards nowhere and uses the `debug` exporter, which is deliberately not a backend: it is the seam that keeps choosing a backend a separate decision.
+
+**The `operation` label is where the cardinality rule is easiest to break.** `observability.md:405-428` forbids `userId`, `momentId` and `requestId` as labels and permits `operation` — and the obvious reading of `operation` for a GraphQL service is the operation name, which is **a string the client wrote**. `query A`, `query B`, `query ${Date.now()}` are three time series and nothing bounds the count. Using the root field instead moves the label's domain from the client to the schema: eight values today, and a ninth only when somebody adds a root field. **A metric dimension a caller controls is a denial of service against your own monitoring.**
+
+**Six instruments rather than thirteen, because most of the thirteen are one measurement seen through a dimension.** Timeline slice latency, temporal zoom latency, historical jump latency and Moment depth latency are one histogram labelled by operation; request count and query duration differ by aggregation rather than by subject. Thirteen separate instruments would be thirteen things to keep consistent and one dashboard nobody can read.
+
+**Absence is the off switch.** Telemetry emits nothing when no endpoint is configured, rather than carrying a separate flag — a boolean beside an endpoint has two ways to say "off" and one way for them to disagree, which surfaces at the first export rather than at startup. Every span and instrument is still created; they simply go nowhere. No call site asks whether telemetry is on.
+
+**Nothing a Viewer supplied reaches a span.** `observability.md:475` forbids raw GraphQL variables, and the reason is sharper than the logging rule it mirrors: **telemetry is a second store, usually with looser access control than the database it describes.** A caption or a coordinate that reaches it has left the system that was guarding it. The suite asserts it by sending a cursor and searching every span for it, and a failed span records the error's **class** rather than its message, because a driver's message can carry a fragment of the statement that failed and a statement carries identifiers.
+
+**No SLO, and there is canonical cover for that.** `observability.md:1144`: "This architecture document defines the categories, not arbitrary numbers." ADR-147 refused the same thing for the same reason during 9I. What this phase ships instead are *structural* budgets — a cost ceiling, row and memory ceilings, timeouts — which are defensible from measurement in a way a latency target is not.
+
+## Consequences
+
+**The trace tells you which stage, which is what nobody could ask before.** A slow Timeline page now separates into eligibility, the ClickHouse read and the enrichment, and 9I's finding — that the horizontal axis costs 577 ms where a page costs 130 ms — becomes a thing production can show rather than a number in a committed artefact.
+
+**Projection lag is now observable, which is what makes stale distinguishable from empty.** `feed.md:1218` requires it and nothing could do it: a Timeline holding nothing and a Timeline whose projector stopped an hour ago are the same empty page. The gauge reports seconds since the newest projected row, and reports **nothing at all** for a version holding nothing — undefined rather than zero, because zero reads as perfectly fresh on every dashboard.
+
+Measured from the newest row rather than from a checkpoint, because the checkpoint belongs to the projector in `apps/api` and this application may not read it. That makes the number an upper bound: a genuinely quiet hour reads as an hour of lag. For a signal whose job is to be noticed, that is the right direction to be wrong in.
+
+**The wire leg is verified, and it took an unreasonable amount of patience to verify it.** Docker's image-pull path stalled for most of an hour on the machine this was written on — `docker pull` produced no output at all for this image and for `hello-world` alike, while container networking was fine and already-pulled images ran normally. It eventually completed. Recorded because the next person to add an image here may hit the same thing and conclude the image is wrong: it is not, and waiting is the fix.
+
+With the collector running, one real request produced exactly the five spans `feed.md:1303-1308` names, and the metrics arrived under the names `observability.md:397` gives them.
+
+**The spans are proven separately from the wire**, and the split is deliberate: the tests collect spans through an in-memory exporter, so they assert the shape without needing a collector, and the collector proves the format without needing assertions. Either can fail without hiding the other.
+
+**`apps/api` still has no instrumentation**, so a trace stops at this service's boundary. That is coherent rather than broken — `feed.md:1246-1252` draws the picture as mobile → aggregator → stores, which is a complete trace for this service — but the cross-service story arrives when the API is instrumented, and the trace identifier already propagates for when it is.
+
+**One dependency's install script is declined rather than approved.** `protobufjs` arrives beneath OpenTelemetry and its postinstall generates a protobuf runtime; the exporters here speak OTLP over HTTP with JSON, so nothing reaches that path. `pnpm-workspace.yaml` records the refusal.
+
+---
+
+# ADR-150 — What One Document May Cost, and How Often One Reader May Ask
+
+## Status
+
+Accepted. Closes the complexity-budget deferrals in ADR-136 and ADR-141, the breadth deferrals in ADR-146, ADR-147 and ADR-148, and the rate-limiting deferral in ADR-136.
+
+## Context
+
+**Nothing bounded a request.** Depth was configured from the start and bounds how far *down* a document reaches; nothing bounded how far *across* it spread. 9I measured the shape: `counting ten discussions in one document` costs fourteen database reads, and the same document written for two hundred Moments costs a thousand — answered without complaint.
+
+ADR-147 said so at the end of 9I: "**What bounds a document is still nothing.** This phase makes repetition cheap; it does not make it permitted. Complexity limits, breadth caps and rate limiting are 9K's." ADR-146 had drawn the line before that — "refusing an over-large document is admission control and belongs to 9K" — and ADR-148 repeated it for search references.
+
+Twice a budget had been declined for the same good reason. ADR-136: "a budget defended against a two-type schema would be a number nobody could defend." ADR-141 deferred it again: "Two queries is not enough shape to weigh." Both were right when written. The schema is now complete and 9I measured it.
+
+## Decision
+
+**The unit is a database statement**, and every weight comes from a measurement rather than a judgement.
+
+**Root fields the loader batches cost once, however many times they are named.** Ten aliased `moment(id:)` selections cost one read. Fields hanging off those Moments cost one *each, per Moment*.
+
+**A GraphQL validation rule**, so a refused document spends nothing beyond authentication.
+
+**`VALIDATION_FAILED`, not a new error code.**
+
+**A rate limit keyed on the reader, falling back to the address**, at `preHandler` so there is a reader to key on.
+
+**Both ceilings are configuration**, and the load harness raises both.
+
+## Alternatives Considered
+
+A flat cap on how many things one document may name; counting fields rather than statements; counting as resolvers execute; charging per alias for batched roots; charging per row returned; a new `TOO_COMPLEX` error code; keying the limiter on the address like `apps/api` does; leaving the limiter at its default `onRequest` hook; persisted queries instead of a cost budget.
+
+## Rationale
+
+**Charging per alias would have been wrong in the direction that matters.** The measured fact is counter-intuitive and is the whole reason the table exists: naming a batched root ten times costs one statement, because 9H's loader answers them together — `batched-statement-count.integration.test.ts` asserts it directly. A cost model that charged per alias would refuse documents that cost nothing, and clients would work around it by splitting into ten requests that genuinely cost ten.
+
+**What is expensive is not the aliases but what hangs off them**, and ADR-146 recorded it deliberately: "Ten Moments asked for their media is ten statements… what bounds that is a limit on how much one document may ask for — 9K's, not a loader's." The budget prices exactly that asymmetry, which is why field counting would be wrong about both halves — a document naming ten Moments and asking each for its caption is one statement, and one naming ten and asking each for its discussion is eleven.
+
+**A validation rule is the only place a refusal is free.** It runs on the parsed document before any resolver, where depth already runs. Counting during execution would refuse a request having already paid for the part it ran, and the integration suite is written to tell those apart: it asserts a refused document costs what a document asking for nothing costs. **Stated relatively rather than against zero**, because authentication reads the Session in a hook before the document has been parsed — comparing the two separates "spent nothing" from "spent nothing except the one thing every request spends".
+
+**The error enum stayed closed.** `errorCodeSchema` is shared with the API's published OpenAPI document, so a `TOO_COMPLEX` value would change the API's contract to describe a condition only GraphQL can produce. The message carries the distinction instead, and carries the numbers — a client that cannot see how far over it went cannot decide what to drop, and neither number says anything about anybody's history.
+
+**Keying the limiter on the reader rather than the address is the one place this diverges from `apps/api`, and the divergence is the point.** Every read here requires an account (ADR-139), so the account is the unit that means something. An address gives a household, an office or a school one budget between them, and gives somebody on a new network a fresh one whenever they like. ADR-119 wrote down why a ceiling is needed at all, and it transfers exactly: "Eligibility decides what each answer may contain; it says nothing about how many answers somebody may collect." Every refusal this service makes is correct and none is free, so a reader walking identifiers asks the system to do unbounded work to tell them nothing.
+
+**That decision was wrong in the code for its first hour, in a way nothing visible would have caught.** `@fastify/rate-limit` defaults to the `onRequest` hook; authentication resolves the Viewer at `preHandler`, which is later. So the limiter keyed **every request by address** — it limited, it answered 429, it set `retry-after`, and it shared one budget across everyone behind a router. The only assertion that could see it is the one the suite is built around: **a second reader over the same connection must still get through.** Moving the limiter to `preHandler` costs one Session lookup for a request about to be refused, which is the price of keying on the reader; the layer that should turn floods away before they reach a process is the edge (`scalability.md:841`), not this.
+
+**Uniform limits, which is a product constraint rather than a simplification.** `feed.md:1342`: "Rate limiting must not be implemented as a hidden ranking mechanism." A limiter giving some readers more room than others would decide whose history loads, which is the thing this service exists not to do.
+
+**Both ceilings are configuration because a harness has to be able to raise them**, and `load.mjs` records what happens otherwise: "the first run of this harness recorded 2,618 requests a second and every one of them was rejected." ADR-147 noted that 9I deliberately shipped no limiter so its own harness had something to configure. This is the phase that needed it, and the load harness raises the cost ceiling to a million.
+
+## Consequences
+
+**The default ceiling of a hundred reads admits every document the product has a use for and refuses the shapes it does not.** A Timeline page costs 1; the fullest reading of one Moment costs 5; a page plus twenty Moments opened in full is a little over a hundred. Two hundred Moments each asking for everything costs 1,001. **It is a ceiling on one document and never a rate** — how often somebody may send a hundred-read document is the limiter's question, and conflating the two produces a bound that is either too tight for one request or too loose for a thousand.
+
+**The weight table is a second place the measured costs are written down**, and it can drift from the statement-count suites that measure them. Every weight is asserted against a shape one of those suites already pins, so a disagreement fails one of the two rather than passing quietly — but nothing enforces that a *new* field gets a weight. A field added with no entry costs zero and is admitted free.
+
+**A refusal is counted, not just made.** `observability.md:699` asks specifically for complexity rejection as a signal, and one instrument carries every admission refusal — depth, cost and rate — because the operational question is one question: is something being turned away, and by which rule.
+
+**Limits are in-process, so each replica counts separately.** ADR-042 permits it and requires a measurement before Redis; one instance makes the ceiling exact and several make it generous, which is the right direction to be wrong in for a bound whose job is to stop abuse rather than to meter usage.
+
+**Fragments are charged where they are spread**, and twice when spread twice, because that is what execution does. Otherwise moving a selection into a fragment would be a way to buy it for nothing — the oldest hole in every cost limiter, and one the suite asserts against directly.
+
+**Persisted queries would have made this unnecessary and are still not built.** An allowlist of documents bounds cost absolutely, and `feed.md:1022` calls them worth considering rather than required. They are a client-contract decision and belong with Phase 10, where mobile's documents become the contract.
+
+---
+
+# ADR-151 — An Outage Is Not an Empty Timeline
+
+## Status
+
+Accepted. Gives every store read a ceiling, closes four of the five failure questions `feed.md:1789-1795` left open, and adds the PostgreSQL statement timeout `data-storage.md:1389` has required since it was written.
+
+## Context
+
+Three things were true of this service and none of them was visible.
+
+**No store read had a ceiling.** The ClickHouse client bounded how long it would *wait* — `request_timeout: 10_000` — which stops a reader hanging and leaves the server working. Nothing bounded what the server would do. `scalability.md:1434` defines a query budget as four dials: rows scanned, duration, memory, page size.
+
+**No statement had a timeout, anywhere in the repository.** Connection acquisition was bounded at five seconds; the statement itself was not, so a query that never returned held one of ten pooled connections until the process ended. Ten of those and this service answers nothing while every health check still passes.
+
+**A store failure reached a client as HTTP 200.** `statusFor()` returned 200 unless the error was one this application had defined, and a driver's error is not — so an outage answered 200 carrying "An unexpected error occurred". The dangerous shape is one step worse: a Timeline whose read failed mid-composition is, to a client, **a Timeline with nothing in it**. Somebody's history appearing to have vanished is not a degraded answer, it is a wrong one.
+
+## Decision
+
+**Three ClickHouse dials as `clickhouse_settings`**: `max_execution_time`, `max_rows_to_read`, `max_memory_usage`. The fourth is bounded already — `viewSpecificationSchema` caps a page at two hundred.
+
+**`statement_timeout` on every pooled PostgreSQL connection.**
+
+**`UnavailableError`, `PROVIDER_UNAVAILABLE`, HTTP 503**, for a store that could not answer.
+
+**An explicit, short classifier** deciding what counts as an outage. Anything unrecognised stays an internal error.
+
+**No fallback to authoritative PostgreSQL when ClickHouse is unavailable**, which `feed.md:1206` forbids and which the suite is written to notice.
+
+## Alternatives Considered
+
+Wrapping every read in a translation layer instead of classifying by shape; treating every unrecognised failure as an outage; a per-request `AbortSignal` threaded to both stores; `statement_timeout` per statement rather than per connection; a circuit breaker; returning partial data with a per-field error; 500 rather than 503; deriving the ceilings from a latency target.
+
+## Rationale
+
+**The ceilings are structural rather than tuned, which is what makes them defensible without an SLO.** `aggregator-read-baseline.json` records the heaviest measured read — the horizontal axis, 577 ms p50 over fifty thousand Moments — so ten seconds is roughly twenty times the worst legitimate read. Fifty million rows is far beyond any corpus measured and far below a full scan of a projection grown for years. These are the values a read has to be *wrong* to reach, not values a busy moment reaches. ADR-147 refused to invent a latency target and this does not either: a ceiling and a target are different objects, and `observability.md:1144` only forbids the second.
+
+**Without them one broad zoom monopolises ClickHouse for every ordinary scroll behind it**, which `scalability.md:265` names directly, and `scalability.md:886` asks for the answer: "reject overly expensive queries rather than allowing uncontrolled ClickHouse scans."
+
+**Classification by shape is unsatisfying and is the honest option.** Neither store throws a type this application controls. The alternative — a try/catch around each of the twenty-odd statements this service issues — would still be classifying by shape, one level down, and would put the decision in twenty places instead of one. **The list is deliberately short, and the default is deliberately the unhelpful one**: an unrecognised failure stays `INTERNAL_ERROR`, because a classifier that called everything an outage would tell a client to retry a genuine defect forever and page nobody. The suite asserts that directly, with an invented error code that must *not* be treated as an outage.
+
+**503 rather than 500, because the thing in front of this process makes different decisions.** A load balancer takes an instance out of rotation for one and pages somebody for the other, and both used to answer 200 — invisible to anything watching status codes.
+
+**The sharpest test in the phase asserts an absence.** There is no fallback to PostgreSQL in the code, so the assertion is what would notice if somebody added one: with ClickHouse broken, a Timeline read must **not** return a page. An outage that produced entries would mean the entries came from somewhere they should not have. That test also covers the failure that motivated the whole decision — an outage presented as an empty Timeline — because both look identical to a client unless the failure is said out loud.
+
+**Warn rather than error when logging an outage.** `observability.md:357` says not to use `error` for expected authorization denials, and the same reasoning reaches further: an outage is already somebody's alert firing, it is not this service's defect, and logging it at error level pages twice for one incident.
+
+**Cancellation is not built, and that is the one open edge.** `feed.md:1071` asks that downstream work stop when a client disconnects. ClickHouse's client accepts an `AbortSignal`, but `pg` offers no mid-statement cancellation to hang a request's own signal on — a query already sent runs to completion or to its timeout. Threading a signal into one store and not the other would leave the harder half wrong while looking finished, so **`statement_timeout` is the bound that stands in**, and this records why rather than leaving the gap unexplained.
+
+## Consequences
+
+**A budget being enforced is reported as an outage, not as a defect**, and that is deliberate: a read cancelled for running too long may well succeed when the server is less busy, which is exactly what `PROVIDER_UNAVAILABLE` means and what `isRetryable` already says about it. PostgreSQL's `57014` and ClickHouse's `TIMEOUT_EXCEEDED`, `TOO_MANY_ROWS_OR_BYTES` and `MEMORY_LIMIT_EXCEEDED` all classify that way.
+
+**The four remaining `feed.md:1789-1795` questions are closed** — ClickHouse unavailable answers a controlled error and never falls back; authorization failures fail closed; correctness data does not degrade; stale is distinguishable from empty (ADR-149). ADR-146 had already closed the fifth: the loaders carry no optional enrichment, because "the Moment loader *is* the access decision".
+
+**Nothing sheds load or degrades under pressure**, and `scalability.md:1563` describes both. Nothing has measured overload, and a shed-priority scheme invented here would be deciding whose history matters — `feed.md:1342`'s prohibition wearing another hat. What exists instead is a bound on each request, which is the version of the same idea that does not require choosing between readers.
+
+**No circuit breaker.** A breaker turns a slow dependency into a fast refusal, which is valuable when a caller has something else to do; this service has nothing else to do, and the ceilings already convert a hung read into a bounded one. Adding one before anything has measured a retry storm is the speculative infrastructure `CLAUDE.md` warns against.
+
+**The first concurrency measurement found the service saturating between two and four readers on this machine**, and that number says more about the machine than the code: four cores running PostgreSQL, Kafka and ClickHouse beside the service, reading a projection rebuilt minutes earlier so every read paid `FINAL` over unmerged parts. Above eight readers, ClickHouse reads exceeded the client's own budget and were refused — **which is the budget working**, and is the first time this service has been observed refusing rather than hanging.
+
+The harness records the shape rather than a verdict, and the shape is the point: throughput rose nearly linearly from one reader to two and collapsed at four. `scripts/load-reads.mjs` measures a weighted mix rather than one endpoint, because `scalability.md:982` warns against tests "that only hammer one endpoint uniformly", and it raises the cost ceiling before running for the reason `load.mjs` records — a refused document is fast and measures nothing.
+
+**Two guards were written after being needed rather than before.** Autocannon's default ten-second client timeout silently *excludes* timed-out requests from its latency figures, so the first run at sixteen readers looked fast because its slowest requests had been dropped; the timeout is now sixty seconds so a slow answer is recorded as slow. And closing a store whose sockets a load run has exhausted throws, which was reporting a successful measurement as a failed one.
+
+**`apps/api` still has no `statement_timeout`.** The same gap `data-storage.md:1389` describes exists on the write side, where the consequences are larger — a held connection there blocks a command rather than a read. Recorded here rather than fixed, because the write side's timeout has to account for migrations and projection rebuilds, and choosing that number is not this phase's to make.
