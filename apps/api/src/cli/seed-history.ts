@@ -11,7 +11,9 @@ import { connectDatabase, createDatabase } from "../lib/database/postgres.js";
 import type { DataSource } from "typeorm";
 
 const usage =
-  "Usage: pnpm seed:history [--seed <int>] [--moments <int>] [--people <int>] [--views <int>] [--purge] [--force]";
+  "Usage: pnpm seed:history [--seed <int>] [--moments <int>] [--people <int>] [--views <int>]\n" +
+  "                         [--places <int>] [--events <int>] [--comments <int>] [--replies-per <int>]\n" +
+  "                         [--media-per <int>] [--participants <int>] [--blocks <int>] [--purge] [--force]";
 
 /**
  * Generate a synthetic history to measure against.
@@ -85,6 +87,25 @@ function random(seed: number): () => number {
 }
 
 /**
+ * Separate draw sequences, one per kind of thing.
+ *
+ * **Not one shared sequence.** The first recorded baseline is reproducible from
+ * `--seed 1 --moments 50000`, and every Moment's occurrence comes from the shared
+ * draw. Taking a draw for anything new — before the Moment loop, inside it, or
+ * after it — shifts every later draw and silently changes a corpus somebody has
+ * already measured against. Giving each kind its own stream keeps the Moments
+ * identical whatever else is asked for, and survives a later kind being added.
+ */
+const STREAM = {
+  places: 0x9e37,
+  events: 0x85eb,
+  comments: 0xc2b2,
+  media: 0x27d4,
+  participation: 0x1656,
+  blocks: 0xd3a2,
+} as const;
+
+/**
  * A UUID derived from a seed and a label rather than from entropy.
  *
  * @param seed - The run's seed.
@@ -125,6 +146,12 @@ interface Seeded {
   readonly people: number;
   readonly moments: number;
   readonly views: number;
+  readonly places: number;
+  readonly events: number;
+  readonly comments: number;
+  readonly media: number;
+  readonly participations: number;
+  readonly blocks: number;
   readonly denseFrom: string;
   readonly denseTo: string;
   readonly sparseFrom: string;
@@ -181,6 +208,296 @@ async function purge(dataSource: DataSource): Promise<number> {
   return rows.length;
 }
 
+/** How much of each attached kind a run wrote. */
+interface Attached {
+  readonly places: number;
+  readonly events: number;
+  readonly comments: number;
+  readonly media: number;
+  readonly participations: number;
+  readonly blocks: number;
+}
+
+/**
+ * Insert rows in batches, building the placeholder list as it goes.
+ *
+ * @param dataSource - Where to write.
+ * @param into - The table and column list, as SQL.
+ * @param columns - How many columns each row carries.
+ * @param rows - The values, one array per row.
+ * @returns How many rows were written.
+ */
+async function insertMany(
+  dataSource: DataSource,
+  into: string,
+  columns: number,
+  rows: readonly unknown[][],
+): Promise<number> {
+  let written = 0;
+
+  for (let start = 0; start < rows.length; start += BATCH) {
+    const chunk = rows.slice(start, start + BATCH);
+    const placeholders = chunk.map(
+      (_row, index) =>
+        `(${Array.from({ length: columns }, (_unused, column) => `$${index * columns + column + 1}`).join(", ")})`,
+    );
+
+    await dataSource.query(
+      `INSERT INTO ${into} VALUES ${placeholders.join(", ")} ON CONFLICT DO NOTHING`,
+      chunk.flat(),
+    );
+    written += chunk.length;
+  }
+
+  return written;
+}
+
+/**
+ * Everything a Moment can have hanging off it.
+ *
+ * Separated from the Moments themselves because a measurement needs them and a
+ * correctness test does not: without places there is no Location Timeline to
+ * read, without comments there is no discussion to page, and without Blocks the
+ * eligibility rule short-circuits on an empty list and measures a path nobody
+ * is on. All of it defaults to nothing, so an existing corpus is unchanged.
+ *
+ * @param dataSource - Where to write.
+ * @param options - The seed and how much of each kind to make.
+ * @param people - The accounts that exist, in creation order.
+ * @returns How many of each kind were written.
+ * @throws {Error} If PostgreSQL refuses a statement.
+ */
+async function attach(
+  dataSource: DataSource,
+  options: {
+    seed: number;
+    moments: number;
+    places: number;
+    events: number;
+    comments: number;
+    repliesPer: number;
+    mediaPer: number;
+    participants: number;
+    blocks: number;
+  },
+  people: readonly string[],
+): Promise<Attached> {
+  const momentId = (index: number): string => identifier(options.seed, `moment:${index}`);
+  const counts = { places: 0, events: 0, comments: 0, media: 0, participations: 0, blocks: 0 };
+
+  if (options.places > 0) {
+    const draw = random(options.seed ^ STREAM.places);
+    const places = Array.from({ length: options.places }, (_unused, index) =>
+      identifier(options.seed, `place:${index}`),
+    );
+
+    counts.places = await insertMany(
+      dataSource,
+      "locations (location_id, recorded_by_user_id, name, latitude, longitude, precision, city, country, country_code, source, created_at)",
+      11,
+      places.map((locationId, index) => [
+        locationId,
+        people[index % people.length],
+        `Seeded place ${index}`,
+        51.5 + index / 1000,
+        -0.12 - index / 1000,
+        "exact",
+        "London",
+        "United Kingdom",
+        "GB",
+        "explicit-selection",
+        new Date(),
+      ]),
+    );
+
+    // Roughly half the Moments happened somewhere, so a Location Timeline is
+    // worth reading and the disclosure gate has both cases to answer.
+    const attached: unknown[][] = [];
+
+    for (let index = 0; index < options.moments; index += 1) {
+      if (draw() < 0.5) {
+        attached.push([momentId(index), places[Math.floor(draw() * places.length)], "user-asserted"]);
+      }
+    }
+
+    await insertMany(dataSource, "moment_locations (moment_id, location_id, origin)", 3, attached);
+  }
+
+  if (options.events > 0) {
+    const draw = random(options.seed ^ STREAM.events);
+    const events = Array.from({ length: options.events }, (_unused, index) =>
+      identifier(options.seed, `event:${index}`),
+    );
+
+    counts.events = await insertMany(
+      dataSource,
+      "real_world_events (real_world_event_id, created_by_user_id, name, occurrence_start, occurrence_end, occurrence_precision)",
+      6,
+      events.map((realWorldEventId, index) => [
+        realWorldEventId,
+        people[index % people.length],
+        `Seeded occasion ${index}`,
+        new Date(Date.UTC(1994, 5, 1 + (index % 28))),
+        new Date(Date.UTC(1994, 5, 1 + (index % 28), 23, 59)),
+        "day",
+      ]),
+    );
+
+    const attached: unknown[][] = [];
+
+    for (let index = 0; index < options.moments; index += 1) {
+      if (draw() < 0.3) {
+        attached.push([momentId(index), events[Math.floor(draw() * events.length)], "user-asserted"]);
+      }
+    }
+
+    await insertMany(
+      dataSource,
+      "moment_real_world_events (moment_id, real_world_event_id, origin)",
+      3,
+      attached,
+    );
+  }
+
+  if (options.comments > 0) {
+    const draw = random(options.seed ^ STREAM.comments);
+    const rows: unknown[][] = [];
+    // The first five hundred land on one Moment, so there is a discussion worth
+    // paging. The rest spread wide, because what a count scans is the table
+    // rather than the discussion.
+    const busy = Math.min(500, options.comments);
+    const spread = Math.max(1, Math.min(options.moments, 5_000));
+
+    for (let index = 0; index < options.comments; index += 1) {
+      const onMoment = index < busy ? 0 : (index - busy) % spread;
+      const commentId = identifier(options.seed, `comment:${index}`);
+      const at = new Date(Date.UTC(2026, 0, 1) + index * 1_000);
+
+      rows.push([
+        commentId,
+        momentId(onMoment),
+        people[Math.floor(draw() * people.length)],
+        null,
+        null,
+        `Seeded comment ${index}`,
+        at,
+      ]);
+
+      for (let reply = 0; reply < options.repliesPer; reply += 1) {
+        rows.push([
+          identifier(options.seed, `reply:${index}:${reply}`),
+          momentId(onMoment),
+          people[Math.floor(draw() * people.length)],
+          commentId,
+          commentId,
+          `Seeded reply ${index}.${reply}`,
+          new Date(at.getTime() + (reply + 1) * 100),
+        ]);
+      }
+    }
+
+    counts.comments = await insertMany(
+      dataSource,
+      "moment_comments (comment_id, moment_id, author_user_id, thread_comment_id, in_reply_to_comment_id, body, created_at)",
+      7,
+      rows,
+    );
+  }
+
+  if (options.mediaPer > 0) {
+    const uploads: unknown[][] = [];
+    const attached: unknown[][] = [];
+    const onMoments = Math.min(options.moments, 1_000);
+    const now = new Date();
+    const expires = new Date(now.getTime() + 86_400_000);
+
+    for (let index = 0; index < onMoments; index += 1) {
+      // One Moment carries far more than the rest, so paging media has
+      // something to page.
+      const many = index === 0 ? options.mediaPer * 10 : options.mediaPer;
+
+      for (let position = 0; position < many; position += 1) {
+        const uploadId = identifier(options.seed, `upload:${index}:${position}`);
+
+        uploads.push([
+          uploadId,
+          people[index % people.length],
+          "image",
+          "image/jpeg",
+          1_024,
+          `seed/${uploadId}`,
+          "ready",
+          now,
+          expires,
+          "image",
+          1_200,
+          900,
+        ]);
+        attached.push([momentId(index), uploadId, position]);
+      }
+    }
+
+    await insertMany(
+      dataSource,
+      "uploads (upload_id, owner_user_id, kind, declared_content_type, declared_byte_size, storage_key, state, registered_at, expires_at, media_kind, width, height)",
+      12,
+      uploads,
+    );
+    counts.media = await insertMany(
+      dataSource,
+      "moment_media (moment_id, upload_id, position)",
+      3,
+      attached,
+    );
+  }
+
+  if (options.participants > 0) {
+    const draw = random(options.seed ^ STREAM.participation);
+    const rows: unknown[][] = [];
+
+    for (let index = 0; index < Math.min(options.moments, options.participants); index += 1) {
+      rows.push([
+        identifier(options.seed, `participation:${index}`),
+        momentId(index),
+        // Anybody but the first account, whose Timeline the measurement reads:
+        // a Moment they took part in is on their Timeline too, and the point of
+        // these is that `ALL` and `AUTHORED` differ.
+        people[1 + Math.floor(draw() * (people.length - 1))],
+        "accepted",
+        // An accepted participation has been resolved, and the table refuses one
+        // that says otherwise.
+        new Date(),
+      ]);
+    }
+
+    counts.participations = await insertMany(
+      dataSource,
+      "moment_participations (participation_id, moment_id, user_id, status, resolved_at)",
+      5,
+      rows,
+    );
+  }
+
+  if (options.blocks > 0) {
+    // All of them touch the first account, because that is whose Timeline a
+    // measurement reads. An empty `blocked` list short-circuits inside the
+    // eligibility rule, so a run without these measures a path nobody is on.
+    const measured = people[0];
+
+    counts.blocks = await insertMany(
+      dataSource,
+      "user_blocks (blocker_user_id, blocked_user_id)",
+      2,
+      Array.from({ length: Math.min(options.blocks, people.length - 1) }, (_unused, index) => [
+        measured,
+        people[index + 1],
+      ]),
+    );
+  }
+
+  return counts;
+}
+
 /**
  * Write a synthetic history.
  *
@@ -196,7 +513,19 @@ async function purge(dataSource: DataSource): Promise<number> {
  */
 async function seed(
   dataSource: DataSource,
-  options: { seed: number; moments: number; people: number; views: number },
+  options: {
+    seed: number;
+    moments: number;
+    people: number;
+    views: number;
+    places: number;
+    events: number;
+    comments: number;
+    repliesPer: number;
+    mediaPer: number;
+    participants: number;
+    blocks: number;
+  },
 ): Promise<Seeded> {
   const next = random(options.seed);
   const people: string[] = [];
@@ -317,10 +646,15 @@ async function seed(
     );
   }
 
+  // After the Moments, and drawing from streams of their own, so asking for any
+  // of it leaves the Moments byte-identical to a run that asked for none.
+  const attached = await attach(dataSource, { ...options, moments: written }, people);
+
   return {
     people: people.length,
     moments: written,
     views: options.views,
+    ...attached,
     denseFrom: denseFrom.toISOString(),
     denseTo: denseTo.toISOString(),
     sparseFrom: sparseFrom.toISOString(),
@@ -342,6 +676,13 @@ async function main(): Promise<void> {
       moments: { type: "string", default: "50000" },
       people: { type: "string", default: "100" },
       views: { type: "string", default: "10" },
+      places: { type: "string", default: "0" },
+      events: { type: "string", default: "0" },
+      comments: { type: "string", default: "0" },
+      "replies-per": { type: "string", default: "0" },
+      "media-per": { type: "string", default: "0" },
+      participants: { type: "string", default: "0" },
+      blocks: { type: "string", default: "0" },
       purge: { type: "boolean", default: false },
       force: { type: "boolean", default: false },
     },
@@ -382,10 +723,19 @@ async function main(): Promise<void> {
       moments: Number(values.moments),
       people: Number(values.people),
       views: Number(values.views),
+      places: Number(values.places),
+      events: Number(values.events),
+      comments: Number(values.comments),
+      repliesPer: Number(values["replies-per"]),
+      mediaPer: Number(values["media-per"]),
+      participants: Number(values.participants),
+      blocks: Number(values.blocks),
     });
 
     process.stdout.write(
       `Seeded ${written.moments} Moments across ${written.people} people and ${written.views} views\n` +
+        `  attached: ${written.places} places, ${written.events} occasions, ${written.comments} comments, ` +
+        `${written.media} media, ${written.participations} participations, ${written.blocks} blocks\n` +
         `  dense:  ${written.denseFrom} .. ${written.denseTo}\n` +
         `  sparse: ${written.sparseFrom} .. ${written.sparseTo}\n` +
         `Now fill the projection: pnpm timeline:rebuild --version bench\n`,
