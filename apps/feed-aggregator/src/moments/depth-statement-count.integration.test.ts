@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import { TimelineEligibilityResolver } from "@chronologity/timeline-derivation";
 import type { FastifyInstance } from "fastify";
 import { SignJWT } from "jose";
-import type { Pool } from "pg";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { SessionRepository } from "../auth/session.repository.js";
 import { createReadStore, type ReadStore } from "../read-models/clickhouse/client.js";
@@ -11,6 +10,7 @@ import { createDirectory, type Directory } from "../read-models/postgres/client.
 import { asQueryable } from "../read-models/postgres/queryable.js";
 import { buildApp } from "../server/app.js";
 import { testAppConfig } from "../testing/app-config.js";
+import { countingPool, countingStore, newCost } from "../testing/counting.js";
 import {
   attachMedia,
   createComment,
@@ -45,7 +45,7 @@ const config = testAppConfig();
 let app: FastifyInstance;
 let store: ReadStore;
 let directory: Directory;
-let statements = 0;
+const cost = newCost();
 const people: Person[] = [];
 
 const EVERYTHING = `query Everything($id: ID!) {
@@ -68,32 +68,6 @@ const EVERYTHING = `query Everything($id: ID!) {
 const JUST_THE_CAPTION = `query JustTheCaption($id: ID!) {
   moment(id: $id) { momentId caption }
 }`;
-
-/**
- * A pool that counts what it is asked.
- *
- * A proxy rather than a subclass, so nothing about the real pool's behaviour
- * changes — every statement still goes to PostgreSQL, and the count is a
- * side-effect of passing through.
- *
- * @param pool - The real connection.
- * @returns The same pool, counting.
- */
-function counting(pool: Pool): Pool {
-  return new Proxy(pool, {
-    get(target, property, receiver): unknown {
-      if (property !== "query") {
-        return Reflect.get(target, property, receiver);
-      }
-
-      return (...args: unknown[]): unknown => {
-        statements += 1;
-
-        return (target.query as (...passed: unknown[]) => unknown).apply(target, args);
-      };
-    },
-  });
-}
 
 /** Somebody new, with a Session they can read through. */
 async function signedInPerson(): Promise<Person & { token: string }> {
@@ -133,8 +107,13 @@ async function costOf(
   query: string,
   momentId: string,
   token: string,
-): Promise<{ cost: number; body: { data: Record<string, unknown> | null; errors?: unknown[] } }> {
-  statements = 0;
+): Promise<{
+  cost: number;
+  clickhouse: number;
+  body: { data: Record<string, unknown> | null; errors?: unknown[] };
+}> {
+  cost.postgres = 0;
+  cost.clickhouse = 0;
 
   const response = await app.inject({
     method: "POST",
@@ -143,7 +122,7 @@ async function costOf(
     payload: { query, variables: { id: momentId } },
   });
 
-  return { cost: statements, body: response.json() };
+  return { cost: cost.postgres, clickhouse: cost.clickhouse, body: response.json() };
 }
 
 /**
@@ -207,12 +186,12 @@ beforeAll(async () => {
     config,
     dependencies: [store, directory],
     graphql: {
-      store,
+      store: countingStore(store, cost),
       // Counted too: the Session lookup is part of what a request costs, and
       // leaving it out would let a regression hide behind it.
-      sessions: new SessionRepository(counting(directory.pool)),
-      eligibility: new TimelineEligibilityResolver(asQueryable(counting(directory.pool))),
-      directory: counting(directory.pool),
+      sessions: new SessionRepository(countingPool(directory.pool, cost)),
+      eligibility: new TimelineEligibilityResolver(asQueryable(countingPool(directory.pool, cost))),
+      directory: countingPool(directory.pool, cost),
     },
   });
 });

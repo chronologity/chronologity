@@ -8,7 +8,6 @@ import {
 } from "@chronologity/timeline-derivation";
 import type { FastifyInstance } from "fastify";
 import { SignJWT } from "jose";
-import type { Pool } from "pg";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { SessionRepository } from "../auth/session.repository.js";
 import type { AppConfig } from "../config/app-config.js";
@@ -17,6 +16,7 @@ import { createDirectory, type Directory } from "../read-models/postgres/client.
 import { asQueryable } from "../read-models/postgres/queryable.js";
 import { buildApp } from "../server/app.js";
 import { testAppConfig } from "../testing/app-config.js";
+import { countingPool, countingStore, newCost } from "../testing/counting.js";
 import { createMoment, createPerson, removePeople, type Person } from "../testing/moment-fixtures.js";
 
 /**
@@ -46,7 +46,7 @@ const config: AppConfig = {
 let app: FastifyInstance;
 let store: ReadStore;
 let directory: Directory;
-let statements = 0;
+const cost = newCost();
 
 const people: Person[] = [];
 
@@ -78,28 +78,6 @@ const COUNTS_ONLY = `query Counts($view: TimelineViewInput!, $scale: TimelineSca
     buckets { startsAt count }
   }
 }`;
-
-/**
- * A pool that counts what it is asked.
- *
- * @param pool - The real connection.
- * @returns The same pool, counting.
- */
-function counting(pool: Pool): Pool {
-  return new Proxy(pool, {
-    get(target, property, receiver): unknown {
-      if (property !== "query") {
-        return Reflect.get(target, property, receiver);
-      }
-
-      return (...args: unknown[]): unknown => {
-        statements += 1;
-
-        return (target.query as (...passed: unknown[]) => unknown).apply(target, args);
-      };
-    },
-  });
-}
 
 /**
  * Somebody new, with a Session they can read through.
@@ -191,9 +169,11 @@ async function ask(
   token: string,
 ): Promise<{
   cost: number;
+  clickhouse: number;
   body: { data: Record<string, never> | null; errors?: { message: string }[] };
 }> {
-  statements = 0;
+  cost.postgres = 0;
+  cost.clickhouse = 0;
 
   const response = await app.inject({
     method: "POST",
@@ -202,7 +182,7 @@ async function ask(
     payload: { query, variables },
   });
 
-  return { cost: statements, body: response.json() };
+  return { cost: cost.postgres, clickhouse: cost.clickhouse, body: response.json() };
 }
 
 /** A view over one person's history across a fixed stretch. */
@@ -238,10 +218,10 @@ beforeAll(async () => {
     config,
     dependencies: [store, directory],
     graphql: {
-      store,
-      sessions: new SessionRepository(counting(directory.pool)),
-      eligibility: new TimelineEligibilityResolver(asQueryable(counting(directory.pool))),
-      directory: counting(directory.pool),
+      store: countingStore(store, cost),
+      sessions: new SessionRepository(countingPool(directory.pool, cost)),
+      eligibility: new TimelineEligibilityResolver(asQueryable(countingPool(directory.pool, cost))),
+      directory: countingPool(directory.pool, cost),
     },
   });
 
@@ -537,6 +517,17 @@ describe("what a distribution costs", () => {
     assert.equal(withThem.body.errors, undefined);
     assert.equal(without.body.errors, undefined);
     assert.equal(withThem.cost - without.cost, 1);
+  });
+
+  it("counts spans in one ClickHouse read, however many come back", async () => {
+    // The store that was never measured. Counting it is what makes "one
+    // statement per store" a fact rather than a description of the code.
+    const view = spanning(owner.userId, "1998-01-01T00:00:00Z", "1998-12-31T00:00:00Z");
+    const coarse = await ask(DISTRIBUTION, { view, scale: "YEAR" }, owner.token);
+    const fine = await ask(DISTRIBUTION, { view, scale: "DAY" }, owner.token);
+
+    assert.equal(coarse.clickhouse, 1);
+    assert.equal(fine.clickhouse, 1);
   });
 
   it("costs the same whether it covers two spans or three hundred and sixty-five", async () => {
