@@ -139,22 +139,43 @@ interface Seeded {
  * @throws {Error} If the database refuses.
  */
 async function purge(dataSource: DataSource): Promise<number> {
-  const rows: { user_id: string }[] = await dataSource.query(
-    `SELECT user_id FROM users WHERE handle LIKE $1`,
+  const rows: { user_id: string; identity_id: string }[] = await dataSource.query(
+    `SELECT user_id, identity_id FROM users WHERE handle LIKE $1`,
     [`${HANDLE_PREFIX}%`],
   );
 
-  for (const { user_id } of rows) {
-    // Order matters only where a foreign key would refuse; the rest cascade.
+  const users = rows.map(({ user_id }) => user_id);
+
+  if (users.length === 0) {
+    return 0;
+  }
+
+  // **Every seeded Moment first, across all of them.** A place one account
+  // recorded can be attached to a Moment another authored, so removing an
+  // account's places while another account's Moments still point at them is
+  // refused. Two passes rather than one loop: everything Moment-shaped goes,
+  // then what those Moments referred to, then the accounts themselves.
+  await dataSource.query(`DELETE FROM moments WHERE author_user_id = ANY($1::uuid[])`, [users]);
+  await dataSource.query(`DELETE FROM locations WHERE recorded_by_user_id = ANY($1::uuid[])`, [users]);
+  await dataSource.query(`DELETE FROM real_world_events WHERE created_by_user_id = ANY($1::uuid[])`, [users]);
+  await dataSource.query(`DELETE FROM uploads WHERE owner_user_id = ANY($1::uuid[])`, [users]);
+  await dataSource.query(
+    `DELETE FROM user_blocks WHERE blocker_user_id = ANY($1::uuid[]) OR blocked_user_id = ANY($1::uuid[])`,
+    [users],
+  );
+
+  for (const { user_id, identity_id } of rows) {
     await dataSource.query(`DELETE FROM saved_views WHERE user_id = $1`, [user_id]);
-    await dataSource.query(`DELETE FROM moments WHERE author_user_id = $1`, [user_id]);
     await dataSource.query(`DELETE FROM user_handles WHERE user_id = $1`, [user_id]);
     await dataSource.query(`DELETE FROM user_restricted_data WHERE user_id = $1`, [user_id]);
     await dataSource.query(`DELETE FROM user_preferences WHERE user_id = $1`, [user_id]);
     await dataSource.query(`DELETE FROM users WHERE user_id = $1`, [user_id]);
-    await dataSource.query(
-      `DELETE FROM identities WHERE identity_id NOT IN (SELECT identity_id FROM users)`,
-    );
+    // **This account's Identity, not every orphaned one.** It previously deleted
+    // any Identity no User pointed at, which reaches whatever else has left one
+    // behind — and fails outright when one of those carries an email address,
+    // because that foreign key refuses. A purge that claims to remove "what a
+    // seed run created, and nothing else" must not decide by orphanhood.
+    await dataSource.query(`DELETE FROM identities WHERE identity_id = $1`, [identity_id]);
   }
 
   return rows.length;
