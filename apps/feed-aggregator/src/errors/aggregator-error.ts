@@ -89,3 +89,41 @@ export class ValidationError extends AggregatorError {
   override readonly code = "VALIDATION_FAILED" as const;
   override readonly status = 400;
 }
+
+/**
+ * A store this service reads from could not answer.
+ *
+ * **The distinction this exists to draw is between "there is nothing here" and
+ * "I could not find out".** Without it a ClickHouse outage reached a client as
+ * HTTP 200 carrying "An unexpected error occurred" — and worse, a read that
+ * failed while composing a page could present as a Timeline with nothing in it.
+ * `feed.md:1204` asks for "a controlled availability error" instead, and
+ * `feed.md:1206` forbids the obvious alternative: falling back to authoritative
+ * PostgreSQL for ordinary Timeline traffic, which would answer a question about
+ * a projection by reading something that is not one.
+ *
+ * `PROVIDER_UNAVAILABLE` rather than a new code, because the contract's enum is
+ * shared with the API's published document and this is the meaning it already
+ * carries. `isRetryable` already treats it as retryable, which is exactly right:
+ * unlike every other refusal this service makes, asking again may work.
+ *
+ * 503 rather than 500, so the thing in front of this process can tell an outage
+ * from a defect. A load balancer takes an instance out of rotation for one and
+ * pages somebody for the other.
+ */
+export class UnavailableError extends AggregatorError {
+  override readonly code = "PROVIDER_UNAVAILABLE" as const;
+  override readonly status = 503;
+
+  /**
+   * Build the error.
+   *
+   * @param message - Shown to a client, so it says which kind of store was
+   *   unreachable and nothing about why. A driver's own message can carry a
+   *   fragment of the statement that failed, and a statement carries
+   *   identifiers.
+   */
+  constructor(message = "History is temporarily unavailable") {
+    super(message);
+  }
+}

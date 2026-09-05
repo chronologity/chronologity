@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { toRecord } from "@chronologity/timeline-derivation";
 import { describe, it } from "vitest";
 import { testAppConfig } from "../testing/app-config.js";
 import { createReadStore } from "./clickhouse/client.js";
+import { TimelineReadModel } from "./clickhouse/timeline-read-model.js";
 import { createDirectory } from "./postgres/client.js";
 
 /**
@@ -96,3 +99,61 @@ describe("what a store read may cost", () => {
   });
 });
 
+describe("telling a stale projection from an empty one", () => {
+  it("reports no lag at all for a version holding nothing", async () => {
+    // Undefined rather than zero, and the distinction is the whole point: zero
+    // reads as perfectly fresh on every dashboard, which is the opposite of what
+    // an empty projection means.
+    const store = createReadStore({ ...config.clickhouse, projectionVersion: `empty-${Date.now()}` });
+    const timeline = new TimelineReadModel(store.client, store.projectionVersion);
+
+    try {
+      assert.equal(await timeline.projectionLag(), undefined);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("reports how far behind a version that holds something is", async () => {
+    const version = `lag-${randomUUID().slice(0, 8)}`;
+    const store = createReadStore({ ...config.clickhouse, projectionVersion: version });
+    const timeline = new TimelineReadModel(store.client, version);
+
+    try {
+      await store.client.insert({
+        table: "timeline_moments",
+        values: [
+          toRecord(
+            {
+              momentId: randomUUID(),
+              authorUserId: randomUUID(),
+              occurredAt: new Date("1998-07-04T19:30:00.000Z"),
+              recordedAt: new Date(),
+              occurrenceEnd: new Date("1998-07-04T19:30:00.000Z"),
+              occurrencePrecision: "instant",
+              occurrenceOffsetMinutes: 0,
+              visibility: "public",
+              moderationState: "allowed",
+              discoverable: true,
+            },
+            new Date(Date.now() - 3_600_000),
+            version,
+          ),
+        ],
+        format: "JSONEachRow",
+      });
+
+      const lag = await timeline.projectionLag();
+
+      assert.ok(lag !== undefined, "a projection holding a row reported no lag");
+      // An hour, give or take the time this test took to run. Asserted as a
+      // range rather than a value, because the alternative is asserting a clock.
+      assert.ok(lag > 3_500 && lag < 3_700, `lag was ${lag}`);
+    } finally {
+      await store.client.command({
+        query: `DELETE FROM timeline_moments WHERE projection_version = '${version}'`,
+      });
+      await store.close();
+    }
+  });
+});

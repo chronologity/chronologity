@@ -263,6 +263,46 @@ export class TimelineReadModel {
   }
 
   /**
+   * How far behind the projection is, in seconds.
+   *
+   * **What makes a stale Timeline distinguishable from an empty one**, which
+   * `feed.md:1218` requires and which nothing could do before: both answer with
+   * no entries, and only this says which. A projector that stopped an hour ago
+   * leaves every Timeline looking quietly correct.
+   *
+   * Measured from the newest row this version holds rather than from a
+   * checkpoint, because the checkpoint belongs to the projector in `apps/api`
+   * and this application may not read it. That makes the number an upper bound —
+   * a genuinely quiet hour reads as an hour of lag — which is the right
+   * direction to be wrong in for a signal whose job is to be noticed.
+   *
+   * @returns Seconds since the newest projected row, or undefined when this
+   *   version holds nothing at all. Undefined rather than zero, because zero
+   *   reads as perfectly fresh and an empty projection is the opposite.
+   * @throws {Error} If ClickHouse refuses the statement.
+   */
+  async projectionLag(): Promise<number | undefined> {
+    const result = await this.client.query({
+      query: `SELECT max(projected_at) AS newest
+                FROM timeline_moments
+               WHERE projection_version = {version: String}`,
+      query_params: { version: this.version },
+      format: "JSONEachRow",
+    });
+    const rows = await result.json<{ newest: string | null }>();
+    const newest = rows[0]?.newest;
+
+    // ClickHouse answers an aggregate over no rows with the zero of the type,
+    // which for `DateTime64` is the epoch. An epoch reading here means empty
+    // rather than fifty-five years behind.
+    if (newest === undefined || newest === null || newest.startsWith("1970-01-01")) {
+      return undefined;
+    }
+
+    return Math.max(0, (Date.now() - new Date(`${newest.replace(" ", "T")}Z`).getTime()) / 1000);
+  }
+
+  /**
    * How much history each span of a stretch holds.
    *
    * **Spans holding nothing are absent rather than zero.** A century of silence

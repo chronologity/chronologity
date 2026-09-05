@@ -3,6 +3,8 @@ import { TimelineEligibilityResolver } from "@chronologity/timeline-derivation";
 import { SessionRepository } from "../auth/session.repository.js";
 import type { AppConfig } from "../config/app-config.js";
 import { createReadStore, type ReadStore } from "../read-models/clickhouse/client.js";
+import { TimelineReadModel } from "../read-models/clickhouse/timeline-read-model.js";
+import { observeProjectionLag } from "../observability/metrics.js";
 import { createDirectory, type Directory } from "../read-models/postgres/client.js";
 import { asQueryable } from "../read-models/postgres/queryable.js";
 import { buildApp } from "./app.js";
@@ -54,6 +56,14 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
   // less obvious reason: without it every request with a credential is refused,
   // which would look to a client like everybody being signed out at once.
   const directory = createDirectory(config.database);
+
+  // Reported rather than read on request: how far behind the projection is is
+  // a level, and a level is answered when somebody collects rather than when
+  // somebody asks. This is what lets an empty Timeline be told apart from a
+  // stopped projector (`feed.md:1218`) — every other signal looks identical.
+  const timeline = new TimelineReadModel(store.client, store.projectionVersion);
+
+  observeProjectionLag(() => timeline.projectionLag());
 
   const app = await buildApp({
     config,

@@ -7,6 +7,7 @@ import type {
 } from "graphql";
 import type { MercuriusContext } from "mercurius";
 import { AggregatorError } from "../errors/aggregator-error.js";
+import { isStoreFailure } from "../errors/store-failure.js";
 
 /**
  * What a client is told when something goes wrong.
@@ -53,6 +54,14 @@ type FailedExecution = ExecutionResult & Required<Pick<ExecutionResult, "errors"
 /** Just enough of a logger to record what the client is not told. */
 interface RequestLog {
   error(details: unknown, message: string): void;
+  /**
+   * For a store that could not answer.
+   *
+   * A level below `error` deliberately: an outage is already somebody's alert,
+   * and logging it at error here would page twice for one incident. It is also
+   * not this service's fault, which is what a level is for.
+   */
+  warn(details: unknown, message: string): void;
 }
 
 /**
@@ -137,6 +146,19 @@ function describe(
     return withCode(error, declared, traceId);
   }
 
+  // A store that could not answer, told apart from a defect. Logged at `warn`
+  // rather than `error`: an outage is somebody else's alert already firing, and
+  // an error level here would page twice for one incident.
+  if (isStoreFailure(original)) {
+    log?.warn({ err: original, traceId }, "A store could not answer");
+
+    return {
+      message: "History is temporarily unavailable",
+      ...(error.path === undefined ? {} : { path: error.path }),
+      extensions: { code: "PROVIDER_UNAVAILABLE" satisfies ErrorCode, traceId },
+    };
+  }
+
   log?.error({ err: original, traceId }, "GraphQL execution failed");
 
   return {
@@ -215,6 +237,13 @@ function statusFor(errors: readonly GraphQLError[]): number {
 
     if (typeof status === "number" && status >= 400 && status <= 499) {
       return status;
+    }
+
+    // An outage answers 503, so the thing in front of this process can tell it
+    // from a defect. Without this a store being unreachable answered 200 with
+    // an error in the body, and nothing watching status codes would ever know.
+    if (isStoreFailure(original)) {
+      return 503;
     }
   }
 
