@@ -531,6 +531,11 @@ await directory.close();
 const report = {
   recordedAt: new Date().toISOString(),
   commit: execSync("git rev-parse --short HEAD").toString().trim(),
+  // Recorded because the commit alone is a claim the working tree can falsify. A
+  // run against uncommitted work names a commit that never produced these
+  // numbers, and nothing in the artefact would say so — which is how a baseline
+  // stops being reproducible without anybody noticing.
+  dirty: execSync("git status --porcelain").toString().trim().length > 0,
   machine: {
     platform: process.platform,
     arch: process.arch,
