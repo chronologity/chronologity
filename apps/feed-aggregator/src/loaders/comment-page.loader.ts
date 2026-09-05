@@ -6,6 +6,7 @@ import type {
   MomentReadModel,
   Slice,
 } from "../read-models/postgres/moment-read-model.js";
+import { recordBatch } from "../observability/metrics.js";
 
 /**
  * Reading several pages of discussion in one statement.
@@ -88,6 +89,9 @@ export function createCommentPageLoader(
         },
         "batched",
       );
+      // The same fact as a metric, which is what `feed.md:1289` asked for. The
+      // log line stays: a log says which request, a metric says how often.
+      recordBatch("comment-page", keys.length);
 
       return pages;
     },

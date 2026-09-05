@@ -6,6 +6,7 @@ import type {
 } from "@chronologity/timeline-derivation";
 import type { Viewer } from "./auth-context.js";
 import { accountFor } from "./require-account.js";
+import { recordStore } from "../observability/metrics.js";
 import { withSpan } from "../observability/tracing.js";
 
 /**
@@ -117,9 +118,16 @@ export class RequestEligibility {
     // arriving at a memo already in flight does not open a second span for work
     // nobody is doing twice. `scope.type` is a bounded dimension; the identifier
     // beside it is not, and is deliberately absent (`observability.md:410`).
+    const began = performance.now();
     const resolving = withSpan(
       "resolve eligibility (PostgreSQL)",
-      () => this.resolver.resolve(userId, scope),
+      async () => {
+        const resolved = await this.resolver.resolve(userId, scope);
+
+        recordStore("postgres", (performance.now() - began) / 1000);
+
+        return resolved;
+      },
       { "chronologity.scope_type": scope.type },
     );
 

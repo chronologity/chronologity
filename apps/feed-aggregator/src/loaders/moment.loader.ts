@@ -6,6 +6,7 @@ import type {
   MomentReadModel,
 } from "../read-models/postgres/moment-read-model.js";
 import { withSpan } from "../observability/tracing.js";
+import { recordBatch } from "../observability/metrics.js";
 
 /**
  * Reading Moments once each, however often a request asks.
@@ -78,7 +79,11 @@ export function createMomentLoader(
             },
             "batched",
           );
-    
+          // The same fact as a metric, which is what `feed.md:1289` asked
+          // for. The log line stays: a log says which request, a metric
+          // says how often.
+          recordBatch("moment", momentIds.length);
+
           return momentIds.map((momentId) => found.get(momentId));
         },
         // How many keys, never which. `feed.md:1289` asks for batch size as a

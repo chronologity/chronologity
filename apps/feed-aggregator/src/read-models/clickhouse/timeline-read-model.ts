@@ -14,6 +14,7 @@ import {
   type TimelinePosition,
   type TimelineReading,
 } from "@chronologity/timeline-derivation";
+import { recordStore } from "../../observability/metrics.js";
 import { withSpan } from "../../observability/tracing.js";
 
 /**
@@ -202,6 +203,7 @@ export class TimelineReadModel {
          AND context_id = {contextId: String}
          AND ${eligible(CONTEXTS)}`;
 
+    const began = performance.now();
     const result = await withSpan(
       "query timeline (ClickHouse)",
       async () =>
@@ -251,6 +253,11 @@ export class TimelineReadModel {
     );
 
     const rows = await result.json<TimelineReading>();
+
+    // After the rows are read rather than after the statement returns: the
+    // client streams, so the time between those two is time this service spent
+    // waiting on ClickHouse and would otherwise attribute to itself.
+    recordStore("clickhouse", (performance.now() - began) / 1000);
 
     return { rows: rows.slice(0, view.limit), more: rows.length > view.limit };
   }

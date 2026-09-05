@@ -15,14 +15,13 @@ import {
 } from "../graphql/resolvers/moment.resolver.js";
 import { contextQueries } from "../graphql/resolvers/context.resolver.js";
 import { queryResolvers } from "../graphql/resolvers/query.resolver.js";
-import {
-  timelineEntryResolver,
-  timelineQueries,
-} from "../graphql/resolvers/timeline.resolver.js";
+import { timelineEntryResolver, timelineQueries } from "../graphql/resolvers/timeline.resolver.js";
 import { cursorScalar } from "../graphql/scalars/cursor.scalar.js";
 import { dateTimeScalar } from "../graphql/scalars/date-time.scalar.js";
 import { authPlugin } from "../plugins/auth.plugin.js";
 import type { ReadStore } from "../read-models/clickhouse/client.js";
+import { recordRefusal } from "../observability/metrics.js";
+import { instrument, type Instrumentable } from "../plugins/metrics.plugin.js";
 
 export interface GraphQLWiring {
   readonly config: GraphQLConfig;
@@ -96,5 +95,10 @@ export async function registerGraphql(app: FastifyInstance, wiring: GraphQLWirin
       graphiql: wiring.config.graphiql,
       errorFormatter: formatErrors,
     });
+
+    // After registration, because the hooks attach to the instance Mercurius
+    // decorates the scope with. Inside the scope, so they see this application's
+    // GraphQL requests and nothing else.
+    instrument(scope.graphql as unknown as Instrumentable);
   });
 }
