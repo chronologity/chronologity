@@ -1,0 +1,262 @@
+{
+  "recordedAt": "2026-09-05T12:27:18.436Z",
+  "commit": "90d44ed",
+  "dirty": false,
+  "machine": {
+    "platform": "darwin",
+    "arch": "x64",
+    "cpus": 4,
+    "memoryGb": 8,
+    "node": "v24.19.0"
+  },
+  "caveat": "Measured on one developer machine against local containers, through the service's own GraphQL surface with app.inject(). Comparable to another run on the same machine; not to anything else. Trust p50, and read every number against databaseRoundTripMs — on this machine much of it is the container network rather than this service.",
+  "projectionVersion": "bench",
+  "seed": "node dist/cli/seed-history.js --seed 1 --moments 50000 --people 100 --views 10 --places 200 --events 50 --comments 200000 --replies-per 1 --media-per 5 --participants 5000 --blocks 20",
+  "graphql": {
+    "maxDepth": 12
+  },
+  "databaseRoundTripMs": {
+    "postgres": 1.41,
+    "clickhouse": 10.75
+  },
+  "corpus": {
+    "moments": 50000,
+    "comments": 400000,
+    "media": 5045,
+    "places": 200,
+    "events": 50,
+    "participations": 5000,
+    "contextRows": {
+      "location": 24845,
+      "person": 54955,
+      "real_world_event": 15037
+    },
+    "parts": {
+      "timeline_moment_contexts": 80,
+      "timeline_moments": 80
+    }
+  },
+  "scenarios": [
+    {
+      "name": "who is asking, and no history at all",
+      "runs": 50,
+      "p50": 4.2,
+      "p95": 7.3,
+      "max": 10.2,
+      "storeMs": 2.3,
+      "statements": {
+        "postgres": 1,
+        "clickhouse": 0
+      },
+      "returned": true
+    },
+    {
+      "name": "opening a Timeline at its head",
+      "runs": 50,
+      "p50": 159.8,
+      "p95": 361.2,
+      "max": 642.9,
+      "storeMs": 162.4,
+      "statements": {
+        "postgres": 4,
+        "clickhouse": 1
+      },
+      "returned": true
+    },
+    {
+      "name": "a page of fifty",
+      "runs": 50,
+      "p50": 129.1,
+      "p95": 261.9,
+      "max": 421.4,
+      "storeMs": 129.8,
+      "statements": {
+        "postgres": 4,
+        "clickhouse": 1
+      },
+      "returned": true
+    },
+    {
+      "name": "a page of two hundred",
+      "runs": 50,
+      "p50": 142.4,
+      "p95": 310.5,
+      "max": 383.1,
+      "storeMs": 135.3,
+      "statements": {
+        "postgres": 4,
+        "clickhouse": 1
+      },
+      "returned": true
+    },
+    {
+      "name": "resuming a page from a cursor",
+      "runs": 50,
+      "p50": 175,
+      "p95": 461.7,
+      "max": 1458.3,
+      "storeMs": 174.5,
+      "statements": {
+        "postgres": 4,
+        "clickhouse": 1
+      },
+      "returned": true
+    },
+    {
+      "name": "a page of a place's history",
+      "runs": 50,
+      "p50": 130.1,
+      "p95": 256.8,
+      "max": 401.6,
+      "storeMs": 127.7,
+      "statements": {
+        "postgres": 4,
+        "clickhouse": 1
+      },
+      "returned": true
+    },
+    {
+      "name": "opening one Moment",
+      "runs": 50,
+      "p50": 14.5,
+      "p95": 22.7,
+      "max": 29.6,
+      "storeMs": 19,
+      "statements": {
+        "postgres": 6,
+        "clickhouse": 0
+      },
+      "returned": true
+    },
+    {
+      "name": "a page of a hundred comments",
+      "runs": 50,
+      "p50": 22.4,
+      "p95": 62,
+      "max": 70.2,
+      "storeMs": 20.4,
+      "statements": {
+        "postgres": 4,
+        "clickhouse": 0
+      },
+      "returned": true
+    },
+    {
+      "name": "replies under 100 comments, in one document",
+      "runs": 50,
+      "p50": 33.6,
+      "p95": 61.3,
+      "max": 126.9,
+      "storeMs": 29.4,
+      "statements": {
+        "postgres": 4,
+        "clickhouse": 0
+      },
+      "returned": true
+    },
+    {
+      "name": "counting one discussion",
+      "runs": 50,
+      "p50": 25.7,
+      "p95": 38.6,
+      "max": 41.5,
+      "storeMs": 24.1,
+      "statements": {
+        "postgres": 5,
+        "clickhouse": 0
+      },
+      "returned": true
+    },
+    {
+      "name": "counting ten discussions in one document",
+      "runs": 50,
+      "p50": 45.8,
+      "p95": 105.7,
+      "max": 152.3,
+      "storeMs": 139.1,
+      "statements": {
+        "postgres": 14,
+        "clickhouse": 0
+      },
+      "returned": true
+    },
+    {
+      "name": "forty years by year",
+      "runs": 50,
+      "p50": 97.7,
+      "p95": 133.1,
+      "max": 145.1,
+      "storeMs": 117.7,
+      "statements": {
+        "postgres": 5,
+        "clickhouse": 1
+      },
+      "returned": true
+    },
+    {
+      "name": "one dense month by day",
+      "runs": 50,
+      "p50": 26.5,
+      "p95": 105.3,
+      "max": 158,
+      "storeMs": 43.6,
+      "statements": {
+        "postgres": 5,
+        "clickhouse": 1
+      },
+      "returned": true
+    },
+    {
+      "name": "jumping to an instant",
+      "runs": 50,
+      "p50": 203.2,
+      "p95": 420.2,
+      "max": 514.6,
+      "storeMs": 345.5,
+      "statements": {
+        "postgres": 5,
+        "clickhouse": 2
+      },
+      "returned": true
+    },
+    {
+      "name": "jumping to a Moment",
+      "runs": 50,
+      "p50": 245.5,
+      "p95": 756.7,
+      "max": 1124.1,
+      "storeMs": 446.9,
+      "statements": {
+        "postgres": 6,
+        "clickhouse": 2
+      },
+      "returned": true
+    },
+    {
+      "name": "the horizontal axis, first page",
+      "runs": 50,
+      "p50": 577,
+      "p95": 2239.6,
+      "max": 2622.4,
+      "storeMs": 577.8,
+      "statements": {
+        "postgres": 8,
+        "clickhouse": 2
+      },
+      "returned": true
+    },
+    {
+      "name": "the horizontal axis, paged onwards",
+      "runs": 50,
+      "p50": 272.9,
+      "p95": 600.2,
+      "max": 1002.2,
+      "storeMs": 279.9,
+      "statements": {
+        "postgres": 7,
+        "clickhouse": 1
+      },
+      "returned": true
+    }
+  ]
+}

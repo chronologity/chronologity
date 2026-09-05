@@ -1017,11 +1017,7 @@ apps/
         │   ├── page-info.ts
         │   ├── connection.ts
         │   └── pagination-limit.ts
-        ├── caching/
-        │   ├── cache.ts
-        │   ├── cache-key.ts
-        │   ├── request-cache.ts
-        │   └── timeline-cache.ts
+        ├── caching/                     # reserved; nothing built (ADR-147)
         ├── auth/
         │   ├── authenticate-request.ts
         │   ├── auth-context.ts
@@ -1067,7 +1063,7 @@ which is the kind of file this document elsewhere says not to create. What was
 added instead is `comment-page.loader.ts`, for the one repetition measurement did
 find. ADR-146 records it.
 - `src/pagination/` owns opaque, deterministic cursor infrastructure. One `Cursor` scalar serves every connection, and `cursors.ts` tags the kinds this application invented — a Timeline position still encodes to exactly what `@chronologity/timeline-derivation` produces, so cursors stay interoperable with the API's.
-- `src/caching/` owns read-side cache abstractions; the existence of this directory does not imply Redis.
+- `src/caching/` is **reserved and empty**, and 9I decided it should stay that way rather than leaving it to be read as unfinished work. The four files this tree once named have nowhere to live: `request-cache.ts` already exists twice under better names (`RequestEligibility`, and `src/loaders/`), `cache.ts` and `cache-key.ts` would key nothing, and `timeline-cache.ts` is the one thing this service cannot hold correctly — every Timeline read is a function of five Viewer facts, so a key that distinguished two answers would *be* the Viewer. **The existence of this directory never implied Redis, and its emptiness is now a decision rather than a gap** (ADR-147).
 - `src/auth/` owns request identity/permission interpretation sufficient for read authorization, not session creation.
 - `src/observability/` owns read-service instrumentation.
 - `src/server/` owns application construction, process startup, and the health surface. Liveness and readiness live here rather than in a feature module, because unlike the API the aggregator has no features that own routes: the only HTTP surfaces are GraphQL and health.
