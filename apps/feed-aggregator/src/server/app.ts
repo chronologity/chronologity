@@ -10,6 +10,7 @@ import type { HealthCheckable } from "./health.js";
 import { healthRoutes } from "./health.routes.js";
 import { registerGraphql } from "./register-graphql.js";
 import { registerPlugins } from "./register-plugins.js";
+import { defaultRateLimits, type RateLimits } from "../plugins/rate-limit.plugin.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -28,6 +29,17 @@ export interface BuildAppOptions {
    * on purpose — which is the only way to prove readiness reports it.
    */
   readonly dependencies: readonly HealthCheckable[];
+  /**
+   * How often one reader may ask.
+   *
+   * Injected rather than read from configuration, so one suite can build an
+   * application with a real ceiling and prove limiting works while every other
+   * suite stays far below it. ADR-119 recorded why that matters: a limit added
+   * without this "broke the test suite before it protected anything, and the
+   * symptom was `results` being undefined rather than anything mentioning
+   * limits."
+   */
+  readonly rateLimits?: RateLimits | undefined;
   /**
    * The GraphQL surface and the stores behind it.
    *
@@ -59,6 +71,7 @@ export interface BuildAppOptions {
 export async function buildApp({
   config,
   dependencies,
+  rateLimits,
   graphql,
 }: BuildAppOptions): Promise<FastifyInstance> {
   // Typed explicitly: Fastify's overloads otherwise resolve a broadly-typed
@@ -119,6 +132,7 @@ export async function buildApp({
       eligibility: graphql.eligibility,
       directory: graphql.directory,
       searchIndexVersion: config.search.indexVersion,
+      rateLimits: rateLimits ?? defaultRateLimits,
     });
   }
 

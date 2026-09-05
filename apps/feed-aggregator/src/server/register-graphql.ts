@@ -21,6 +21,7 @@ import { dateTimeScalar } from "../graphql/scalars/date-time.scalar.js";
 import { authPlugin } from "../plugins/auth.plugin.js";
 import type { ReadStore } from "../read-models/clickhouse/client.js";
 import { costLimit } from "../graphql/cost/cost-rule.js";
+import { rateLimitPlugin, type RateLimits } from "../plugins/rate-limit.plugin.js";
 import { recordRefusal } from "../observability/metrics.js";
 import { instrument, type Instrumentable } from "../plugins/metrics.plugin.js";
 
@@ -35,6 +36,8 @@ export interface GraphQLWiring {
   readonly directory: Pool;
   /** Which Search index answers whether a found thing is still findable. */
   readonly searchIndexVersion: string;
+  /** How often one reader may ask. Injected so a suite can raise it. */
+  readonly rateLimits: RateLimits;
 }
 
 /**
@@ -60,6 +63,12 @@ export interface GraphQLWiring {
 export async function registerGraphql(app: FastifyInstance, wiring: GraphQLWiring): Promise<void> {
   await app.register(async (scope) => {
     await scope.register(authPlugin, { config: wiring.auth, sessions: wiring.sessions });
+
+    // After authentication, so there is a Viewer to key on, and inside this
+    // scope so a readiness probe is never rate limited — an instance that
+    // looked unready because somebody was scrolling too fast would be taken
+    // out of rotation for the opposite of the reason limits exist.
+    await scope.register(rateLimitPlugin, wiring.rateLimits);
 
     await scope.register(mercurius, {
       schema: loadSchema(),
