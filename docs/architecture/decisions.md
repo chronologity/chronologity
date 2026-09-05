@@ -5227,3 +5227,73 @@ Six root fields, one per anchor kind; `@oneOf` for the anchor input; a `nearest`
 **A third implementation of span boundaries now exists**, in TypeScript, because whether a request names a real span start has to be settled before a store is read. It is proved against both engines in the same suite that proves them against each other.
 
 **A bound in `audienceWithin` became visible while testing.** For a person scope it joins only the participated half, so a restricted Moment its own author wrote naming somebody else never reaches that person's audience list for the author's Timeline — readable by identifier, absent from the Timeline. Pre-existing, documented in the function, and left alone; recorded here because a jump is the first surface where the asymmetry is easy to trip over.
+
+---
+
+# ADR-146 — There Was No N+1 to Fix, and What Batching Fixed Instead
+
+## Status
+
+Accepted. Records a deliberate divergence from `monorepo.md:1008-1014`, splits ADR-143's "9H/9I" assignment, and closes the measurement gap both statement-count suites had.
+
+## Context
+
+The roadmap asked for "batching against **real** resolver access patterns", and `CLAUDE.md` forbids optimising anything unmeasured. So the phase began by measuring, and the measurement changed what it was.
+
+**No per-item store read existed anywhere in the service.** No `Promise.all(rows.map(async …))` in `src/`; every list assembled in a single statement; `Moment` unreachable as a list node, with `Query.moment(id:)` the only field returning one. Earlier phases had designed it out: 9D folded comment authors, mentions and reaction counts into lateral joins, 9C and 9F made list nodes thin values, 9E resolved context names in bulk. ADR-142 said so at the time — "DataLoader, which 9H brings and **which the lateral joins made unnecessary here**."
+
+What measurement did find was **client-driven repetition**, which nothing bounded. `queryDepth: 12` is the only control and these are breadth. Ten aliased `moment(id:)` selections cost about fifty-two statements. And replies, read as `Moment.comments(thread:)` rather than through a field on `Comment`, meant a hundred-comment discussion whose replies a client wanted was a hundred selections and a hundred statements — the multiplication moved out of the server and into the document, where nothing capped it.
+
+## Decision
+
+**Two loaders, not the six the canonical tree names.** A Moment loader and a discussion-page loader. `location`, `user-summary`, `reaction-summary` and `moderation-visibility` are **not built**: none has a keyed read left to batch.
+
+**`findVisible` becomes plural and delegates to it.** `findVisibleMany` is the producer; the singular form calls it.
+
+**The discussion batch is two statements, split by which partial index applies** — never by page shape.
+
+**A page with no cursor resumes from a bound `-infinity` sentinel**, never from an `IS NULL OR`.
+
+**Deduplication is justified as consistency**, not as saved statements.
+
+**The Viewer is a constructor parameter, never part of a key**, and the loaders are built inside the closure that receives a request.
+
+**Nothing here outlives a request, so nothing here needs invalidating.**
+
+**No schema change.** `comments(thread:)` stays; no `Comment.replies`.
+
+## Alternatives Considered
+
+Building all six named loaders; building all six and wiring two; Mercurius's own `loaders` option; batching by page shape; a single discussion statement matching the level with `IS NOT DISTINCT FROM`; a `VALUES` list instead of `unnest … WITH ORDINALITY`; an `IS NULL OR` for an absent cursor; putting the Viewer in the loader key; branding `AuthorizedMoment` with a `unique symbol`; adding `Comment.replies`; batching the per-Moment field reads; a metrics registry for batch size.
+
+## Rationale
+
+**Building a loader with nothing to batch is not neutral.** It is a file whose tests can only assert that something nobody calls behaves correctly, and `CLAUDE.md` says plainly: "do not create files merely to populate the canonical tree; create files when they acquire real responsibility." The tree and the measure-first rule sit in the same rule book and conflicted here; the measurement decided it. A `user-summary` loader would batch author lookups that arrive through a `JOIN` inside the comment statement — called once, with one key, forever.
+
+**Moving the producer to the plural form is what keeps ADR-142's guarantee true.** That guarantee was never about arity: it was that exactly one statement text carries `visibleToViewer`, and there is still exactly one. Adding a second statement for the batch would have added a second place for the rule to be wrong. Branding the type so nothing else could construct one was considered and declined — the risk it guards against does not arise once the batch function merely calls the producer, and it would have forced a test factory for a hypothetical.
+
+**The two-statement split is forced by the schema, and getting it wrong would have been worse than not batching.** `moment_comments` carries two *partial* indexes, one `WHERE thread_comment_id IS NULL` and one `WHERE thread_comment_id IS NOT NULL`. A single statement matching the level with a comparison the planner cannot prove implies either predicate loses both indexes, and the batch becomes a sequential scan per key — strictly worse than the hundred statements it replaced. Splitting by page shape instead would produce unboundedly many statements for a client varying `first:` and buys nothing, because a per-key `LIMIT` inside a lateral handles heterogeneous sizes in one statement.
+
+**The sentinel is not a trick, it is the difference between a range scan and a scan.** `(created_at, comment_id) > ($at, $id)` with `-infinity` bound for an absent cursor stays an index range scan; `($at IS NULL OR (…) > (…))` is equally correct and defeats the index, turning the batch into the thing it exists to prevent.
+
+**Deduplication is a correctness property and the saved statement is the side effect.** Two selections of one Moment previously ran the visibility check twice. Between them the author can change who may see it, block the reader or delete it; a moderator can withhold it. The response could then carry one selection answered and the other null — a single document asserting both that its reader may see that Moment and that they may not. **That is not a slow answer, it is a wrong one**, and it is the failure ADR-142 named: "four chances for one of them to disagree mid-response." ADR-142 closed it beneath a Moment, where nothing then reached the same Moment twice. Aliases do. Two consequences follow: the cache must hold the promise rather than the settled value, since two aliases resolve in one execution frame and a map of settled values would start a second statement; and a rejection must be forgotten, because a cached failure is replayed to every later reader in the request. **DataLoader's behaviour here was measured rather than assumed**: a rejected batch clears its keys, but an `Error` returned for a single key *is* cached — so the wrapper that clears on rejection is required, not decorative.
+
+**A key containing the Viewer invites a resolver to supply one**, which means supplying the wrong one, and asserts by its own shape that the loader may serve more than one reader — which is the same as asserting it may outlive a request. A loader whose constructor takes the Viewer has no method that accepts one. Better still, the strongest control was already there and only had to be kept: the read models are built in `createContext`'s outer body and the Viewer exists only inside the closure it returns, so **a loader requiring a Viewer cannot be built at process scope — it does not typecheck.** The mistake does not fail a review; it fails to compile.
+
+**A shared loader leaks in three ways and only the first is caught by any access check**: a Moment its reader may not see; a Moment they *may* see carrying somebody else's private significance mark, joined into the row by the Viewer's own identifier, with nothing anywhere disagreeing; and a decision since revoked, replayed after the fact. The isolation suite asserts all three, and each fails for a different wrong implementation — the third for a loader correctly keyed by reader and incorrectly kept for the life of the process, which is exactly the fix somebody reaches for after the first two.
+
+**Neither loader carries an optional enrichment, so invariant 55 grants no degradation here.** "Optional enrichments may degrade; access correctness may not" — but the Moment loader *is* the access decision, and degrading it to null would be indistinguishable from "you may not see this", a lie told in the one place this service must not tell one. The degradable things are exactly what 9D folded into laterals, and they already degrade in SQL by coming back null.
+
+**Batch bounds come from the page bounds that produce the keys** — a hundred for discussions, because a discussion page is capped at a hundred and the motivating case is exactly one such page; two hundred for Moments, the largest set of identifiers a Timeline page can have handed a client. They **split into consecutive statements rather than refusing**, which keeps this a statement-size decision: refusing an over-large document is admission control and belongs to 9K.
+
+## Consequences
+
+**Per-Moment field reads across aliases are still one statement each**, and are asserted to be so rather than left unstated. Ten Moments asked for their media is ten statements. Nothing has measured that as a problem, and what bounds it is a limit on how much one document may ask for — 9K's, not a loader's. **This phase makes repetition cheap; it does not make it permitted**, and the two are constantly conflated.
+
+**Both statement-count harnesses counted PostgreSQL only**; ClickHouse was entirely unmeasured. A shared `counting` helper now counts both, and its store proxy throws from `insert`, `command` and `exec` — turning "the aggregator cannot mutate ClickHouse", which was a property of a deployment credential no test could exercise, into one the suite proves about the code.
+
+**A Timeline page is now asserted to cost a fixed number of PostgreSQL statements whatever it returns.** That assertion was written before the loaders existed, deliberately: batching makes a per-item PostgreSQL read cheap, and cheap is exactly the condition under which somebody adds one to a Timeline node and nothing complains.
+
+**`feed.md:1276` wants batch size as a metric and this service has no metrics pipeline at all.** Building one to hold a single gauge is the speculative infrastructure `CLAUDE.md` warns against. A structured log line per dispatch carries the field today, so 9K has something to scrape rather than something to instrument.
+
+**ADR-143 assigned "prefetching neighbour Timelines" to "9H/9I" without splitting it. It is 9I's, and 9I is expected to decline it.** Prefetching is not batching: it performs a read nobody asked for, so it is cross-request by definition and cannot be request-scoped; it computes an eligibility answer for a Timeline the reader may never be shown; and nothing has measured it. Splitting it explicitly is the point, because work assigned to two phases lands in neither.

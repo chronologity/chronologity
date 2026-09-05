@@ -619,6 +619,16 @@ authorization/eligibility
 
 Exact loaders should match the canonical feed-aggregator tree.
 
+**As built, none of those six exists.** Each named a keyed read that no longer
+happens per item: Moment depth gathers places, authors, mentions and reaction
+counts through lateral joins inside one statement, and eligibility is memoised
+per request by `RequestEligibility` for correctness rather than for cost. What
+was built instead is a loader for the Moment read and one for a page of
+discussion — the two repetitions measurement actually found, both of them
+caused by a document naming the same kind of thing many times rather than by
+any resolver reading per row. ADR-146 records the reasoning and the
+divergence.
+
 ---
 
 # Request-Scoped Loaders

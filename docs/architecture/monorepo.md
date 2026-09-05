@@ -1008,10 +1008,7 @@ apps/
         ├── loaders/
         │   ├── create-loaders.ts
         │   ├── moment.loader.ts
-        │   ├── location.loader.ts
-        │   ├── reaction-summary.loader.ts
-        │   ├── user-summary.loader.ts
-        │   └── moderation-visibility.loader.ts
+        │   └── comment-page.loader.ts
         ├── pagination/
         │   ├── cursor.ts
         │   ├── encode-cursor.ts
@@ -1058,6 +1055,17 @@ The major directory meanings are:
 - `src/read-models/clickhouse/` is the normal persistence adapter boundary.
 - `src/read-models/postgres/` is the narrow exception `feed.md` permits, and it now answers two kinds of question rather than one: current Viewer eligibility, and **a Moment read in full when somebody opens one** (ADR-142). The second was added deliberately — the Timeline projection holds no caption, media or discussion, so depth has nowhere else to come from — and the bound that matters is unchanged: paging a Timeline must not touch these tables, and if PostgreSQL is ever needed for every Timeline item the read model is wrong rather than this boundary (ADR-137). Its credential should be able to `SELECT` and no more.
 - `src/loaders/` owns request-scoped batching and deduplication.
+
+**Three files rather than the six this tree once named**, and the difference is
+measurement rather than omission. `location`, `reaction-summary`,
+`user-summary` and `moderation-visibility` had nothing left to batch by the time
+loaders arrived: Moment depth folded places, authors, mentions and reaction
+counts into lateral joins inside one statement, and moderation is a clause of the
+visibility rule rather than a lookup. A loader for any of them would have been
+called once, with one key, wrapping a read that was already a single query —
+which is the kind of file this document elsewhere says not to create. What was
+added instead is `comment-page.loader.ts`, for the one repetition measurement did
+find. ADR-146 records it.
 - `src/pagination/` owns opaque, deterministic cursor infrastructure. One `Cursor` scalar serves every connection, and `cursors.ts` tags the kinds this application invented — a Timeline position still encodes to exactly what `@chronologity/timeline-derivation` produces, so cursors stay interoperable with the API's.
 - `src/caching/` owns read-side cache abstractions; the existence of this directory does not imply Redis.
 - `src/auth/` owns request identity/permission interpretation sufficient for read authorization, not session creation.
