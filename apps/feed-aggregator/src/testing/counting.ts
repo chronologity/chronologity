@@ -21,10 +21,19 @@ import type { ReadStore } from "../read-models/clickhouse/client.js";
  * measuring the same thing.
  */
 
-/** How many statements a request caused, per store. */
+/**
+ * How many statements a request caused, per store, and how long they took.
+ *
+ * The milliseconds are what separate *the query is slow* from *this service is
+ * slow*: a read whose wall time is almost all store time is fixed by a better
+ * statement, an index or a data layout, and one whose wall time is mostly
+ * elsewhere is not.
+ */
 export interface Cost {
   postgres: number;
   clickhouse: number;
+  postgresMs: number;
+  clickhouseMs: number;
 }
 
 /**
@@ -33,7 +42,7 @@ export interface Cost {
  * @returns Both counters at zero.
  */
 export function newCost(): Cost {
-  return { postgres: 0, clickhouse: 0 };
+  return { postgres: 0, clickhouse: 0, postgresMs: 0, clickhouseMs: 0 };
 }
 
 /**
@@ -55,10 +64,19 @@ export function countingPool(pool: Pool, cost: Cost): Pool {
         return Reflect.get(target, property, receiver);
       }
 
-      return (...args: unknown[]): unknown => {
+      return async (...args: unknown[]): Promise<unknown> => {
+        const began = performance.now();
+
         cost.postgres += 1;
 
-        return (target.query as (...passed: unknown[]) => unknown).apply(target, args);
+        try {
+          return await (target.query as (...passed: unknown[]) => Promise<unknown>).apply(
+            target,
+            args,
+          );
+        } finally {
+          cost.postgresMs += performance.now() - began;
+        }
       };
     },
   });
@@ -82,10 +100,19 @@ export function countingStore(store: ReadStore, cost: Cost): ReadStore {
   const client = new Proxy(store.client, {
     get(target, property, receiver): unknown {
       if (property === "query") {
-        return (...args: unknown[]): unknown => {
+        return async (...args: unknown[]): Promise<unknown> => {
+          const began = performance.now();
+
           cost.clickhouse += 1;
 
-          return (target.query as (...passed: unknown[]) => unknown).apply(target, args);
+          try {
+            return await (target.query as (...passed: unknown[]) => Promise<unknown>).apply(
+              target,
+              args,
+            );
+          } finally {
+            cost.clickhouseMs += performance.now() - began;
+          }
         };
       }
 
