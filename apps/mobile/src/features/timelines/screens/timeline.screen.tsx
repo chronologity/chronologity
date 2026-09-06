@@ -7,6 +7,7 @@ import {
   type TimelineEntry,
   type TimelineSlice,
 } from "../../../lib/graphql/queries/get-timeline-slice.query";
+import { GET_VIEWER, type ViewerResult } from "../../../lib/graphql/queries/get-viewer.query";
 
 /**
  * One page of somebody's own history.
@@ -14,6 +15,13 @@ import {
  * The bootstrap's proof that everything downstream of a token actually works:
  * the Session is live, the aggregator accepts it, and real Moments come back in
  * the order they happened.
+ *
+ * **Two queries, and the first one is not a formality.** Whose Timeline this is
+ * comes from the aggregator, because the client does not know: a Session
+ * identifier names one sign-in on one device, not the account behind it. Asking
+ * also distinguishes somebody signed in without an account yet — `userId` null,
+ * which is `ONBOARDING_REQUIRED` as the read surface expresses it — from
+ * somebody whose history is genuinely empty.
  *
  * **Chronological, and only chronological.** The order is the order the server
  * returned, and nothing here sorts, scores, or promotes anything — the Timeline
@@ -35,8 +43,16 @@ import {
  * @returns The element.
  */
 export function TimelineScreen(): React.JSX.Element {
-  const { graphql, session } = useBackend();
-  const userId = session.current()?.sessionId;
+  const { graphql } = useBackend();
+
+  // Asked rather than assumed. A Session identifier names one sign-in, not a
+  // person, and a PERSON scope needs the account.
+  const viewer = useQuery({
+    queryKey: ["viewer"],
+    queryFn: async ({ signal }) => await graphql.query<ViewerResult>(GET_VIEWER, {}, signal),
+  });
+
+  const userId = viewer.data?.viewer.userId ?? undefined;
 
   const timeline = useQuery({
     queryKey: ["timeline", userId],
@@ -52,7 +68,21 @@ export function TimelineScreen(): React.JSX.Element {
     enabled: userId !== undefined,
   });
 
-  if (timeline.isPending) {
+  if (viewer.isError) {
+    return <ErrorState error={viewer.error} />;
+  }
+
+  // Signed in, with no account yet. Not a failure, and emphatically not a
+  // reason to send somebody back to signing in (ADR-139).
+  if (viewer.isSuccess && userId === undefined) {
+    return (
+      <View style={styles.centred} testID="timeline-onboarding">
+        <Text style={styles.empty}>There is one more step before your Timeline is ready.</Text>
+      </View>
+    );
+  }
+
+  if (viewer.isPending || timeline.isPending) {
     return (
       <View style={styles.centred} testID="timeline-loading">
         <ActivityIndicator />

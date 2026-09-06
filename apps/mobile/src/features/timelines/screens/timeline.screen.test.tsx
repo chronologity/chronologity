@@ -31,6 +31,9 @@ const withheld = {
   occurrencePrecision: "DAY",
 };
 
+/** The account the aggregator says is reading. Not the Session identifier. */
+const USER_ID = "3f2b7c58-9a41-4d2e-8f6a-1c0b5e7d9a24";
+
 /** Fixed insets. Without them SafeAreaProvider renders nothing off-device. */
 const METRICS = {
   frame: { x: 0, y: 0, width: 390, height: 844 },
@@ -44,6 +47,26 @@ const page = (nodes: unknown[]) => ({
     scope: { type: "PERSON", id: credentials.sessionId },
   },
 });
+
+/**
+ * A reader that answers the viewer query, then hands the rest to `then`.
+ *
+ * The screen asks who is signed in before it asks for their history, because a
+ * Session identifier is not a person.
+ *
+ * @param userId - What the aggregator says the reader's account is.
+ * @param then - What to answer the Timeline query with.
+ * @returns A query function.
+ */
+function reader(userId: string | null, then: GraphqlClient["query"]): GraphqlClient["query"] {
+  return (async (document: string, variables?: Record<string, unknown>, signal?: AbortSignal) => {
+    if (document.includes("GetViewer")) {
+      return { viewer: { authenticated: true, userId } };
+    }
+
+    return await then(document, variables, signal);
+  }) as GraphqlClient["query"];
+}
 
 /**
  * A backend whose GraphQL reader answers with whatever the test supplies.
@@ -96,7 +119,7 @@ function wrapper(backend: Backend) {
 
 describe("showing a page of somebody's own history", () => {
   it("renders the Moments the aggregator returned", async () => {
-    const backend = backendWith(async () => page([readable]) as never);
+    const backend = backendWith(reader(USER_ID, async () => page([readable]) as never));
 
     const { getByTestId } = await render(<TimelineScreen />, { wrapper: wrapper(backend) });
 
@@ -109,7 +132,7 @@ describe("showing a page of somebody's own history", () => {
     // ADR-140 made an unreadable Moment its own type precisely so a client
     // cannot confuse the two. Showing it as readable would be a leak; showing a
     // gap would misstate the shape of the period.
-    const backend = backendWith(async () => page([withheld]) as never);
+    const backend = backendWith(reader(USER_ID, async () => page([withheld]) as never));
 
     const { getByTestId, queryByTestId } = await render(<TimelineScreen />, {
       wrapper: wrapper(backend),
@@ -124,7 +147,7 @@ describe("showing a page of somebody's own history", () => {
   it("keeps a withheld Moment in its chronological place", async () => {
     // It is still part of the shape of that period, which is why it has an
     // occurrence at all.
-    const backend = backendWith(async () => page([readable, withheld]) as never);
+    const backend = backendWith(reader(USER_ID, async () => page([readable, withheld]) as never));
 
     const { getAllByTestId, getByTestId } = await render(<TimelineScreen />, {
       wrapper: wrapper(backend),
@@ -137,7 +160,7 @@ describe("showing a page of somebody's own history", () => {
   });
 
   it("says a Timeline is empty only when it is", async () => {
-    const backend = backendWith(async () => page([]) as never);
+    const backend = backendWith(reader(USER_ID, async () => page([]) as never));
 
     const { getByTestId } = await render(<TimelineScreen />, { wrapper: wrapper(backend) });
 
@@ -146,11 +169,49 @@ describe("showing a page of somebody's own history", () => {
     });
   });
 
+  it("scopes the Timeline to the account, never to the Session", async () => {
+    // A Session identifier names one sign-in on one device. Scoping a PERSON
+    // Timeline to it asks for the history of somebody who does not exist.
+    let scoped: unknown;
+    const backend = backendWith(
+      reader(USER_ID, async (_document, variables) => {
+        scoped = (variables?.view as { scope?: { id?: string } })?.scope?.id;
+
+        return page([]) as never;
+      }),
+    );
+
+    const { getByTestId } = await render(<TimelineScreen />, { wrapper: wrapper(backend) });
+
+    await waitFor(() => {
+      expect(getByTestId("timeline-empty")).toBeTruthy();
+    });
+    expect(scoped).toBe(USER_ID);
+    expect(scoped).not.toBe(credentials.sessionId);
+  });
+
+  it("sends somebody without an account to onboarding, not back to signing in", async () => {
+    // `userId` null means signed in and not yet onboarded (ADR-139). The
+    // credentials are good; there is simply no history to scope to.
+    const backend = backendWith(reader(null, async () => page([]) as never));
+
+    const { getByTestId, queryByTestId } = await render(<TimelineScreen />, {
+      wrapper: wrapper(backend),
+    });
+
+    await waitFor(() => {
+      expect(getByTestId("timeline-onboarding")).toBeTruthy();
+    });
+    expect(queryByTestId("timeline-empty")).toBeNull();
+  });
+
   it("shows an outage as an outage rather than as an empty Timeline", async () => {
     // The distinction ADR-151 exists for. This is the rendering half of it.
-    const backend = backendWith(async () => {
-      throw new Error("the service is unwell");
-    });
+    const backend = backendWith(
+      reader(USER_ID, async () => {
+        throw new Error("the service is unwell");
+      }),
+    );
 
     const { getByTestId, queryByTestId } = await render(<TimelineScreen />, {
       wrapper: wrapper(backend),
