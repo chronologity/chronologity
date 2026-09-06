@@ -1,8 +1,13 @@
 import { operations, type ApiClient } from "@chronologity/api-client";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { View } from "react-native";
+import { spacing } from "../../../app/theme/spacing";
 import { ErrorState } from "../../../components/feedback/error-state";
+import { Screen } from "../../../components/layout/screen";
+import { AppButton } from "../../../components/primitives/app-button";
+import { AppInput } from "../../../components/primitives/app-input";
+import { AppText } from "../../../components/primitives/app-text";
 import { useSession } from "../../../app/providers";
 
 /**
@@ -23,6 +28,13 @@ import { useSession } from "../../../app/providers";
  *
  * Adopting the credentials is what persists them: `createBackend` writes the
  * refresh half through on every change.
+ *
+ * **The fields carry visible labels now, and that is a fix rather than a
+ * polish.** They were named by `placeholder` alone, which vanishes the moment
+ * somebody types — `accessibility.md:774`: "Placeholder text must not substitute
+ * for a persistent accessible label." `AppInput` has no way to be built without
+ * one. The `textContentType` and `autoComplete` hints are what let a password
+ * manager fill this in, which `accessibility.md:1065` asks for by name.
  */
 
 /** What the screen needs to do its one job. */
@@ -52,69 +64,45 @@ export function SignInScreen({ client }: SignInScreenProps): React.JSX.Element {
   });
 
   return (
-    <View style={styles.container} testID="sign-in-screen">
-      <Text style={styles.title}>Chronologity</Text>
+    <Screen centred testID="sign-in-screen">
+      <View style={{ gap: spacing.lg, width: "100%" }}>
+        <AppText style={{ textAlign: "center" }} variant="display">
+          Chronologity
+        </AppText>
 
-      <TextInput
-        accessibilityLabel="Email"
-        autoCapitalize="none"
-        autoComplete="email"
-        keyboardType="email-address"
-        onChangeText={setEmail}
-        placeholder="Email"
-        style={styles.field}
-        testID="sign-in-email"
-        value={email}
-      />
+        <AppInput
+          autoCapitalize="none"
+          autoComplete="email"
+          keyboardType="email-address"
+          label="Email"
+          onChangeText={setEmail}
+          testID="sign-in-email"
+          textContentType="emailAddress"
+          value={email}
+        />
 
-      <TextInput
-        accessibilityLabel="Password"
-        autoCapitalize="none"
-        onChangeText={setPassword}
-        placeholder="Password"
-        secureTextEntry
-        style={styles.field}
-        testID="sign-in-password"
-        value={password}
-      />
+        <AppInput
+          autoCapitalize="none"
+          autoComplete="current-password"
+          label="Password"
+          onChangeText={setPassword}
+          secureTextEntry
+          testID="sign-in-password"
+          textContentType="password"
+          value={password}
+        />
 
-      <Pressable
-        accessibilityRole="button"
-        disabled={signIn.isPending}
-        onPress={() => {
-          signIn.mutate();
-        }}
-        style={styles.button}
-        testID="sign-in-submit"
-      >
-        {signIn.isPending ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonLabel}>Sign in</Text>
-        )}
-      </Pressable>
+        <AppButton
+          busy={signIn.isPending}
+          label="Sign in"
+          onPress={() => {
+            signIn.mutate();
+          }}
+          testID="sign-in-submit"
+        />
 
-      {signIn.isError ? <ErrorState error={signIn.error} /> : null}
-    </View>
+        {signIn.isError ? <ErrorState error={signIn.error} /> : null}
+      </View>
+    </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  button: {
-    alignItems: "center",
-    backgroundColor: "#1a1a1a",
-    borderRadius: 8,
-    paddingVertical: 14,
-  },
-  buttonLabel: { color: "#fff", fontWeight: "600" },
-  container: { flex: 1, justifyContent: "center", padding: 32 },
-  field: {
-    borderColor: "#ddd",
-    borderRadius: 8,
-    borderWidth: 1,
-    marginBottom: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  title: { fontSize: 28, fontWeight: "700", marginBottom: 32, textAlign: "center" },
-});

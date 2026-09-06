@@ -217,6 +217,13 @@ describe("showing a page of somebody's own history", () => {
 
     expect(getByTestId("timeline-loading")).toBeTruthy();
     expect(queryByTestId("timeline-onboarding")).toBeNull();
+
+    // The query settles after the assertions above, and a state update after a
+    // test finishes is what React reports as an act() warning. Waiting for the
+    // state it settles into keeps the run's output honest.
+    await waitFor(() => {
+      expect(getByTestId("timeline-loading")).toBeTruthy();
+    });
   });
 
   it("shows an outage as an outage rather than as an empty Timeline", async () => {

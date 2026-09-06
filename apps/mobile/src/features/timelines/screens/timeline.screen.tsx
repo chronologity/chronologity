@@ -1,6 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import { ActivityIndicator, FlatList, StyleSheet, Text, View } from "react-native";
+import { FlatList, View } from "react-native";
+import { spacing } from "../../../app/theme/spacing";
+import { EmptyState } from "../../../components/feedback/empty-state";
 import { ErrorState } from "../../../components/feedback/error-state";
+import { Screen } from "../../../components/layout/screen";
+import { AppLoader } from "../../../components/primitives/app-loader";
+import { AppText } from "../../../components/primitives/app-text";
+import { useTheme } from "../../../hooks/use-theme";
+import { formatOccurrence, type Precision } from "../../../lib/utils/format-date";
 import { useBackend } from "../../../app/providers";
 import {
   GET_TIMELINE_SLICE,
@@ -83,9 +90,12 @@ export function TimelineScreen(): React.JSX.Element {
   // reason to send somebody back to signing in (ADR-139).
   if (answered && userId === undefined) {
     return (
-      <View style={styles.centred} testID="timeline-onboarding">
-        <Text style={styles.empty}>There is one more step before your Timeline is ready.</Text>
-      </View>
+      <Screen centred testID="timeline-onboarding">
+        <EmptyState
+          action="Finish setting up your account and your history will appear here."
+          title="One more step"
+        />
+      </Screen>
     );
   }
 
@@ -94,9 +104,9 @@ export function TimelineScreen(): React.JSX.Element {
   // either is better than deciding on a shape that is not there.
   if (viewer.isPending || !answered || timeline.isPending) {
     return (
-      <View style={styles.centred} testID="timeline-loading">
-        <ActivityIndicator />
-      </View>
+      <Screen centred testID="timeline-loading">
+        <AppLoader label="Loading your Timeline" />
+      </Screen>
     );
   }
 
@@ -110,20 +120,22 @@ export function TimelineScreen(): React.JSX.Element {
 
   if (edges.length === 0) {
     return (
-      <View style={styles.centred} testID="timeline-empty">
-        <Text style={styles.empty}>Nothing here yet. Your history starts with a Moment.</Text>
-      </View>
+      <Screen centred testID="timeline-empty">
+        <EmptyState action="Your history starts with a Moment." title="Nothing here yet" />
+      </Screen>
     );
   }
 
   return (
-    <FlatList
-      contentContainerStyle={styles.list}
-      data={edges}
-      keyExtractor={(edge) => edge.cursor}
-      renderItem={({ item }) => <Entry entry={item.node} />}
-      testID="timeline"
-    />
+    <Screen padded={false}>
+      <FlatList
+        contentContainerStyle={{ padding: spacing.lg }}
+        data={edges}
+        keyExtractor={(edge) => edge.cursor}
+        renderItem={({ item }) => <Entry entry={item.node} />}
+        testID="timeline"
+      />
+    </Screen>
   );
 }
 
@@ -135,31 +147,39 @@ export function TimelineScreen(): React.JSX.Element {
  * @returns The element.
  */
 function Entry({ entry }: { entry: TimelineEntry }): React.JSX.Element {
-  const when = new Date(entry.occurredAt).toDateString();
+  const { theme } = useTheme();
+
+  // At the precision it is actually known. A Moment recorded as "summer 1998"
+  // must not be rendered as a day nobody knows (moments.md:259).
+  const when = formatOccurrence(entry.occurredAt, entry.occurrencePrecision as Precision);
+
+  const row = {
+    borderBottomColor: theme.colors.border,
+    borderBottomWidth: 1,
+    gap: spacing.xs,
+    paddingVertical: spacing.md,
+  };
 
   if (entry.__typename === "WithheldTimelineEntry") {
     return (
-      <View style={styles.row} testID="timeline-entry-withheld">
-        <Text style={styles.when}>{when}</Text>
-        <Text style={styles.withheld}>Not yours to read</Text>
+      <View style={row} testID="timeline-entry-withheld">
+        <AppText variant="body">{when}</AppText>
+        {/*
+          The words carry this, not the colour. Colour "must not be the only way
+          meaning is communicated" (accessibility.md:828), and this is the row
+          whose meaning is somebody else's privacy — it was also the least
+          legible thing on the screen at 2.8:1 before the palette existed.
+        */}
+        <AppText color="textMuted" variant="caption">
+          Not yours to read
+        </AppText>
       </View>
     );
   }
 
   return (
-    <View style={styles.row} testID="timeline-entry">
-      <Text style={styles.when}>{when}</Text>
-      <Text style={styles.detail}>{entry.occurrencePrecision.toLowerCase()}</Text>
+    <View style={row} testID="timeline-entry">
+      <AppText variant="body">{when}</AppText>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  centred: { alignItems: "center", flex: 1, justifyContent: "center", padding: 32 },
-  detail: { color: "#666", fontSize: 13 },
-  empty: { color: "#444", textAlign: "center" },
-  list: { padding: 16 },
-  row: { borderBottomColor: "#eee", borderBottomWidth: 1, paddingVertical: 14 },
-  when: { fontSize: 16, fontWeight: "600" },
-  withheld: { color: "#999", fontSize: 13, fontStyle: "italic" },
-});

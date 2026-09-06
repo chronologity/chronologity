@@ -54,8 +54,11 @@ function usePlatformReducedMotion(): boolean {
     let live = true;
 
     void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
+      // Only when it differs. The first read almost always agrees with the
+      // default, and setting state to the value it already holds re-renders
+      // every screen on mount for nothing.
       if (live) {
-        setReduced(enabled);
+        setReduced((current) => (current === enabled ? current : enabled));
       }
     });
 
