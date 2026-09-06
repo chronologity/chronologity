@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "Chronologity React Native",
+  "_comment": "React Native runtime preset. Added in Phase 11, when apps/mobile became its first real consumer. Extends the base rather than the Node preset: `module: nodenext` and `types: [\"node\"]` describe a runtime this is not, and Metro resolves like a bundler.",
+  "extends": "./base.json",
+  "compilerOptions": {
+    "target": "ESNext",
+    "lib": ["ESNext", "DOM"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "allowJs": true,
+    "types": []
+  }
+}

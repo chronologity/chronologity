@@ -6,10 +6,12 @@
   "license": "UNLICENSED",
   "files": [
     "base.json",
-    "node.json"
+    "node.json",
+    "react-native.json"
   ],
   "exports": {
     "./base.json": "./base.json",
-    "./node.json": "./node.json"
+    "./node.json": "./node.json",
+    "./react-native.json": "./react-native.json"
   }
 }

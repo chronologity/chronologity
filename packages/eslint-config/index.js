@@ -1,5 +1,7 @@
 import js from "@eslint/js";
 import jsdoc from "eslint-plugin-jsdoc";
+import react from "eslint-plugin-react";
+import reactHooks from "eslint-plugin-react-hooks";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
@@ -139,6 +141,45 @@ export const typescript = {
         ignoreRestSiblings: true,
       },
     ],
+  },
+};
+
+/**
+ * React Native sources.
+ *
+ * Applied on top of the baseline, to the one application that renders. It is a
+ * separate export rather than part of `base` because the rules here are about a
+ * runtime rather than about a language: a hook called conditionally is a defect
+ * in React and meaningless anywhere else, and `apps/api` should not be asked to
+ * carry a rule it cannot violate.
+ *
+ * `react/react-in-jsx-scope` is off because the modern transform makes the
+ * import unnecessary, and `prop-types` because TypeScript already states what a
+ * component takes — the same reason `jsdoc/no-types` is an error here.
+ */
+export const reactNative = {
+  files: ["**/*.{ts,tsx}"],
+  plugins: { react, "react-hooks": reactHooks },
+  languageOptions: {
+    parserOptions: {
+      ecmaFeatures: { jsx: true },
+    },
+    globals: {
+      ...globals.browser,
+      __DEV__: "readonly",
+    },
+  },
+  settings: { react: { version: "detect" } },
+  rules: {
+    ...react.configs.flat.recommended.rules,
+    // The two that catch real defects. A hook behind a condition changes the
+    // order hooks are called in, which React relies on absolutely.
+    "react-hooks/rules-of-hooks": "error",
+    // A warning rather than an error: a missing dependency is usually a bug and
+    // occasionally deliberate, and an error would push people to silence it.
+    "react-hooks/exhaustive-deps": "warn",
+    "react/react-in-jsx-scope": "off",
+    "react/prop-types": "off",
   },
 };
 
