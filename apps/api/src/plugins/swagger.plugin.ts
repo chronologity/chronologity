@@ -45,6 +45,27 @@ export const swaggerPlugin = fp(async (app, options: SwaggerOptions) => {
           "**Chronology comes from when something happened, never from when it was recorded.** A Moment entered today for 2014 belongs in 2014, and occurrence is an interval at the precision it is actually known at rather than a fabricated instant.",
         ].join("\n"),
       },
+      components: {
+        securitySchemes: {
+          bearerAuth: {
+            type: "http",
+            scheme: "bearer",
+            bearerFormat: "JWT",
+            description: [
+              "The access token returned by any of the three sign-in routes.",
+              "",
+              "Sent as `Authorization: Bearer <token>`. A token that verifies is not sufficient on its own: the Session it names must still be open, so signing out takes effect immediately rather than when the token expires.",
+            ].join("\n"),
+          },
+        },
+      },
+      // Required by default, and opted out of by the thirteen routes that
+      // genuinely need no credential — the sign-in routes, the two health
+      // probes, and one public profile read. Stated this way round because the
+      // document previously said nothing at all about authentication, and a
+      // reader had no way to tell which of a hundred and sixty-three operations
+      // needed a token.
+      security: [{ bearerAuth: [] }],
       tags: [
         { name: "Health", description: "Liveness and readiness." },
         { name: "Authentication", description: "Proving who somebody is. Three methods reach one Identity: a link sent to an address, a password, and a code sent to a phone number." },

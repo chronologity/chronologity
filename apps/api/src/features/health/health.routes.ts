@@ -41,6 +41,10 @@ export async function healthRoutes(app: FastifyInstance): Promise<void> {
     "/health/live",
     {
       schema: {
+          // No credential needed. Declared rather than assumed, because the
+          // document requires one by default and silence would say this route
+          // needs a token it will never look at.
+          security: [],
         summary: "Is the process running",
         description:
           "Answers only whether this process is alive. It says nothing about whether the instance can serve traffic — a database outage must not cause an orchestrator to kill a healthy process.",
@@ -54,6 +58,10 @@ export async function healthRoutes(app: FastifyInstance): Promise<void> {
     "/health/ready",
     {
       schema: {
+          // No credential needed. Declared rather than assumed, because the
+          // document requires one by default and silence would say this route
+          // needs a token it will never look at.
+          security: [],
         summary: "Can this instance serve traffic",
         description:
           "Reports each dependency this instance needs. `degraded` with a 503 means traffic should go elsewhere; the process is still healthy and should not be restarted.",

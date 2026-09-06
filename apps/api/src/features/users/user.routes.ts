@@ -311,6 +311,10 @@ export function userRoutes(
       "/users/:handle",
       {
         schema: {
+          // No credential needed. Declared rather than assumed, because the
+          // document requires one by default and silence would say this route
+          // needs a token it will never look at.
+          security: [],
           summary: "Read somebody's public profile",
           description:
             "The only route here needing no caller. It carries nothing a person has not chosen to present.",
