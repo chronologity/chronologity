@@ -1120,7 +1120,14 @@ packages/api-client/
 │   ├── retry.ts            what may be retried, and when
 │   ├── session.ts          holding credentials and refreshing them
 │   ├── uploads.ts          the presigned PUT, which does not go through the API
-│   ├── operations/         one module per feature (Phase 10, Part 2)
+│   ├── operations/
+│   │   ├── operation.ts    a descriptor a test can read, not a plain function
+│   │   ├── <feature>.ts    one module per API feature, fifteen of them
+│   │   ├── coverage.test.ts  every documented route has a way to call it
+│   │   └── index.ts        the fifteen, as namespaces
+│   ├── fixtures/
+│   │   ├── responses/      recorded bodies, frozen on purpose
+│   │   └── compatibility.test.ts
 │   └── index.ts
 ```
 
@@ -1133,6 +1140,19 @@ a shape here would be a second source of truth for something ADR-070 settled.
 **Its operations are written rather than generated**, against those contracts,
 with the committed OpenAPI document used as an inventory: a test fails when a
 documented operation has no client method and no recorded reason (ADR-152).
+
+**An operation is a descriptor rather than a function.** It carries its own
+method, path template, and whether it sends a body or a query, so the
+completeness check can read the whole set and reconcile it against the document
+in both directions — a route with no operation and an operation naming a route
+the API no longer serves fail alike. A hundred and sixty-three plain functions
+would be a hundred and sixty-three things no test can see (ADR-154).
+
+`src/fixtures/` holds responses recorded once and parsed through the operations
+as the contracts stand now, which is the compatibility rule `deployment.md:766`
+states expressed as a test: a field added is fine, a field removed or narrowed is
+not. They are hand-recorded rather than built from the schemas, because a fixture
+generated from the thing it checks agrees with it by construction.
 
 `src/uploads.ts` is the one thing here that is not an API call. Media goes
 straight to object storage (ADR-029), so the middle step of the upload flow has

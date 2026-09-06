@@ -5825,3 +5825,55 @@ Changing the six routes to `z.void()`; retrying on status rather than on code; r
 **A refresh that fails with 401 clears the session; one that fails otherwise does not.** A server briefly unavailable has not ended anybody's session, and signing somebody out over a blip is the wrong answer to a transient failure.
 
 **The upload helper does not finalise and does not poll.** Finalising is an ordinary API call the caller makes — documented idempotent, so safe to retry — and how often to poll for `ready` is a UX decision rather than a transport one.
+
+# ADR-154 — What the Client Contract Settles, and What It Refuses to Guess
+
+## Status
+
+Accepted. Closes the client-contract questions ADR-138 and ADR-150 assigned to Phase 10, and records the ones deferred with the condition for reopening each.
+
+## Context
+
+Three earlier decisions deferred work here by name, and a fourth question — where generated GraphQL types live — was left open by `feed.md:1710` with an explicit instruction that it be decided rather than drift.
+
+Deferrals are cheap to make and expensive to lose. A decision recorded as "later" and never written down is indistinguishable, a year on, from something nobody thought of; the next person reads the silence as an oversight and either builds the thing badly in a hurry or spends a week rediscovering why it was left. So the deferrals matter as much as the operations, and what makes them decisions rather than gaps is the condition attached to each.
+
+## Decision
+
+**The client offers all 163 operations the API declares**, one module per feature, written by hand against `packages/contracts` and reconciled against the committed OpenAPI document by a test.
+
+**GraphQL types are not generated, and no package is created to hold them.** Revisit when a second consumer of the aggregator's schema exists.
+
+**Persisted queries are not introduced.** Revisit when mobile's query documents exist and are stable.
+
+**Idempotency keys are not invented.** Revisit when a route needs a safely repeatable `POST` and the mechanism is decided at the API, not at the client.
+
+**Offline support is not built.** Revisit after the product and security decisions `caching.md:982` requires.
+
+**Token storage stays out of this package.** It belongs to Phase 11, on the platform's secure store.
+
+## Alternatives Considered
+
+Generating operations from the OpenAPI document; a `packages/graphql-client` created now and populated in Phase 11; an allowlist of persisted queries seeded from the aggregator's own tests; a client-generated `Idempotency-Key` header on every mutation; a read-through response cache in this package; per-module test files asserting each of the 163 operations individually.
+
+## Rationale
+
+**A shared package with one consumer is not shared, it is misplaced.** `monorepo.md:1150` sets the bar, and `apps/mobile` does not exist until Phase 11. Creating `packages/graphql-client` now would mean designing its boundary against an imagined consumer — and the first real one would either bend to fit or force it to be rewritten, which is the same work done twice with a migration in between. `roadmap.md:1088` warns specifically against forcing these types into `packages/api-client`, and that warning is honoured by creating nothing rather than by creating something else.
+
+**An allowlist of queries nobody has written is an empty allowlist.** Persisted queries bound what the aggregator will execute, and the bound is drawn around the documents a client actually sends. ADR-150 assigned the decision here; the decision is that the input does not exist yet. Seeding it from the aggregator's tests would allowlist the queries the tests happen to use, which is a different set from the ones mobile will send, and the gap would show up as a client refused in production for asking something reasonable.
+
+**An idempotency key invented at the client would bind every future mutation to a guess.** `api.md:1051` leaves the mechanism open deliberately. A key is only worth anything if the server stores it, deduplicates against it, and decides how long it lives — none of which a header sent hopefully by a client achieves. Sending one that nothing honours would be worse than sending none: it would look like protection. The client instead retries only what is safe to repeat (ADR-153), which is a real guarantee rather than the appearance of one.
+
+**The completeness check earns more than per-module tests would.** It reads the method, the path, whether a body is sent, whether a query is sent, whether every placeholder is filled, and which operations claim to be repeatable — for all 163, against a document this package did not write. Fifteen hand-written test files would restate a subset of that by hand, in fifteen places, and would go stale one file at a time. What such files could add and the structural check cannot — that the *right* schema is attached — is instead covered by parsing recorded responses through the operations themselves.
+
+## Consequences
+
+**The exemption table in the completeness check starts empty**, which is the strongest state it can be in: the first entry anybody adds has to be argued for in a diff, rather than joining a list of existing exceptions.
+
+**The check fails in both directions.** An operation naming a route the API no longer serves fails as loudly as a route with no operation — which is what turns the sixteen Timeline routes ADR-138 removed from a silent 404 into a build failure.
+
+**Compatibility fixtures are frozen and hand-recorded**, not built from the schemas they check. A fixture generated from the thing it verifies agrees with it by construction and proves nothing. When one stops parsing, the change is either deliberate and the fixture is re-recorded, or it is the incompatibility `deployment.md:766` exists to prevent.
+
+**Adding a field to a response stays safe; removing or narrowing one does not.** That asymmetry is now a test rather than a convention, and it will fail before a client already on somebody's phone does.
+
+**Each deferral above carries the condition that reopens it**, so Phase 11 inherits four decisions rather than four silences.
