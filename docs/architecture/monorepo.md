@@ -323,6 +323,7 @@ apps/
         │   │   ├── spacing.ts
         │   │   ├── typography.ts
         │   │   ├── radius.ts
+        │   │   ├── motion.ts
         │   │   └── theme.ts
         │   └── config/
         │       ├── env.ts
@@ -596,11 +597,24 @@ under each of `features/auth/` and `features/timelines/`; and `components/feedba
 for the error boundary and error state. The rest arrives with the screens that
 need it, in Phase 12.
 
-Two deviations from the tree are permanent rather than pending:
+`motion.ts` was added to the theme in 12A. `reducedMotion` ships as an account
+preference and `accessibility.md` asks what the maximum transition duration
+should be, and no duration belonged in any of the other five files — a question
+about a number with nowhere to put the answer (ADR-156).
+
+`navigation/main.navigator.tsx` was added alongside the tabs, because a Moment is
+pushed over them rather than being a hidden tab: opening one is depth, and depth
+has to be closable back to where the reader was (`timeline.md:161`).
+
+Three deviations from the tree are permanent rather than pending:
 
 **No `babel.config.js`.** Expo SDK 57 configures Babel through `babel-preset-expo`
 without a project-level file, and the template no longer generates one. Adding
 one back would be a file that exists to match a diagram.
+
+**`toast.tsx` and `offline-banner.tsx` are not built.** Both are named above and
+described in no document, and offline handling belongs to Phase 13. A component
+with no requirement behind it is a guess about a screen nobody has designed.
 
 **Imports inside this application omit the `.js` extension**, unlike every other
 package here. Those use `nodenext` resolution, where the extension is required;

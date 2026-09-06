@@ -5969,3 +5969,77 @@ The ESLint one carries a pin worth knowing about: `eslint-plugin-react` with `ve
 **`expo install --check` reports `typescript` as needing to be downgraded to `~6.0.3`, and it should not be followed.** This workspace standardises on TypeScript 7; the check compares against the version Expo ships its own templates with. Typecheck, the Metro bundle, and CI all pass on 7, so following the advice would install a second TypeScript to satisfy a check rather than a problem.
 
 **`z.url()` is not an address.** `packages/config`'s `urlSchema` accepts `localhost:3000` — parsed as a URL whose protocol is `localhost:` — and accepts `ftp://` too. Neither is something `fetch` can use, and the first is precisely the typo somebody makes writing this variable by hand. The shared schema is unchanged; this application requires an `http` or `https` scheme, which is what an address for `fetch` has to be.
+
+# ADR-156 — The Numbers Nobody Had Chosen
+
+## Status
+
+Accepted. Establishes the mobile design system, and closes five accessibility questions the product documentation had left open.
+
+## Context
+
+`monorepo.md:321-326` names five files — `colors.ts`, `spacing.ts`, `typography.ts`, `radius.ts`, `theme.ts` — and says nothing about what belongs in any of them. Searched end to end, the documentation contains no palette, no type scale, no spacing scale, no radius scale, no typeface, and no brand colour. One sentence in the entire corpus concerns visual identity, `accessibility.md:848`: it "must adapt to accessibility requirements rather than treating low-contrast aesthetics as immutable branding."
+
+Meanwhile `accessibility.md` is unusually specific about *behaviour* — contrast, text scaling, reduced motion, touch targets, colour never carrying meaning alone — while leaving every number that would make those testable as an open question. It asks which conformance target Chronologity will adopt (`:1254`), what minimum touch-target size (`:1494`), what maximum transition duration (`:1313`), how palettes should meet contrast "in both light and dark appearance" (`:1488`), and whether "design-system components enforce accessible defaults" (`:1553`).
+
+Those are not gaps to be worked around. They are the design system's actual content: a requirement to meet "the intended accessibility standard" cannot be met until somebody says which one.
+
+**And two requirements were already being violated.** `#999` on white is roughly **2.8:1**, below any plausible standard, and it was the colour of the "Not yours to read" row — the one row whose meaning concerns somebody else's privacy was the least legible thing on the screen. The sign-in fields were named by `placeholder` alone, which `accessibility.md:774` forbids outright and which disappears the moment somebody types. Neither was caught by anything, because nothing was looking.
+
+## Decision
+
+**WCAG 2.2 AA.** 4.5:1 for body text, 3:1 for user-interface components and meaningful boundaries.
+
+**44 points** is the minimum touch target, reached with `hitSlop` where the drawn control is smaller.
+
+**Light and dark, both holding the floor independently.** `app.json` moves from `"light"` to `"automatic"`.
+
+**200 milliseconds** is the ceiling on any transition, and `motion.ts` exists to hold it despite not being in the canonical tree.
+
+**Reduced motion is on when either the platform or the account asks for it.**
+
+**Yes, the primitives enforce accessible defaults**, and there is no way to opt out.
+
+**Warm neutrals, sampled from the product designs**, with one accent that means orientation in time.
+
+## Alternatives Considered
+
+WCAG 2.1 AA, or naming no target and reviewing by eye; Android's 48 rather than 44; a single light appearance with the token structure left able to admit a second; motion durations inline at each call site; the platform preference alone deciding reduced motion; primitives that permit an override "for the cases that need it"; a pure-white background with cool greys; a `toast.tsx` and an `offline-banner.tsx` because the canonical tree names them.
+
+## Rationale
+
+**A standard nobody named is a standard nobody meets.** `accessibility.md:1154` requires meeting "the adopted contrast requirements" — a sentence that does nothing until something is adopted, which is why a 2.8:1 grey survived code review. 2.2 rather than 2.1 because it is current and its additions are the ones this product will meet anyway. AA rather than AAA because AAA's 7:1 on body text rules out most of the near-neutral range, and a target that forces the palette into black-on-white is one that gets abandoned rather than met.
+
+**44 rather than 48 because one number that satisfies both platforms is worth more than two that drift.** It is the lower of the two floors, so meeting it meets iOS outright and Android in the way that matters — and `hitSlop` rather than a minimum height is what keeps a compact design possible: a control drawn 28 points tall is padded to 44 for a finger without becoming 44 on screen. `accessibility.md:891` asks for exactly that: "Visually compact design must not create inaccessible hit targets."
+
+**The primitives enforce rather than encourage, and this is the decision with the longest reach.** `AppText` has no `maxFontSizeMultiplier` and no prop that takes one, because capping the multiplier is precisely what `accessibility.md:868` forbids — "the product should reflow into a more suitable representation rather than shrinking the text back to an inaccessible size." `AppPressable` has no way to fall below the floor. `AppInput` cannot be constructed without a visible label. `AppText` accepts a colour *role*, never a value, so every colour that can reach the screen is one the contrast test has already measured.
+
+An override "for the cases that need it" was considered and rejected: the cases that need it are exactly the cases where somebody is in a hurry, and a rule that yields under pressure is a rule that documents an intention rather than enforcing one. Fifteen phases of screens are still to be written; the accessible thing has to be the easy thing, and preferably the only thing.
+
+**Contrast is computed, not reviewed.** `contrast.test.ts` takes every text role against every surface it is permitted on, in both appearances, and fails below the floor — plus the filled-control label, the meaningful boundary, and the focus ring at 3:1. `accessibility.md:1661` asks for accessibility to be verifiable "without relying exclusively on manual visual inspection", and this is that, for the one property where a machine is strictly better than an eye. The suite includes the `#999` case as a regression, so the specific failure that motivated this cannot return.
+
+Several palette values ended a shade darker than looked right, because the shade that looked right cleared 4.5:1 against the page and failed it against a card. That is the test doing its job, and it is not a judgement an eye makes reliably.
+
+**Two kinds of boundary, because collapsing them breaks one of them.** A divider between rows carries no information — the rows are already distinguished by their content — and holding it to 3:1 would make every hairline heavy. A field's outline is the only thing saying where the field is, so it is a component and does meet 3:1. One token for both would either shout or disappear.
+
+**Either source may reduce motion.** `accessibility.md:1105` says to respect the platform preference; nothing says what to do when the account preference disagrees, and both exist. The failure modes are not symmetrical: animating at somebody who asked you not to is the one that causes harm, and being still for somebody who would not have minded costs nothing. So either is sufficient, and nobody has to ask twice.
+
+**Warm, because the designs are.** The page is `#F9F5F0` rather than white, and a card is *lighter* than the page it sits on — which is the opposite of the usual convention and is what makes a photograph appear to come forward rather than be punched out of a brighter ground. These values were sampled from the product designs rather than invented. The accent is a saturated blue that appears in exactly one role in those designs: marking where in time the reader is — the year heading, the underline on the Timeline being read, the ring on the active Moment, the jump control. It is the colour of orientation, which is why nothing decorative may use it.
+
+## Consequences
+
+**`toast.tsx` and `offline-banner.tsx` were not built.** Both are named in the canonical tree and described in no document; offline handling is Phase 13's. `monorepo.md:589` is explicit that "files are created when they acquire a responsibility, never to populate a diagram", and a component with no requirement behind it is a guess about a future screen. `retry-button.tsx` was built, because `ErrorState` was telling somebody something had failed while offering nothing to do about it — and on a phone there is no reload button to fall back on.
+
+**A Moment is now a pushed screen rather than a hidden tab, and it exists at all.** `moment` was declared in `types/navigation.ts`, routed to in `linking.ts`, and registered in no navigator, so `chronologity://moment/<id>` resolved to nothing and failed silently. A stack over the tabs is also the right shape for what opening a Moment *is*: depth, the third dimension, which `timeline.md:161` requires be closable back to "the same meaningful chronological and contextual position".
+
+**React Navigation is fed this theme.** Its container was passed none, so its own defaults painted the screen background, headers and tab bar — a second uncontrolled source of colour beneath a measured one, and a white flash behind a dark screen.
+
+**Dates are formatted at the precision they are known.** `toDateString()` rendered every occurrence as an American day, including the ones known only to a month, which `moments.md:259` forbids: "The product should not create false precision." Locale and time zone come from the reader, and both are nullable in the contract because null means *follow the device* rather than any particular value.
+
+That work found something worth recording on its own: **`new Date("summer 1998")` does not fail — it answers 1 January 1998**, having found a year in the noise. GraphQL responses are not parsed against a schema the way REST ones are (ADR-154), so a malformed occurrence would have reached the screen as a confident wrong date. Timestamps are now checked by shape before they are parsed.
+
+**One design-system defect was caught by its own test.** `AppPressable` replaced any `accessibilityState` a caller passed rather than merging it, which silently discarded `AppButton`'s `busy` — the one thing a screen reader needs to hear while a button is spinning.
+
+**Telemetry, which `roadmap.md:1284` also lists under 12A, was not built.** The provider remains open (`observability.md:1891-1896`) and Phase 11 attached the seam. Choosing one against a shell that does almost nothing would be choosing it blind.
+
+**There is no in-product appearance toggle.** `preferencesSchema` has no field for one, so adding it is a contract change rather than a client decision. The platform preference is followed, which is what `accessibility.md:1105` asks for anyway.

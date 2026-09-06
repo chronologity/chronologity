@@ -1253,6 +1253,14 @@ The following questions require deliberate resolution:
 
 - Which formal accessibility target will Chronologity adopt for launch?
 - Should WCAG 2.2 AA be the baseline for applicable web and product semantics?
+
+**Answered in 12A: WCAG 2.2 AA** (ADR-156). 4.5:1 for body text, 3:1 for
+user-interface components and meaningful boundaries. Until something was adopted,
+invariant 46 — "must meet the adopted contrast requirements" — could not be
+checked or failed, which is how a 2.8:1 grey came to be the colour of the row
+saying a Moment is not yours to read. `apps/mobile` now computes every role pair
+against every surface in both appearances and fails the build below the floor.
+
 - How should native mobile platform guidance supplement a web-oriented conformance target?
 - Which assistive technologies must be included in the supported launch matrix?
 - Which combinations of iOS VoiceOver, Android TalkBack, keyboard, switch control, browser screen readers, and other technologies must be manually tested?
@@ -1311,6 +1319,13 @@ The following questions require deliberate resolution:
 - Could an instantaneous jump itself be cognitively disorienting?
 - Would a brief fade plus explicit temporal announcement be better?
 - What maximum transition duration is appropriate?
+
+**Answered in 12A: 200 milliseconds**, as a ceiling rather than a default
+(ADR-156). Long enough to read as movement, short enough that somebody moving
+quickly never waits for the interface to agree. Under reduced motion every
+duration is zero, which changes how a capability is presented without removing
+it.
+
 - Which animations are essential to comprehension versus decorative?
 - Should Users be able to disable all nonessential animation independently of the system preference?
 - Should a Chronologity-specific reduced-motion preference sync across devices?
@@ -1488,10 +1503,23 @@ The following questions require deliberate resolution:
 - How should color palettes meet contrast requirements in both light and dark appearance?
 - Should Chronologity provide a dedicated high-contrast mode?
 - Or should standard themes already meet the required contrast?
+
+**Answered in 12A: both appearances ship, and each holds the floor on its own**
+(ADR-156). Not a light palette with a dark variant derived from it — two palettes,
+each measured. No dedicated high-contrast mode: the standard themes already meet
+the requirement, which is the second of the two options above and the one that
+does not create a surface people have to find.
+
 - How should historical-significance visualizations remain accessible under high contrast?
 - How should causality lines or connectors be represented without relying on color?
 - How should selected Timeline scale be represented without color?
 - What minimum touch-target size will Chronologity adopt?
+
+**Answered in 12A: 44 points** (ADR-156). The lower of the two platform floors,
+so one number satisfies both. Reached with `hitSlop` rather than a minimum
+height, so a compact design stays compact and stays operable — which is what
+"Visually compact design must not create inaccessible hit targets" asks for.
+
 - How should adjacent small Reaction controls avoid accidental activation?
 - Which gestures require explicit buttons even for sighted Users?
 - Could providing visible zoom/jump controls improve discoverability for everyone?
@@ -1551,6 +1579,16 @@ The following questions require deliberate resolution:
 - How do privacy and moderation filters affect accessible counts and summaries?
 - How should Chronologity ensure future features cannot ship with inaccessible gesture-only behavior?
 - Should design-system components enforce accessible defaults?
+
+**Answered in 12A: yes, and with no way to opt out** (ADR-156). The text
+primitive has no way to cap font scaling, the pressable has no way to fall below
+the touch floor, the input cannot be built without a visible label, and text
+takes a colour role rather than a value — so every colour that can reach the
+screen is one the contrast test has measured. An override "for the cases that
+need it" was considered and rejected: those are the cases where somebody is in a
+hurry, and a rule that yields under pressure documents an intention rather than
+enforcing one.
+
 - Which product invariants should be encoded in shared UI primitives?
 - How do we prevent mobile and web accessibility behavior from diverging semantically?
 - How should accessibility requirements be documented when a feature intentionally behaves differently by platform?
