@@ -17,6 +17,7 @@ export {
   type RequestOptions,
 } from "./client.js";
 export { queryString } from "./query.js";
+export { createSession, type Session, type SessionOptions } from "./session.js";
 export {
   defaultRetryPolicy,
   TransportError,

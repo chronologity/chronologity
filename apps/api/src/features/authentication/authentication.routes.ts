@@ -43,7 +43,6 @@ import type { AuthenticationWiring } from "./authentication.types.js";
  * contract: it names which Session is being refreshed, while the credential
  * itself is what proves the right to do so.
  */
-const refreshSessionBodySchema = refreshSessionRequestSchema.extend({ sessionId: z.uuid() });
 
 /** Identifying one Session in a path. */
 const sessionParamsSchema = z.object({ sessionId: z.uuid() });
@@ -109,6 +108,10 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
       "/auth/magic-link",
       {
         schema: {
+          // No credential needed. Declared rather than assumed, because the
+          // document requires one by default and silence would say this route
+          // needs a token it will never look at.
+          security: [],
           body: magicLinkRequestSchema,
           summary: "Send a sign-in link",
           description: "Answers identically whether or not an account exists. No authentication surface here discloses membership, because knowing that an address, handle, or number has an account is itself a fact about a person.",
@@ -221,6 +224,10 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
         "/auth/phone/codes",
         {
           schema: {
+          // No credential needed. Declared rather than assumed, because the
+          // document requires one by default and silence would say this route
+          // needs a token it will never look at.
+          security: [],
             summary: "Send a sign-in code by text",
             description:
               "Answers identically whether or not an account exists. No authentication surface here discloses membership, because knowing that an address, handle, or number has an account is itself a fact about a person. A number that has gone unused for a long period receives no code at all; the account's email address is told instead, because a number left unused is the one a carrier may have given to somebody else.",
@@ -240,6 +247,10 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
         "/auth/sessions/phone",
         {
           schema: {
+          // No credential needed. Declared rather than assumed, because the
+          // document requires one by default and silence would say this route
+          // needs a token it will never look at.
+          security: [],
             summary: "Sign in with a number and code",
             description:
               "Succeeding emails the account, so its holder learns of it even if the number was taken from them.",
@@ -265,6 +276,10 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
       "/auth/sessions",
       {
         schema: {
+          // No credential needed. Declared rather than assumed, because the
+          // document requires one by default and silence would say this route
+          // needs a token it will never look at.
+          security: [],
           summary: "Redeem a sign-in link",
           description:
             "An expired link, an already-used one, one issued for another purpose, and one that never existed are all the same refusal. Redeeming proves control of the address, so a first-time address arrives already verified.",
@@ -288,7 +303,11 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
       "/auth/sessions/refresh",
       {
         schema: {
-          body: refreshSessionBodySchema,
+          // No credential needed. Declared rather than assumed, because the
+          // document requires one by default and silence would say this route
+          // needs a token it will never look at.
+          security: [],
+          body: refreshSessionRequestSchema,
           summary: "Exchange a refresh token",
           description:
             "Refresh tokens rotate: the one sent is spent, and a new one comes back. Reusing a spent token ends the session, because reuse means it was copied.",
@@ -345,6 +364,10 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
       "/auth/registrations",
       {
         schema: {
+          // No credential needed. Declared rather than assumed, because the
+          // document requires one by default and silence would say this route
+          // needs a token it will never look at.
+          security: [],
           summary: "Register with a password",
           description:
             "Answers identically whether or not an account exists. Registering does not prove the address — redeeming the link sent to it does — and password sign-in is refused until it is proven.",
@@ -368,6 +391,10 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
       "/auth/email-verifications",
       {
         schema: {
+          // No credential needed. Declared rather than assumed, because the
+          // document requires one by default and silence would say this route
+          // needs a token it will never look at.
+          security: [],
           summary: "Prove an email address",
           description:
             "Proving an address grants no session. Proof of who somebody is and being signed in are deliberately separate.",
@@ -387,6 +414,10 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
       "/auth/sessions/password",
       {
         schema: {
+          // No credential needed. Declared rather than assumed, because the
+          // document requires one by default and silence would say this route
+          // needs a token it will never look at.
+          security: [],
           summary: "Sign in with a password",
           description:
             "Answers identically whether or not an account exists. No such account, a wrong password, and an unproven address are one refusal — and the work is done either way, so the time taken says nothing either.",
@@ -411,6 +442,10 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
       "/auth/password-resets",
       {
         schema: {
+          // No credential needed. Declared rather than assumed, because the
+          // document requires one by default and silence would say this route
+          // needs a token it will never look at.
+          security: [],
           summary: "Ask for a password reset",
           description: "Answers identically whether or not an account exists.",
           body: passwordResetRequestSchema,
@@ -432,6 +467,10 @@ export function authenticationRoutes(wiring: AuthenticationWiring) {
       "/auth/password-resets/complete",
       {
         schema: {
+          // No credential needed. Declared rather than assumed, because the
+          // document requires one by default and silence would say this route
+          // needs a token it will never look at.
+          security: [],
           summary: "Set a new password with a reset link",
           description:
             "Every other session ends, because a reset usually means the old password was known to somebody else.",

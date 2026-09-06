@@ -152,6 +152,15 @@ export type CreateSessionRequest = z.infer<typeof createSessionRequestSchema>;
 /** Exchanging a refresh credential for a new pair. */
 export const refreshSessionRequestSchema = z.object({
   refreshToken: z.string().min(1).max(512),
+  /**
+   * Which Session is being refreshed.
+   *
+   * Required, and previously absent from this contract while the route demanded
+   * it — so a client typed honestly from here sent an incomplete body and could
+   * not refresh at all. The refresh token alone does not name a Session: it is
+   * held only as a hash, so the server cannot look one up from it.
+   */
+  sessionId: z.uuid(),
 });
 
 export type RefreshSessionRequest = z.infer<typeof refreshSessionRequestSchema>;
