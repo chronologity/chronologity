@@ -622,3 +622,12 @@ export {
   type SetNotificationPreferencesRequest,
   type UnreadCount,
 } from "./notifications.js";
+
+/**
+ * The public names for the shapes that cross the API boundary.
+ *
+ * Exported so the API's OpenAPI generation can resolve them; nothing else needs
+ * it. Named here rather than there because an id is part of the published
+ * vocabulary, not an implementation detail of one application.
+ */
+export { contractRegistry } from "./registry.js";

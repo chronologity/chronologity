@@ -1,7 +1,11 @@
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import fp from "fastify-plugin";
-import { jsonSchemaTransform } from "fastify-type-provider-zod";
+import {
+  createJsonSchemaTransform,
+  createJsonSchemaTransformObject,
+} from "fastify-type-provider-zod";
+import { contractRegistry } from "@chronologity/contracts";
 
 /**
  * The OpenAPI document, and the page that browses it.
@@ -53,7 +57,14 @@ export const swaggerPlugin = fp(async (app, options: SwaggerOptions) => {
         { name: "Social", description: "Following, requests, and blocking. Following says what somebody wants to hear about, never what they may see." },
       ],
     },
-    transform: jsonSchemaTransform,
+    // **Named shapes rather than inlined ones.** Without the registry every
+    // schema is written out in full at every use site: two and a half megabytes,
+    // a Moment described thirty-six separate times, and `components.schemas`
+    // empty. That defeats the reason ADR-112 gives for committing this document
+    // — "a diff on a pull request says the boundary moved" — because a change to
+    // one field produced thirty-six identical hunks.
+    transform: createJsonSchemaTransform({ schemaRegistry: contractRegistry }),
+    transformObject: createJsonSchemaTransformObject({ schemaRegistry: contractRegistry }),
   });
 
   await app.register(swaggerUi, { routePrefix: "/docs" });
