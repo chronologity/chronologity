@@ -1,8 +1,8 @@
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { TimelineScreen } from "../../features/timelines/screens/timeline.screen";
-import type { MainRoutes } from "../../types/navigation";
+import type { MainTabRoutes } from "../../types/navigation";
 
-const Tabs = createBottomTabNavigator<MainRoutes>();
+const Tabs = createBottomTabNavigator<MainTabRoutes>();
 
 /**
  * Where somebody who is signed in can be.
@@ -11,10 +11,9 @@ const Tabs = createBottomTabNavigator<MainRoutes>();
  * bootstrap that rendered five empty tabs would be proving less than one that
  * renders real history.
  *
- * The `moment` route is declared and hidden from the bar, because a deep link
- * names it and `linking.ts` has to have somewhere to send one. What it renders
- * is Phase 12's; what matters here is that the destination exists and is
- * reauthorized on arrival like everything else.
+ * A Moment is not among them. It is pushed over the tabs by `MainNavigator`,
+ * because opening one is depth rather than a change of section — and depth has
+ * to be closable back to where the reader was (`timeline.md:161`).
  *
  * @returns The navigator.
  */

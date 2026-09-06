@@ -17,9 +17,27 @@ export type AuthRoutes = {
   "sign-in": undefined;
 };
 
-/** Screens available to somebody who is. */
-export type MainRoutes = {
+/**
+ * The tabs somebody signed in moves between.
+ *
+ * One for now. The horizontal axis — the named Timelines a person reads across —
+ * is 12H, and is not a tab bar.
+ */
+export type MainTabRoutes = {
   timeline: undefined;
+};
+
+/**
+ * Screens available to somebody signed in.
+ *
+ * A stack with the tabs at its root, rather than a Moment being a hidden tab.
+ * Opening a Moment is a push: it covers the tabs, it has somewhere to go back
+ * to, and closing it returns to where the reader was — which
+ * `timeline.md:161` requires of depth, that "Exiting should return the user to
+ * the same meaningful chronological and contextual position".
+ */
+export type MainRoutes = {
+  tabs: undefined;
   /** A Moment opened directly, including from a deep link. */
   moment: { momentId: string };
 };

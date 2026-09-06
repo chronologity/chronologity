@@ -1,9 +1,10 @@
 import type { ApiClient, Session } from "@chronologity/api-client";
 import type { SessionCredentials } from "@chronologity/contracts";
-import { render } from "@testing-library/react-native";
+import { render, waitFor } from "@testing-library/react-native";
 import { Providers } from "../providers";
 import type { Backend } from "../../lib/api/client";
 import type { GraphqlClient } from "../../lib/graphql/client";
+import { linking } from "./linking";
 import { RootNavigator } from "./root.navigator";
 
 const METRICS = {
@@ -21,7 +22,14 @@ const credentials: SessionCredentials = {
 
 const backend: Backend = {
   client: {} as ApiClient,
-  graphql: { query: async () => ({}) as never } as GraphqlClient,
+  // Answers the viewer query so the Timeline settles instead of updating state
+  // after the test has finished, which React reports as an act() warning.
+  graphql: {
+    query: async (document: string) =>
+      (document.includes("GetViewer")
+        ? { viewer: { authenticated: true, userId: null } }
+        : {}) as never,
+  } as GraphqlClient,
   session: {
     accessToken: async () => "at",
     current: () => undefined,
@@ -66,7 +74,42 @@ describe("choosing which half of the application is showing", () => {
   it("shows the Timeline when somebody is", async () => {
     const { queryByTestId } = await renderRoot(credentials, false);
 
-    expect(queryByTestId("sign-in-screen")).toBeNull();
+    await waitFor(() => {
+      // The settled state, not merely the absence of the other tree: the viewer
+      // query resolves in a microtask and would update state after the test.
+      expect(queryByTestId("timeline-onboarding")).not.toBeNull();
+    });
+  });
+
+  it("paints its chrome from the same theme as everything else", async () => {
+    // React Navigation draws the screen background, headers and tab bar from
+    // its own theme. Left unfed it uses its defaults — a second uncontrolled
+    // source of colour under a carefully measured one.
+    const { getByTestId } = await renderRoot(undefined, true);
+
+    const style = getByTestId("restoring").props.style as Array<Record<string, unknown>>;
+
+    expect(style.flat().some((one) => typeof one?.backgroundColor === "string")).toBe(true);
+  });
+
+  it("has somewhere for a Moment link to land", async () => {
+    // `moment` was declared in the route types and routed to in linking.ts and
+    // registered in no navigator, so chronologity://moment/<id> resolved to
+    // nothing and failed silently.
+    const { queryByTestId } = await renderRoot(credentials, false);
+
+    await waitFor(() => {
+      // The settled state, not merely the absence of the other tree: the viewer
+      // query resolves in a microtask and would update state after the test.
+      expect(queryByTestId("timeline-onboarding")).not.toBeNull();
+    });
+    expect(linking.config?.screens).toHaveProperty("moment");
+  });
+
+  it("routes the tabs through the stack the links describe", async () => {
+    // A flat linking config would name a navigator that does not exist and
+    // silently match nothing.
+    expect(linking.config?.screens).toHaveProperty("tabs");
   });
 
   it("leaves no sign-in screen mounted behind a signed-in tree", async () => {
@@ -75,7 +118,11 @@ describe("choosing which half of the application is showing", () => {
     // mounted that the current Viewer has no business seeing.
     const { queryByTestId } = await renderRoot(credentials, false);
 
-    expect(queryByTestId("sign-in-screen")).toBeNull();
+    await waitFor(() => {
+      // The settled state, not merely the absence of the other tree: the viewer
+      // query resolves in a microtask and would update state after the test.
+      expect(queryByTestId("timeline-onboarding")).not.toBeNull();
+    });
     expect(queryByTestId("restoring")).toBeNull();
   });
 });

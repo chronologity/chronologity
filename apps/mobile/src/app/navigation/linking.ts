@@ -55,7 +55,9 @@ export const linking: LinkingOptions<MainRoutes> = {
   prefixes: ["chronologity://"],
   config: {
     screens: {
-      timeline: "timeline",
+      // Nested, because the tabs sit inside the stack. A flat config here would
+      // describe a navigator that does not exist and silently match nothing.
+      tabs: { screens: { timeline: "timeline" } },
       moment: {
         path: "moment/:momentId",
         parse: { momentId: parseMomentId as (value: string) => string },

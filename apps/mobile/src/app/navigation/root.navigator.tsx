@@ -1,10 +1,12 @@
 import type { ApiClient } from "@chronologity/api-client";
-import { NavigationContainer } from "@react-navigation/native";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { DarkTheme, DefaultTheme, NavigationContainer } from "@react-navigation/native";
+import { AppLoader } from "../../components/primitives/app-loader";
+import { Screen } from "../../components/layout/screen";
+import { useTheme } from "../../hooks/use-theme";
 import { useSession } from "../providers";
 import { AuthNavigator } from "./auth.navigator";
 import { linking } from "./linking";
-import { MainTabsNavigator } from "./main-tabs.navigator";
+import { MainNavigator } from "./main.navigator";
 
 /** What the root needs to hand down. */
 export interface RootNavigatorProps {
@@ -31,22 +33,38 @@ export interface RootNavigatorProps {
  */
 export function RootNavigator({ client }: RootNavigatorProps): React.JSX.Element {
   const { credentials, restoring } = useSession();
+  const { theme } = useTheme();
+
+  // React Navigation paints the screen background, headers and tab bar from its
+  // own theme. Left unfed it uses its defaults, which is a second uncontrolled
+  // source of colour sitting underneath a carefully measured one — and it shows
+  // as a white flash behind a dark screen.
+  const base = theme.dark ? DarkTheme : DefaultTheme;
+  const navigationTheme = {
+    ...base,
+    dark: theme.dark,
+    colors: {
+      ...base.colors,
+      background: theme.colors.background,
+      border: theme.colors.border,
+      card: theme.colors.surface,
+      notification: theme.colors.danger,
+      primary: theme.colors.accent,
+      text: theme.colors.textPrimary,
+    },
+  };
 
   if (restoring) {
     return (
-      <View style={styles.container} testID="restoring">
-        <ActivityIndicator />
-      </View>
+      <Screen centred testID="restoring">
+        <AppLoader label="Restoring your session" showLabel={false} />
+      </Screen>
     );
   }
 
   return (
-    <NavigationContainer linking={linking}>
-      {credentials === undefined ? <AuthNavigator client={client} /> : <MainTabsNavigator />}
+    <NavigationContainer linking={linking} theme={navigationTheme}>
+      {credentials === undefined ? <AuthNavigator client={client} /> : <MainNavigator />}
     </NavigationContainer>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { alignItems: "center", flex: 1, justifyContent: "center" },
-});
