@@ -1,5 +1,13 @@
 import { errorResponseSchema, type ErrorResponse } from "@chronologity/contracts";
 import { ApiError } from "./api-error.js";
+import {
+  classify,
+  defaultRetryPolicy,
+  delayFor,
+  mayRetry,
+  retryAfterSeconds,
+  type RetryPolicy,
+} from "./retry.js";
 import type { z } from "zod";
 
 export interface ApiClientOptions {
@@ -29,6 +37,10 @@ export interface ApiClientOptions {
   newTraceId?: () => string | undefined;
   /** Per-request timeout in milliseconds. */
   timeoutMs?: number;
+  /** How persistent to be about failures worth retrying. */
+  retry?: RetryPolicy;
+  /** Waits between attempts. A seam, so tests do not sleep. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export interface RequestOptions<Schema extends z.ZodType> {
@@ -76,6 +88,8 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     fetch: fetchImpl = globalThis.fetch,
     timeoutMs = DEFAULT_TIMEOUT_MS,
     newTraceId = defaultTraceId,
+    retry = defaultRetryPolicy,
+    sleep = defaultSleep,
   } = options;
 
   return {
@@ -86,6 +100,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
       body,
       signal,
       traceId,
+      idempotent,
     }: RequestOptions<Schema>): Promise<z.infer<Schema>> {
       const token = await getAccessToken?.();
       const headers: Record<string, string> = { accept: "application/json" };
@@ -102,23 +117,47 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
         headers["content-type"] = "application/json";
       }
 
-      const timeout = AbortSignal.timeout(timeoutMs);
-      const response = await fetchImpl(new URL(path, baseUrl), {
-        method,
-        headers,
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        signal: signal === undefined ? timeout : AbortSignal.any([signal, timeout]),
-      });
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          // A fresh timeout per attempt. Sharing one across retries would mean
+          // the last attempt inherits whatever the first two left of it.
+          const timeout = AbortSignal.timeout(timeoutMs);
+          const response = await fetchImpl(new URL(path, baseUrl), {
+            method,
+            headers,
+            ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+            signal: signal === undefined ? timeout : AbortSignal.any([signal, timeout]),
+          });
 
-      if (!response.ok) {
-        throw await toApiError(response);
+          if (!response.ok) {
+            throw await toApiError(response);
+          }
+
+          if (response.status === 204) {
+            return emptyBody(schema);
+          }
+
+          return schema.parse(await response.json());
+        } catch (thrown) {
+          const error = classify(thrown, signal);
+
+          // A schema mismatch is not a transport failure and repeating it would
+          // produce the same bytes; `classify` returns it unchanged and
+          // `mayRetry` refuses it, but the ordering is worth being explicit
+          // about: the last attempt always throws what it caught.
+          if (attempt >= retry.attempts || !mayRetry(error, method, idempotent === true)) {
+            throw error;
+          }
+
+          await sleep(
+            delayFor(
+              attempt,
+              error instanceof ApiError ? error.retryAfterSeconds : undefined,
+              retry,
+            ),
+          );
+        }
       }
-
-      if (response.status === 204) {
-        return emptyBody(schema);
-      }
-
-      return schema.parse(await response.json());
     },
   };
 }
@@ -142,11 +181,13 @@ async function toApiError(response: Response): Promise<ApiError> {
     traceId: response.headers.get("x-trace-id") ?? "unknown",
   };
 
+  const wait = retryAfterSeconds(response);
+
   try {
     const parsed = errorResponseSchema.safeParse(await response.json());
-    return new ApiError(response.status, parsed.success ? parsed.data : fallback);
+    return new ApiError(response.status, parsed.success ? parsed.data : fallback, wait);
   } catch {
-    return new ApiError(response.status, fallback);
+    return new ApiError(response.status, fallback, wait);
   }
 }
 
@@ -194,4 +235,14 @@ function emptyBody<Schema extends z.ZodType>(schema: Schema): z.infer<Schema> {
  */
 function defaultTraceId(): string | undefined {
   return globalThis.crypto?.randomUUID?.();
+}
+
+/**
+ * Wait.
+ *
+ * @param ms - How long.
+ * @returns A promise that settles then.
+ */
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

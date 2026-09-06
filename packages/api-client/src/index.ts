@@ -17,3 +17,8 @@ export {
   type RequestOptions,
 } from "./client.js";
 export { queryString } from "./query.js";
+export {
+  defaultRetryPolicy,
+  TransportError,
+  type RetryPolicy,
+} from "./retry.js";
