@@ -41,6 +41,31 @@ export interface Operation<Arguments, Result> {
   readonly template: string;
   /** Whether repeating this is defined to be the same as doing it once. */
   readonly idempotent: boolean;
+  /**
+   * Whether this sends a request body.
+   *
+   * Read by the completeness check, which compares it against whether the
+   * document declares a `requestBody` — so an operation that forgot its body is
+   * caught as loudly as one that was never written.
+   */
+  readonly sendsBody: boolean;
+  /** Whether this sends a query string, compared the same way. */
+  readonly sendsQuery: boolean;
+  /**
+   * The schema the response is parsed against.
+   *
+   * Exposed so the completeness check can compare it against the shape the
+   * document names for this route. Pointing at the right path with the wrong
+   * schema is the subtler half of the mistake that check exists to find.
+   */
+  readonly response: z.ZodType;
+  /**
+   * The path this would call, without calling it.
+   *
+   * @param args - The same arguments the call takes.
+   * @returns The path with its placeholders filled.
+   */
+  pathFor(args: Arguments): string;
   /** Make the call. */
   (client: ApiClient, args: Arguments, options?: CallOptions): Promise<Result>;
 }
@@ -130,5 +155,9 @@ export function defineOperation<Args extends Arguments, Response extends z.ZodTy
     method: spec.method,
     template: spec.template,
     idempotent: spec.idempotent === true,
+    sendsBody: spec.body !== undefined,
+    sendsQuery: spec.query !== undefined,
+    response: spec.response,
+    pathFor: (args: Args) => (spec.path === undefined ? spec.template : spec.path(args)),
   });
 }

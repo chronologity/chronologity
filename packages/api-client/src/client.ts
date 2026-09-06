@@ -73,13 +73,14 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 /**
  * Create a client bound to one API base URL.
  *
- * Only `request` is exposed. Named operations are added as the API implements
- * the routes behind them.
+ * Only `request` is exposed. Named operations live in `./operations` and take a
+ * client as their first argument, so the transport knows nothing about routes
+ * and the routes know nothing about retries, tokens, or timeouts.
  *
  * @param options - Base URL, an optional token supplier, an optional fetch
  *   implementation for tests, and a per-request timeout.
- * @returns A client exposing only `request`. Named operations are added as the
- *   API implements the routes behind them.
+ * @returns A client that can make any request. What is worth requesting is
+ *   `operations`' business.
  */
 export function createApiClient(options: ApiClientOptions): ApiClient {
   const {
