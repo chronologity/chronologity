@@ -5762,6 +5762,8 @@ Generating from the document as ADR-112 anticipated; generating after fixing the
 
 Accepted. Records the transport decisions in `packages/api-client`, and two bugs that were latent for as long as nothing called it.
 
+*Amended in Phase 11 — see Amendments below.*
+
 ## Context
 
 `packages/api-client` said of itself that it was "bootstrapped without operations on purpose… what lives here is transport concern only." That was the right posture while no routes were stable. It also meant nothing had ever exercised it, and code nothing exercises is code whose bugs are still in it.
@@ -5825,6 +5827,22 @@ Changing the six routes to `z.void()`; retrying on status rather than on code; r
 **A refresh that fails with 401 clears the session; one that fails otherwise does not.** A server briefly unavailable has not ended anybody's session, and signing somebody out over a blip is the wrong answer to a transient failure.
 
 **The upload helper does not finalise and does not poll.** Finalising is an ordinary API call the caller makes — documented idempotent, so safe to retry — and how often to poll for `ready` is a UX decision rather than a transport one.
+
+## Amendments
+
+**Phase 11.** This decision reasoned correctly about one global React Native does not have, and then used two more.
+
+`newTraceId` is injectable and may return nothing because "React Native has no global `crypto` without a polyfill, and a client that threw on a missing global would be unusable in the runtime this package exists for." That sentence is right, and it applies word for word to `AbortSignal.any` and to the two-argument `URL` constructor, both of which this client used unguarded.
+
+**`new URL(path, baseUrl)`.** React Native ships a homemade lightweight `URL`, and among its documented gaps is that it cannot take a `localhost` base. Every development build points at `http://localhost:3000`, so the failure was not an edge case reachable under load — it was the first request an app would ever make, in the environment where all the early work happens. The path is now joined directly.
+
+Doing so fixed a second thing nobody had noticed, because no test used a base URL with a path. The standard two-argument form treats an absolute path as a *replacement*: `new URL("/moments", "https://example.com/v1")` is `https://example.com/moments`, with the prefix silently gone. A client configured against a versioned base would have sent every one of its hundred and sixty-three operations to an address the API does not serve. A base URL's prefix is part of where the API is, and joining keeps it.
+
+**`AbortSignal.any`.** Absent from React Native, and called on every request carrying a caller's own signal — which is every screen a person can navigate away from. It is now built from `AbortController` and two listeners, reading each input's `aborted` state as well as subscribing, because a signal that has already aborted never fires the event again.
+
+**`AbortSignal.timeout` went with it**, for the same reason and with one consequence worth recording: the deadline is now an ordinary `AbortController`, so the abort no longer carries a `TimeoutError` to recognise. `classify` is told whether the deadline expired rather than inferring it, and the caller's own cancellation is checked first — somebody who aborts at the moment a deadline expires still asked to stop. Getting that ordering wrong would have made every timeout unretryable, which is the opposite of what a timeout is for.
+
+**Why none of this was caught.** Every test in this package runs on Node, where all three globals exist and behave. The completeness check reads the OpenAPI document and proves an operation exists for every route; nothing proved the transport beneath them runs anywhere but the machine the tests run on. That gap closes when `apps/mobile` bundles this package and `expo export` runs in CI — which is the first thing in this repository to execute the client outside Node.
 
 # ADR-154 — What the Client Contract Settles, and What It Refuses to Guess
 
