@@ -1896,6 +1896,20 @@ The exact backend should be chosen later based on hosting, cost, and operational
 - another service?
 - How is User context pseudonymized?
 
+**Still open after Phase 11, deliberately.** Choosing a provider is choosing what
+leaves somebody's device, and the answer depends on what there is to report —
+which is Phase 12's screens rather than Phase 11's shell. Deciding it now would
+mean deciding it against an application that does almost nothing.
+
+What Phase 11 built instead is the seam. `ErrorBoundary` takes an `onError`
+callback and nothing is attached to it, so a reporter arrives in one place rather
+than being threaded through afterwards. The boundary's own fallback shows fixed
+text and never the error: what is on a screen can be photographed, so the
+scrubbing this document requires at `:1556` applies at least as strongly there.
+
+The client already sends `x-trace-id` from `expo-crypto` (ADR-155), so a request
+can be followed from the device into the API's logs today, without a provider.
+
 ## Runbooks
 
 - Where do runbooks live?

@@ -1501,12 +1501,28 @@ The following questions require explicit resolution before implementation harden
 
 ## Mobile
 
-- Which Expo/native secure storage mechanism is used?
-- Are refresh credentials stored only in secure storage?
-- Are access credentials memory-only?
-- How does app restart restore Session state?
-- How is biometric device unlock related to Chronologity authentication, if at all?
-- Does biometric unlock merely protect local credential access?
+Answered in Phase 11 (ADR-155).
+
+**`expo-secure-store`** holds the refresh credential — the iOS Keychain, and
+SharedPreferences encrypted with the Android Keystore. Three fields go in: the
+Session's identity, the refresh credential, and when that credential lapses.
+
+**Refresh credentials are stored only there, and access credentials are held in
+memory and written nowhere.** An access token expires in minutes and is
+worthless by the next launch, so storing it would be a second copy of something
+sensitive in exchange for nothing.
+
+**A restart restores a claim rather than a Session.** What the store returns
+becomes credentials whose access token is *already expired*, so the first
+request refreshes and the server answers the only question that matters. This is
+what `authentication.md:1271` requires in practice: a stored credential never
+proves the Session is still valid server-side. A refresh credential whose expiry
+has already passed is discarded without a request.
+
+**Biometric unlock is not used**, and this is a decision rather than an
+omission. Nothing on the device is readable without the server's agreement, so a
+fingerprint prompt in front of a screen the server would refuse anyway protects
+nothing. Revisit when there is a local capability that survives being offline.
 
 ## OAuth
 

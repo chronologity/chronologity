@@ -5895,3 +5895,73 @@ Generating operations from the OpenAPI document; a `packages/graphql-client` cre
 **Adding a field to a response stays safe; removing or narrowing one does not.** That asymmetry is now a test rather than a convention, and it will fail before a client already on somebody's phone does.
 
 **Each deferral above carries the condition that reopens it**, so Phase 11 inherits four decisions rather than four silences.
+
+# ADR-155 — The Application, and the Five Questions It Had to Answer to Exist
+
+## Status
+
+Accepted. Records the decisions taken bootstrapping `apps/mobile`, and closes the mobile questions left open at `authentication.md:1504-1509`.
+
+## Context
+
+Everything before this phase was a backend nobody could open. A hundred and sixty-three typed REST operations and a GraphQL read surface, both green, and no application.
+
+The canonical documentation constrains what such an application must do far more than it constrains how. It requires platform-secure storage for a refresh credential and names what must never hold one (`authentication.md:628-644`); it requires every deep link to be reauthorized on arrival (`privacy.md:432-442`); it requires client authorization to be presentation only (`authorization.md:833`); and it names four navigator files in the canonical tree (`monorepo.md:317-323`). It deliberately declines to name a navigation library (`timeline.md:582`), names no query cache at all, and leaves five mobile questions explicitly open.
+
+Those five had to be answered to write a line of this, which is why they are answered here rather than deferred again.
+
+## Decision
+
+**React Navigation**, not Expo Router.
+
+**One query cache for both protocols**: TanStack Query holds REST and GraphQL alike, and the GraphQL half is a `fetch` rather than a client library.
+
+**The refresh credential lives in `expo-secure-store`; the access token lives in memory and is written nowhere.**
+
+**A cold start restores a claim, not a Session.** What comes back from the store is turned into credentials whose access token is already expired, so the first request refreshes and the server decides.
+
+**`expo-crypto` supplies the trace identifier** ADR-153 left injectable.
+
+**Biometric unlock is not built.** Revisit when there is something behind it worth a second factor — a local vault, or a privileged action — rather than as a lock on a screen the server would refuse anyway.
+
+**GraphQL documents and their types are written by hand, inside this application.** Not generated, and not in a package.
+
+## Alternatives Considered
+
+Expo Router with an amended canonical tree; Apollo Client or urql beside TanStack Query; `AsyncStorage` for the whole credential; storing the access token too; refreshing lazily on a 401 rather than eagerly on restore; a `uuid` package instead of `expo-crypto`; requiring biometrics to open the app; generating types from the aggregator's SDL with a codegen step.
+
+## Rationale
+
+**The canonical tree already described React Navigation.** Four named navigator files and a `linking.ts` is that library's shape; Expo Router would replace them with a directory whose filenames are the routes, and `monorepo.md:1487` would have required amending the tree in the same change. Following a structure the architecture already committed to is the cheaper of two defensible options.
+
+The product reasoning points the same way. `timeline.md:161` requires that leaving depth returns somebody to the same chronological *and* contextual position, and `timeline.md:165` describes navigation state as `Time Position + Context Position + Moment Position` — a triple this application holds and restores deliberately. That is easier to reason about when the navigators are objects in code than when they are inferred from a directory listing.
+
+**A normalized GraphQL cache is the wrong tool for a read-only surface.** It exists to keep a mutation's result consistent everywhere an entity appears, and ADR-136 turned mutations and subscriptions off at the aggregator: `defineMutation: false`, `subscription: false`, both asserted absent from introspection. What is left is paging, which the connection convention (ADR-140) already made ordinary. Two caches would have meant two invalidation models and two answers to "why is this stale", for a benefit this surface cannot produce.
+
+**The split between what is stored and what is not follows the threat, not the convenience.** A refresh credential can mint access tokens for as long as it lives, so it goes where the platform protects it. An access token expires in minutes and is worthless by the next launch, so keeping it would add a second copy of something sensitive in exchange for nothing.
+
+**Restoring an expired access token deliberately is the whole design.** `authentication.md:1271` forbids assuming a stored credential proves a Session is still valid server-side — it may have been revoked from another device, or, on iOS, may belong to an installation that was deleted, because the Keychain outlives the app. Making the restored token already expired means the first request refreshes, which asks the server the only question that matters. A 401 clears the Session (ADR-153) and the person signs in again; anything else leaves it intact, because a backend briefly unreachable has not ended anybody's Session. The stored access token is the empty string rather than something plausible, because there is nothing useful to put there and a value that looked usable is one somebody might use.
+
+**The refresh expiry is checked before the request, not by it.** An app returning after a month would otherwise spend a round trip discovering what the expiry already said.
+
+**Biometrics would have been a lock on the wrong door.** `authentication.md:1508-1509` asks whether biometric unlock relates to Chronologity authentication at all, or merely protects local credential access. Nothing on this device is readable without the server's agreement, so a fingerprint prompt in front of a screen the server would refuse anyway is theatre — and `requireAuthentication` is unsupported in Expo Go, which would have cost the development path for it. The condition for revisiting is a local capability that survives being offline.
+
+**Generating GraphQL types would have re-opened a decision made a phase ago.** ADR-154 declined to create a package for them because nothing but this application consumes the schema, and the same argument holds one level down: a codegen step is a build dependency, a committed artefact, and a schema fetch, in exchange for types over eight fields. When a second consumer appears — the condition ADR-154 already recorded — both decisions are reopened together.
+
+## Consequences
+
+**This repository now runs two test runners.** ADR-076 anticipated exactly that and carved it out in advance, so this is a note rather than a reversal. `jest-expo` mocks the native half of every Expo module, which is not something Vitest can be configured into doing.
+
+Two things about that runner are worth writing down, because both cost time to find. React Native Testing Library 14 made `render` **and** `fireEvent` asynchronous, since React 19 renders concurrently — a missing `await` presents as an element that is not there. And `SafeAreaProvider` renders *nothing* without window metrics, so `Providers` accepts them as a prop; supplying `initialWindowMetrics` in production also removes a frame of layout correction on a device with a notch.
+
+**`packages/tsconfig` and `packages/eslint-config` gained their React Native presets**, which both packages had been describing in the conditional tense since Phase 2 — "added when a real Node, React Native, or browser consumer exists". This is that consumer.
+
+The ESLint one carries a pin worth knowing about: `eslint-plugin-react` with `version: "detect"` calls `context.getFilename()`, which ESLint 10 removed, and every rule in its recommended set then fails to load. The version is stated outright instead. It is the same shape of problem as this package's existing TypeScript pin, handled the same way.
+
+**Metro is configured with `unstable_enablePackageExports`**, and without it nothing works. `@chronologity/api-client` and `@chronologity/contracts` are ESM-only and describe themselves with an `exports` map rather than a `main` field. `expo export` runs as this application's `build`, which means CI bundles it on every push — the first thing in this repository to execute the client outside Node, and the check that closes the gap ADR-153's amendment describes.
+
+**Two exit criteria cannot be proved by CI.** `roadmap.md:1208-1212` requires that an iOS and an Android development build start, and the workflow runs on `ubuntu-latest` with no macOS runner. They are verified by hand. What CI does prove is that the bundle builds, which is where a bootstrap usually fails.
+
+**The application deliberately renders a withheld Moment as withheld.** ADR-140 made it its own type in a union rather than the readable one with nullable fields, and a client that showed a gap instead would misstate the shape of a period while one that showed it as readable would leak. Both halves are tested.
+
+**`z.url()` is not an address.** `packages/config`'s `urlSchema` accepts `localhost:3000` — parsed as a URL whose protocol is `localhost:` — and accepts `ftp://` too. Neither is something `fetch` can use, and the first is precisely the typo somebody makes writing this variable by hand. The shared schema is unchanged; this application requires an `http` or `https` scheme, which is what an address for `fetch` has to be.

@@ -584,6 +584,33 @@ apps/
             └── reaction.ts
 ```
 
+### What the tree describes, and what exists
+
+The tree above is the shape this application grows into, not a checklist to
+satisfy on day one: files are created when they acquire a responsibility, never
+to populate a diagram.
+
+Phase 11 created the spine — `app/` with its config, providers and three
+navigators; `lib/` with `api/`, `graphql/`, `auth/` and `storage/`; one screen
+under each of `features/auth/` and `features/timelines/`; and `components/feedback/`
+for the error boundary and error state. The rest arrives with the screens that
+need it, in Phase 12.
+
+Two deviations from the tree are permanent rather than pending:
+
+**No `babel.config.js`.** Expo SDK 57 configures Babel through `babel-preset-expo`
+without a project-level file, and the template no longer generates one. Adding
+one back would be a file that exists to match a diagram.
+
+**Imports inside this application omit the `.js` extension**, unlike every other
+package here. Those use `nodenext` resolution, where the extension is required;
+Metro resolves like a bundler, where a `.js` specifier pointing at a `.ts` file
+is a file that does not exist. The preset says which world a package is in.
+
+`jest.config.js` and `metro.config.js` sit alongside the framework files, and
+this application has no `tsconfig.build.json` — Metro produces the bundle, so
+there is no `tsc` build to exclude tests from.
+
 ### Mobile placement rules
 
 The major directory meanings are:
