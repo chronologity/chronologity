@@ -1111,6 +1111,34 @@ Contains the typed REST client used primarily by `apps/mobile` and, where approp
 
 It encapsulates API transport contracts without importing API implementation.
 
+```text
+packages/api-client/
+├── src/
+│   ├── api-error.ts        the API's stable envelope, as a thrown error
+│   ├── client.ts           one request: headers, timeout, parse, retry loop
+│   ├── query.ts            a request object as a query string
+│   ├── retry.ts            what may be retried, and when
+│   ├── session.ts          holding credentials and refreshing them
+│   ├── uploads.ts          the presigned PUT, which does not go through the API
+│   ├── operations/         one module per feature (Phase 10, Part 2)
+│   └── index.ts
+```
+
+**It owns transport, never types.** The request and response shapes come from
+`packages/contracts`, which the client imports and parses against — the same
+schemas that validate the request and serialise the response on the API side, so
+a client operation is parsing the very object that produced the bytes. Restating
+a shape here would be a second source of truth for something ADR-070 settled.
+
+**Its operations are written rather than generated**, against those contracts,
+with the committed OpenAPI document used as an inventory: a test fails when a
+documented operation has no client method and no recorded reason (ADR-152).
+
+`src/uploads.ts` is the one thing here that is not an API call. Media goes
+straight to object storage (ADR-029), so the middle step of the upload flow has
+no other home — and it must send no `Authorization` header, because the
+signature in the URL is the authority (ADR-153).
+
 ## `packages/timeline-derivation`
 
 Contains what the two applications that derive Timelines must agree about: the eligibility rule deciding which Moments a Viewer may be shown, the cursor format together with the keyset condition and ordering that read it back, the translation from a View Specification into filters, and the row shape and projection version.

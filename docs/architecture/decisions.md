@@ -3393,6 +3393,8 @@ Moving the existing implementation comments into `description` rather than writi
 
 **Committed, because a contract change should look like one.** A diff in `openapi.json` on a pull request says "the boundary moved" in a way a changed line inside a route file does not. It is also what `packages/api-client` will generate from when Phase 10 arrives.
 
+*Amended by ADR-152 — see Amendments below.*
+
 **One helper for error responses, because the interesting sentence is shared.** Every error at every status is the same envelope, so only the description varies. That let the most important thing a client developer needs to know — *a 404 must not be read as proof of absence* — be written once and appear on the thirty-six routes that can refuse. Written per route it would have been thirty-six chances to phrase it differently, and thirty-six places to forget it.
 
 **Tags from a hook, for the same reason.** Nine hooks rather than eighty-one annotations, and a route added next year is grouped without anybody remembering to say so.
@@ -3410,6 +3412,29 @@ Moving the existing implementation comments into `description` rather than writi
 **The generator reads `.env.example` rather than the environment.** Routes do not depend on anybody's credentials, so a document that required S3 keys to generate would be absurd, and a CI job could not produce one after a bare checkout. It has a useful side effect: generating the document now also proves `.env.example` still covers every variable the application requires, because a missing one fails there rather than on somebody's first run.
 
 **Sixty-two of eighty-one operations carry a description.** More than the fifteen to twenty first estimated, because once the error helper carried the general warning, the remaining prose was about things a consumer genuinely cannot infer: that asking for a state which already holds succeeds, that a reduced place carries no identifier, that a relationship whose far end is inaccessible is absent rather than redacted, and that authentication answers say nothing about whether an account exists.
+
+
+## Amendments
+
+**2026-09 (ADR-152).** The consequence "it is also what `packages/api-client`
+will generate from when Phase 10 arrives" no longer holds. Phase 10 writes the
+client's operations against `packages/contracts` instead, and uses this document
+as an inventory rather than a source — a test fails when an operation here has no
+client method and no recorded reason for its absence.
+
+The cause was a property of the document nobody had looked at when that sentence
+was written: `components.schemas` was **empty**, with zero `$ref`s in 2.7 MB.
+Every schema was inlined at every use site, so a generator saw a hundred and
+seventy-nine unrelated anonymous shapes rather than one `Moment` used thirty-six
+times — while the Zod schemas those bytes were generated *from* sat one
+`workspace:*` import away, already named, and already the source of truth by
+ADR-070.
+
+**The decision itself is unchanged and was right**: generate the document from
+the routes, commit it, publish it nowhere real. ADR-152 additionally *fixed* the
+inlining, because it defeated this ADR's own stated justification — a change to
+one field on a Moment produced thirty-six identical diff hunks, which says
+nothing about where the boundary moved.
 
 # ADR-113 — Reactions Are Names, Counted by Aggregate, and Hidden Rather Than Deleted
 
@@ -5672,3 +5697,131 @@ The harness records the shape rather than a verdict, and the shape is the point:
 **Two guards were written after being needed rather than before.** Autocannon's default ten-second client timeout silently *excludes* timed-out requests from its latency figures, so the first run at sixteen readers looked fast because its slowest requests had been dropped; the timeout is now sixty seconds so a slow answer is recorded as slow. And closing a store whose sockets a load run has exhausted throws, which was reporting a successful measurement as a failed one.
 
 **`apps/api` still has no `statement_timeout`.** The same gap `data-storage.md:1389` describes exists on the write side, where the consequences are larger — a held connection there blocks a command rather than a read. Recorded here rather than fixed, because the write side's timeout has to account for migrations and projection rebuilds, and choosing that number is not this phase's to make.
+
+---
+
+# ADR-152 — The Client Is Written, and the Document It Checks Itself Against Was Fixed
+
+## Status
+
+Accepted. Amends ADR-112, and settles how `packages/api-client` acquires its operations.
+
+## Context
+
+ADR-112 committed a generated OpenAPI document and said, in its consequences, that it "is also what `packages/api-client` will generate from when Phase 10 arrives." Phase 10 arrived, and the sentence turned out to rest on an assumption about the document that nobody had checked.
+
+**`components.schemas` was empty. There were zero `$ref`s in 2.7 MB.** Every schema was written out in full at every use site — a Moment described thirty-six separate times, structurally identical and unrelated as far as any tool could tell. The document also carried **no `securitySchemes` and no per-operation `security`**, so it said nothing about which of a hundred and seventy-nine operations needed a token.
+
+Meanwhile the Zod schemas those bytes were generated *from* were one `workspace:*` import away — named, exported through an explicit barrel, and made the source of truth by ADR-070, which says outright that "JSON Schema is a derived artifact rather than the source of truth."
+
+## Decision
+
+**Operations are written against `packages/contracts`, not generated from the document.** Each is thin: a method, a path, the request schema it validates against, the response schema it parses.
+
+**The document becomes the checklist.** A test reads it and fails when an operation has no client method and no exemption carrying a reason.
+
+**The document was fixed anyway.** A schema registry in `packages/contracts` gives public names to the shapes that repeat, and the API's Swagger transform emits `$ref`s against them. A bearer security scheme is declared and required by default, with thirteen routes opting out.
+
+## Alternatives Considered
+
+Generating from the document as ADR-112 anticipated; generating after fixing the document; hand-writing without a completeness check; naming every schema rather than the ones that repeat; naming schemas in `apps/api` rather than in `packages/contracts`; describing security per operation rather than by default with opt-outs; leaving the document inlined since the client no longer generates from it.
+
+## Rationale
+
+**Generating from a derived artefact when the source is in scope installs a second source of truth, and a worse one.** Even fixed, the document is JSON Schema produced *from* Zod: it cannot express what the Zod schema knows about coercion, defaults, or refinement, and a generated type would be a lossy restatement of a type already importable. ADR-070 anticipated exactly this and the reasoning has not changed.
+
+**The empty `components` made it worse than merely redundant.** A generator would have emitted hundreds of anonymous, structurally-duplicated interfaces with no reusable names — nothing resembling `Moment` or `SessionCredentials`. Every operation would have had its own private idea of what a Moment is, which is the opposite of a contract.
+
+**What generation actually buys is completeness, and that is separable.** The reason to generate is not that machines type faster; it is that a human writing a hundred and sixty-three operations will miss one. So the check was kept and the generation dropped: a test reads the document and refuses to let an operation exist there with no way to call it. This is the mechanism `apps/api/src/testing/routes.test.ts` already uses against the same document, and the coverage-or-exemption pattern 9K built for the GraphQL surface.
+
+**Fixing the document is justified without any of the above**, and would have been worth doing even if the client did generate from it. ADR-112's stated reason for committing it is that "a diff in `openapi.json` on a pull request says 'the boundary moved'." Inlining defeated that precisely: adding one field to a Moment produced thirty-six identical diff hunks, and a reviewer could not tell one boundary change from thirty-six. **A justification a decision states for itself is worth protecting**, and it had quietly stopped being true.
+
+**Names live in `packages/contracts` because an id is a public word.** It becomes a key in `components.schemas`, so it is read by anybody browsing the document, importing it into a tool, or generating from it later. That is the same reason this package's barrel is an explicit list rather than `export *` — the surface is deliberate.
+
+**Only what repeats is named.** Sixty-six shapes: entities, pages, and the value objects that appear inside many of them. Naming `captionSchema` would buy nothing, because a caption appears twice and reads perfectly well inline; naming `momentSchema` collapses thirty-six copies into one. Requests are deliberately unnamed — each belongs to exactly one operation, so a name would be a second way of saying what the operation already says.
+
+**Security is required by default and opted out of, rather than declared where it applies.** A hundred and fifty operations need a credential and thirteen do not, so stating the rule and naming the exceptions is thirteen declarations instead of a hundred and fifty. It also fails safe in the direction that matters: a new route that forgets to say anything is documented as needing a token, which is wrong in a way somebody notices, rather than documented as public, which is wrong in a way nobody does.
+
+## Consequences
+
+**The document went from 2.7 MB to 0.77 MB**, with 966 `$ref`s and 132 named shapes — sixty-six schemas, each in an input and an output form, because a schema with defaults or coercion genuinely differs between what a client may send and what it will receive.
+
+**A change to one shape now produces one diff hunk.** Which is what ADR-112 said committing the document was for.
+
+**The completeness test is Part 2's**, and starts with an empty exemption table. That is the strongest version of it: the first entry anybody adds has to be argued for rather than joining a list.
+
+**Anything that reads OpenAPI now gets something usable** — a Postman or Insomnia import, a mock server, a documentation site — which was not true of the inlined form. That is a side benefit rather than a reason, but it is a real one given a `chore/postman-collection` branch already exists.
+
+**Sixty-six names are now a published vocabulary that cannot be changed casually.** Renaming `Moment` in the registry renames a key in the document and breaks anything generated from it. That is the cost of naming things, and it is smaller than the cost of not.
+
+---
+
+# ADR-153 — What the Client Does When the Network Does Not Cooperate
+
+## Status
+
+Accepted. Records the transport decisions in `packages/api-client`, and two bugs that were latent for as long as nothing called it.
+
+## Context
+
+`packages/api-client` said of itself that it was "bootstrapped without operations on purpose… what lives here is transport concern only." That was the right posture while no routes were stable. It also meant nothing had ever exercised it, and code nothing exercises is code whose bugs are still in it.
+
+Two were. **`z.null().parse(undefined)` throws**, and six routes describe their empty success as `204: z.null()` — deleting a Moment among them. The client parsed `undefined` unconditionally, so a delete would have failed *after the server had already succeeded*: the Moment gone, the caller shown a validation error. And **`refreshSessionRequestSchema` carried only `refreshToken`** while the route required `sessionId` as well, so a client typed honestly from the shared contract could not refresh a session at all.
+
+Beyond the bugs, the transport was missing everything an operation needs: no query strings, so nothing paged or searched; no retries, though `isRetryable` had been sitting in `packages/contracts` unused since it was written; no session refresh, so an expiring token surfaced as a logout; and no way to PUT bytes to a presigned URL, which is the one step of the upload flow that does not go through this client at all.
+
+## Decision
+
+**Both spellings of an empty body are answered**, and the fix is in the client rather than in six routes.
+
+**Retries follow `isRetryable` and stop at the method.** `GET`, `HEAD`, `PUT`, `DELETE` may be repeated; `POST` never is, unless the caller declares that route idempotent.
+
+**Transport failures are classified**, distinctly from anything the server said.
+
+**Sessions refresh before expiry rather than after failure**, once for however many requests notice at the same moment.
+
+**The presigned PUT sends no `Authorization` header**, and exactly the content type it was given.
+
+**`refreshSessionRequestSchema` gains `sessionId`**, and the route drops its local extension.
+
+## Alternatives Considered
+
+Changing the six routes to `z.void()`; retrying on status rather than on code; retrying `POST` with an idempotency key; refreshing reactively on a 401; letting the session own storage; putting the upload helper behind the ordinary `request`; treating an unrecognised transport failure as retryable; sending `Authorization` on the presigned PUT "for consistency".
+
+## Rationale
+
+**Neither spelling of a 204 is wrong, so the client tolerating only one is what was wrong.** Changing six routes would have made this client work and left the next one broken. It also would have been a change to the published contract to accommodate a defect in a consumer.
+
+**The method decides retrying, not the error.** This is the decision most worth being firm about: a `POST` that timed out may have *succeeded*, with the response lost on the way back. Retrying records a second Moment. There are no idempotency keys in this system — `api.md:1051` explicitly leaves the mechanism open — so nothing exists to make a repeat safe. `POST /uploads/:id/finalize` is documented idempotent and the caller may say so per operation; nothing is inferred from the path, because nothing about a path says whether repeating it is safe.
+
+**Retrying on code rather than status** is what `isRetryable` already encodes, and status is the wrong key: `CONCURRENCY_CONFLICT` and `PROVIDER_UNAVAILABLE` arrive with their own statuses from domain errors, and a 500 that is genuinely a server defect must not be retried forever.
+
+**A failure that never reached the server is a different kind of thing**, and the client could not previously say so. `fetch` reports a dropped connection as a `TypeError` and a timeout as a `DOMException`; neither is an `ApiError`, so both reached callers as unrecognised crashes — while being exactly the failures a retry exists for. They are now `TransportError`, and **a cancellation the caller asked for is marked not retryable**, because retrying it would be doing work somebody asked to stop.
+
+**Refreshing before expiry rather than after a 401 is the difference between a session that stays alive and one that fails one request per hour on purpose.** The credentials carry `accessTokenExpiresAt`; waiting to be told is choosing to fail. A margin absorbs the round trip and the disagreement between a phone's clock and the server's.
+
+**Once, however many requests notice.** A screen that loads six things on open makes six requests that all find the same expired token. Six refreshes would race, and five would be spending a refresh token the first had already rotated away. The in-flight refresh is shared.
+
+**The session never touches storage.** Where a refresh token lives is a mobile decision — `security.md:393` requires platform-secure storage — and belongs to Phase 11. What this offers instead is a change callback, so whoever owns storage hears about new credentials the moment they exist. It is deliberately not awaited before the token is handed out: a slow write should not delay a request already holding a valid token.
+
+**No `Authorization` header on the presigned PUT, and this is the part that is easy to get wrong in a way that looks like something else.** The signature in the URL *is* the authority. An extra header does not make the request more authorised — it makes it a different request from the one that was signed, and storage refuses it with a 403 indistinguishable from a signing bug. The content type is passed through from the authorisation rather than accepted from the caller, for the same reason: it is covered by the signature, so `image/jpeg` where the authorisation said something else is a mismatch rather than a synonym.
+
+**The expiry is checked before sending**, because storage answers an expired signature with a 403 that reads exactly like a malformed one — and the caller's next move differs entirely: register again, or fix a bug.
+
+**Storage's refusals are not dressed up as this API's.** Its body is XML naming the bucket and the key; neither belongs in front of somebody or in a log written here. The status is reported and the body is not.
+
+**The refresh contract was corrected rather than worked around.** The route had extended the shared schema locally, which is how the shared one came to be missing a required field without anybody noticing — the API was self-consistent and only a client typed from the contract would have found it. The extension is gone and the route now uses the contract unmodified, so the two cannot diverge again.
+
+## Consequences
+
+**Query serialisation parses before it writes**, applying the contract's bounds and defaults — so a page size the server would refuse is refused here, where the error names the field, and an omitted `limit` is sent as the value the server would have assumed rather than left implicit.
+
+**A retried request gets a fresh timeout.** Sharing one across attempts would mean the last attempt inherits whatever the first two left of it.
+
+**Backoff carries full jitter**, because without it every client that failed at the same moment retries at the same moment — the failure a backoff exists to prevent. `Retry-After` overrides it where the server sent one, bounded by a ceiling so a long wait cannot strand a request.
+
+**The client now sends `x-trace-id`**, which the API already honours and echoes, so a request can be followed from the app into the server's logs. The generator is injectable and may return nothing: React Native has no global `crypto` without a polyfill, and a client that threw on a missing global would be unusable in the runtime this package exists for. Absent, the header is omitted and the server generates its own.
+
+**A refresh that fails with 401 clears the session; one that fails otherwise does not.** A server briefly unavailable has not ended anybody's session, and signing somebody out over a blip is the wrong answer to a transient failure.
+
+**The upload helper does not finalise and does not poll.** Finalising is an ordinary API call the caller makes — documented idempotent, so safe to retry — and how often to poll for `ready` is a UX decision rather than a transport one.
