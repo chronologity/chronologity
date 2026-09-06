@@ -205,6 +205,20 @@ describe("showing a page of somebody's own history", () => {
     expect(queryByTestId("timeline-empty")).toBeNull();
   });
 
+  it("does not crash on an answer that is missing the field it asked for", async () => {
+    // A GraphQL response is not parsed the way a REST one is, so an absent
+    // field arrives as undefined rather than as a refusal. Reaching through it
+    // took the whole screen down, which is worse than any error state.
+    const backend = backendWith((async () => ({})) as GraphqlClient["query"]);
+
+    const { getByTestId, queryByTestId } = await render(<TimelineScreen />, {
+      wrapper: wrapper(backend),
+    });
+
+    expect(getByTestId("timeline-loading")).toBeTruthy();
+    expect(queryByTestId("timeline-onboarding")).toBeNull();
+  });
+
   it("shows an outage as an outage rather than as an empty Timeline", async () => {
     // The distinction ADR-151 exists for. This is the rendering half of it.
     const backend = backendWith(

@@ -52,7 +52,14 @@ export function TimelineScreen(): React.JSX.Element {
     queryFn: async ({ signal }) => await graphql.query<ViewerResult>(GET_VIEWER, {}, signal),
   });
 
-  const userId = viewer.data?.viewer.userId ?? undefined;
+  // Every link in this chain is optional, and that is not defensive habit. A
+  // GraphQL response is not parsed the way a REST one is — `packages/contracts`
+  // validates those, and these documents are hand-written with hand-written
+  // types beside them (ADR-154) — so a field that is absent arrives as
+  // `undefined` rather than as a refusal. Reaching through it crashes the
+  // screen, which is the one failure mode worse than showing an error.
+  const userId = viewer.data?.viewer?.userId ?? undefined;
+  const answered = viewer.isSuccess && viewer.data?.viewer !== undefined;
 
   const timeline = useQuery({
     queryKey: ["timeline", userId],
@@ -74,7 +81,7 @@ export function TimelineScreen(): React.JSX.Element {
 
   // Signed in, with no account yet. Not a failure, and emphatically not a
   // reason to send somebody back to signing in (ADR-139).
-  if (viewer.isSuccess && userId === undefined) {
+  if (answered && userId === undefined) {
     return (
       <View style={styles.centred} testID="timeline-onboarding">
         <Text style={styles.empty}>There is one more step before your Timeline is ready.</Text>
@@ -82,7 +89,10 @@ export function TimelineScreen(): React.JSX.Element {
     );
   }
 
-  if (viewer.isPending || timeline.isPending) {
+  // A success that carried no `viewer` is a malformed answer, not an empty one.
+  // Waiting is the honest thing to render: the query will settle or fail, and
+  // either is better than deciding on a shape that is not there.
+  if (viewer.isPending || !answered || timeline.isPending) {
     return (
       <View style={styles.centred} testID="timeline-loading">
         <ActivityIndicator />
