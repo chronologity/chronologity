@@ -6,6 +6,7 @@ import {
 } from "@chronologity/api-client";
 import type { SessionCredentials } from "@chronologity/contracts";
 import { randomUUID } from "expo-crypto";
+import { createGraphqlClient, type GraphqlClient } from "../graphql/client";
 import { forgetSession, rememberSession } from "../storage/secure-storage";
 
 /**
@@ -37,7 +38,11 @@ import { forgetSession, rememberSession } from "../storage/secure-storage";
 
 /** What the application talks to, and what it is signed in as. */
 export interface Backend {
+  /** REST, to the authoritative API. */
   readonly client: ApiClient;
+  /** GraphQL, to the read-only Timeline aggregator. */
+  readonly graphql: GraphqlClient;
+  /** The Session both of them present. */
   readonly session: Session;
 }
 
@@ -45,6 +50,8 @@ export interface Backend {
 export interface BackendOptions {
   /** Where the API is. */
   readonly apiUrl: string;
+  /** Where the Timeline aggregator is. */
+  readonly feedUrl: string;
   /** Credentials recovered from the secure store, when there were any. */
   readonly credentials?: SessionCredentials | undefined;
   /** Told whenever the signed-in state changes, so the shell can re-render. */
@@ -61,12 +68,12 @@ export interface BackendOptions {
 /**
  * Build the client and its Session.
  *
- * @param options - The API address, any restored credentials, and a change
+ * @param options - Both addresses, any restored credentials, and a change
  *   listener.
- * @returns Both, already wired to each other.
+ * @returns The two readers and the Session, already wired to each other.
  */
 export function createBackend(options: BackendOptions): Backend {
-  const { apiUrl, credentials, onChange, fetch: fetchImpl } = options;
+  const { apiUrl, feedUrl, credentials, onChange, fetch: fetchImpl } = options;
 
   // The client is built first and refers to a Session it does not yet have.
   // That is sound rather than a trick: `getAccessToken` is a callback, and
@@ -88,7 +95,15 @@ export function createBackend(options: BackendOptions): Backend {
     },
   });
 
-  return { client, session };
+  // The same Session, deliberately. ADR-137 has the aggregator verify the very
+  // token the API issued, so there is one credential and one place it lives.
+  const graphql = createGraphqlClient({
+    url: feedUrl,
+    session,
+    ...(fetchImpl === undefined ? {} : { fetch: fetchImpl }),
+  });
+
+  return { client, graphql, session };
 }
 
 /**

@@ -1,31 +1,76 @@
-import { operations } from "@chronologity/api-client";
+import type { SessionCredentials } from "@chronologity/contracts";
+import { useEffect, useMemo, useState } from "react";
 import { StatusBar } from "expo-status-bar";
-import { StyleSheet, Text, View } from "react-native";
+import { ErrorBoundary } from "../components/feedback/error-boundary";
+import { restoreSession } from "../lib/auth/session";
+import { createBackend } from "../lib/api/client";
+import { loadConfig } from "./config/app-config";
+import { RootNavigator } from "./navigation/root.navigator";
+import { Providers } from "./providers";
 
 /**
- * The application.
+ * The application, assembled.
  *
- * A placeholder while the providers and navigation are wired. It imports an
- * operation deliberately: the one thing this bootstrap has to prove before
- * anything is built on it is that Metro can resolve the workspace's ESM
- * packages, and an import Metro must follow is the only proof of that.
+ * The order here is the phase's argument in miniature. Configuration is read
+ * first and fails loudly if it is wrong, because an application that cannot
+ * reach its backends should say so at launch rather than at the first tap. The
+ * backend is built once, so every screen shares one Session and one cache. The
+ * secure store is read after mount rather than before, because reading a
+ * keychain is asynchronous and blocking the first frame on it is how an
+ * application acquires a blank second on every cold start.
+ *
+ * The error boundary is outermost on purpose: it must survive whatever it
+ * catches, so it cannot be inside the tree that failed.
  *
  * @returns The root element.
  */
 export default function App(): React.JSX.Element {
+  const config = useMemo(() => loadConfig(), []);
+  const [credentials, setCredentials] = useState<SessionCredentials | undefined>(undefined);
+  const [restoring, setRestoring] = useState(true);
+
+  const backend = useMemo(
+    () =>
+      createBackend({
+        apiUrl: config.apiUrl,
+        feedUrl: config.feedUrl,
+        onChange: setCredentials,
+      }),
+    [config.apiUrl, config.feedUrl],
+  );
+
+  useEffect(() => {
+    let live = true;
+
+    void (async () => {
+      const { credentials: restored } = await restoreSession();
+
+      // The screen may have gone by the time the keychain answers.
+      if (!live) {
+        return;
+      }
+
+      if (restored !== undefined) {
+        // Adopting is what makes the first request refresh: the restored access
+        // token is already expired, so the server decides whether this Session
+        // is still real (authentication.md:1271-1279).
+        backend.session.adopt(restored);
+      }
+
+      setRestoring(false);
+    })();
+
+    return () => {
+      live = false;
+    };
+  }, [backend]);
+
   return (
-    <View style={styles.container}>
-      <Text>{operations.health.checkLiveness.template}</Text>
-      <StatusBar style="auto" />
-    </View>
+    <ErrorBoundary>
+      <Providers backend={backend} credentials={credentials} restoring={restoring}>
+        <RootNavigator client={backend.client} />
+        <StatusBar style="auto" />
+      </Providers>
+    </ErrorBoundary>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    alignItems: "center",
-    backgroundColor: "#fff",
-    flex: 1,
-    justifyContent: "center",
-  },
-});

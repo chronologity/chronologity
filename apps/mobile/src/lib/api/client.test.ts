@@ -35,6 +35,7 @@ describe("wiring the client to the Session it carries", () => {
     let sent: string | null = null;
     const { client } = createBackend({
       apiUrl: "http://localhost:3000",
+      feedUrl: "http://localhost:4000",
       fetch: async (_input, init) => {
         sent = new Headers(init?.headers).get("x-trace-id");
 
@@ -53,6 +54,7 @@ describe("wiring the client to the Session it carries", () => {
     let sent: string | null = null;
     const { client, session } = createBackend({
       apiUrl: "http://localhost:3000",
+      feedUrl: "http://localhost:4000",
       fetch: async (_input, init) => {
         sent = new Headers(init?.headers).get("authorization");
 
@@ -67,7 +69,10 @@ describe("wiring the client to the Session it carries", () => {
   });
 
   it("writes only the refresh half through to storage", async () => {
-    const { session } = createBackend({ apiUrl: "http://localhost:3000" });
+    const { session } = createBackend({
+      apiUrl: "http://localhost:3000",
+      feedUrl: "http://localhost:4000",
+    });
 
     session.adopt(credentials);
     await Promise.resolve();
@@ -80,7 +85,10 @@ describe("wiring the client to the Session it carries", () => {
   });
 
   it("forgets the stored credential when the Session ends", async () => {
-    const { session } = createBackend({ apiUrl: "http://localhost:3000" });
+    const { session } = createBackend({
+      apiUrl: "http://localhost:3000",
+      feedUrl: "http://localhost:4000",
+    });
 
     session.adopt(credentials);
     session.clear();
@@ -94,6 +102,7 @@ describe("wiring the client to the Session it carries", () => {
 
     const { session } = createBackend({
       apiUrl: "http://localhost:3000",
+      feedUrl: "http://localhost:4000",
       onChange: (next) => seen.push(next?.sessionId),
     });
 
@@ -106,6 +115,7 @@ describe("wiring the client to the Session it carries", () => {
   it("starts from credentials recovered on a cold start", async () => {
     const { session } = createBackend({
       apiUrl: "http://localhost:3000",
+      feedUrl: "http://localhost:4000",
       credentials,
     });
 
