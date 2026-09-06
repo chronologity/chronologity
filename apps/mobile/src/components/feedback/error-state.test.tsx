@@ -46,6 +46,32 @@ describe("telling somebody why they are not seeing what they asked for", () => {
     expect(words).toContain("connection");
   });
 
+  it("offers a way to try again when there is one", async () => {
+    // accessibility.md:798 lists "retry is required" among the states a person
+    // must be told about. On a phone there is no reload button to fall back on.
+    const { getByRole } = await render(
+      <ErrorState error={apiError("PROVIDER_UNAVAILABLE", 503)} onRetry={() => undefined} />,
+    );
+
+    expect(getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
+  it("offers nothing to retry when a refusal is the answer", async () => {
+    // Asking again for something that will be refused again is worse than
+    // offering nothing.
+    const { queryByRole } = await render(
+      <ErrorState error={apiError("AUTHORIZATION_DENIED", 403)} />,
+    );
+
+    expect(queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+
+  it("announces the failure rather than only drawing it", async () => {
+    const { getByTestId } = await render(<ErrorState error={apiError("RATE_LIMITED", 429)} />);
+
+    expect(getByTestId("error-state").props.accessibilityLiveRegion).toBe("polite");
+  });
+
   it("renders the sentence it chose", async () => {
     // RNTL 14's render is async: React 19 renders concurrently, so the tree is
     // not there the instant render returns.

@@ -1,5 +1,8 @@
 import { ApiError } from "@chronologity/api-client";
-import { StyleSheet, Text, View } from "react-native";
+import { View } from "react-native";
+import { spacing } from "../../app/theme/spacing";
+import { AppText } from "../primitives/app-text";
+import { RetryButton } from "./retry-button";
 
 /**
  * Telling somebody why they are not looking at what they asked for.
@@ -17,9 +20,17 @@ import { StyleSheet, Text, View } from "react-native";
  * it can be about them.
  */
 
-/** What to say about a failure. */
+/** What to say about a failure, and what to offer doing about it. */
 export interface ErrorStateProps {
   readonly error: unknown;
+  /**
+   * What trying again does.
+   *
+   * Omitted where there is nothing to retry — a refusal is an answer, and
+   * offering to ask again for something that will be refused again is worse than
+   * offering nothing.
+   */
+  readonly onRetry?: () => void;
 }
 
 /**
@@ -64,18 +75,28 @@ export function describe(error: unknown): string {
 /**
  * Show a failure.
  *
- * @param props - The error to describe.
+ * @param props - The error to describe, and optionally what retrying does.
  * @returns The element.
  */
-export function ErrorState({ error }: ErrorStateProps): React.JSX.Element {
+export function ErrorState({ error, onRetry }: ErrorStateProps): React.JSX.Element {
   return (
-    <View style={styles.container} testID="error-state">
-      <Text style={styles.body}>{describe(error)}</Text>
+    <View
+      // Announced when it appears, because a failure that only draws itself is
+      // one a person may never learn about (accessibility.md:790).
+      accessibilityLiveRegion="polite"
+      accessible
+      style={{
+        alignItems: "center",
+        gap: spacing.lg,
+        justifyContent: "center",
+        padding: spacing.xxl,
+      }}
+      testID="error-state"
+    >
+      <AppText color="textSecondary" style={{ textAlign: "center" }}>
+        {describe(error)}
+      </AppText>
+      {onRetry === undefined ? null : <RetryButton onPress={onRetry} />}
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  body: { color: "#444", textAlign: "center" },
-  container: { alignItems: "center", justifyContent: "center", padding: 32 },
-});

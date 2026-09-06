@@ -1,5 +1,8 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { View } from "react-native";
+import { spacing } from "../../app/theme/spacing";
+import { AppButton } from "../primitives/app-button";
+import { AppText } from "../primitives/app-text";
 
 /**
  * The last thing between a render failure and a blank screen.
@@ -90,28 +93,22 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     }
 
     return (
-      <View style={styles.container} testID="error-boundary-fallback">
-        <Text style={styles.title}>Something went wrong</Text>
-        <Text style={styles.body}>
+      <View
+        style={{
+          alignItems: "center",
+          flex: 1,
+          gap: spacing.md,
+          justifyContent: "center",
+          padding: spacing.xxl,
+        }}
+        testID="error-boundary-fallback"
+      >
+        <AppText variant="title">Something went wrong</AppText>
+        <AppText color="textSecondary" style={{ textAlign: "center" }}>
           Chronologity could not show this. Your history is safe — nothing was changed.
-        </Text>
-        <Pressable accessibilityRole="button" onPress={this.retry} style={styles.button}>
-          <Text style={styles.buttonLabel}>Try again</Text>
-        </Pressable>
+        </AppText>
+        <AppButton label="Try again" onPress={this.retry} tone="secondary" />
       </View>
     );
   }
 }
-
-const styles = StyleSheet.create({
-  body: { color: "#444", marginBottom: 24, textAlign: "center" },
-  button: {
-    backgroundColor: "#1a1a1a",
-    borderRadius: 8,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-  },
-  buttonLabel: { color: "#fff", fontWeight: "600" },
-  container: { alignItems: "center", flex: 1, justifyContent: "center", padding: 32 },
-  title: { fontSize: 20, fontWeight: "600", marginBottom: 8 },
-});
