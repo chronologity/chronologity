@@ -16,3 +16,4 @@ export {
   type ApiClientOptions,
   type RequestOptions,
 } from "./client.js";
+export { queryString } from "./query.js";
