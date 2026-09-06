@@ -25,9 +25,6 @@ import { AuthorizationService } from "../features/authorization/authorization.se
 import { LocationRepository } from "../features/locations/location.repository.js";
 import { ModerationRepository } from "../features/moderation/moderation.repository.js";
 import { DiscoveryRetrieval } from "../features/discovery/discovery.retrieval.js";
-import { TimelineEligibilityResolver } from "@chronologity/timeline-derivation";
-import { TimelineReadRepository } from "../features/timeline/timeline.read.repository.js";
-import { TimelineService } from "../features/timeline/timeline.service.js";
 import { createAnalytics } from "../lib/clickhouse/clickhouse.js";
 import { AccountDeletionService } from "../features/privacy/account-deletion.service.js";
 import { ErasureRepository } from "../features/privacy/erasure.repository.js";
@@ -242,10 +239,6 @@ export async function composeApp(config: AppConfig): Promise<ComposedApp> {
     search: new SearchService(
       new PostgresSearchRetrieval(database.dataSource),
       moderationRepository,
-    ),
-    timeline: new TimelineService(
-      new TimelineReadRepository(analytics.client, config.clickhouse.projectionVersion),
-      new TimelineEligibilityResolver(database.dataSource),
     ),
     discovery: new DiscoveryService(
       new DiscoveryRetrieval(database.dataSource),

@@ -139,44 +139,6 @@ const EXEMPT: readonly Exemption[] = [
   //
   // It is openable by anybody signed in and answers with the Moments that
   // Viewer was already entitled to see, one at a time, and no others.
-  // Substituting another identifier therefore returns that person's history
-  // filtered for the same Viewer: there is nothing to reach that reaching it
-  // discloses. A person who would rather not be walked through turns their
-  // Timeline off, and it then answers empty — refusing would itself say there
-  // is something there. Driven by timeline.integration.test.ts.
-  ...[
-    "GET /users/:userId/timeline",
-    "GET /users/:userId/timeline/head",
-    "GET /users/:userId/timeline/around",
-    "GET /users/:userId/timeline/buckets",
-  ].map((route) => ({
-    route,
-    because:
-      "A person's Timeline, openable by anybody and filtered per Viewer; timeline.integration.test.ts drives what each may see.",
-  })),
-
-  // A shared scope's Timeline. The identifier names a place or an occasion,
-  // which belongs to nobody, and the authorization question is not whether the
-  // Viewer may read the scope but which of its Moments they may see — decided
-  // inside the query, per Viewer, and driven by the eligibility matrix. There
-  // is no IDOR here to attempt: substituting another Location's identifier
-  // returns that Location's history filtered for the same Viewer, which is what
-  // the endpoint is for.
-  ...[
-    "GET /locations/:locationId/timeline",
-    "GET /locations/:locationId/timeline/head",
-    "GET /locations/:locationId/timeline/around",
-    "GET /locations/:locationId/timeline/buckets",
-    "GET /real-world-events/:realWorldEventId/timeline",
-    "GET /real-world-events/:realWorldEventId/timeline/head",
-    "GET /real-world-events/:realWorldEventId/timeline/around",
-    "GET /real-world-events/:realWorldEventId/timeline/buckets",
-  ].map((route) => ({
-    route,
-    because:
-      "A shared scope read per Viewer; timeline.eligibility.integration.test.ts drives which Moments each may see.",
-  })),
-
   // Naming somebody else is the whole point. The authorization question on
   // these is a Block, and follow.integration.test.ts drives that.
   ...[

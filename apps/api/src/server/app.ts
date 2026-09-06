@@ -20,7 +20,6 @@ import type { UserService } from "../features/users/user.service.js";
 import { registerPlugins } from "./register-plugins.js";
 import type { ModerationService } from "../features/moderation/moderation.service.js";
 import type { DiscoveryService } from "../features/discovery/discovery.service.js";
-import type { TimelineService } from "../features/timeline/timeline.service.js";
 import type { AccountDeletionService } from "../features/privacy/account-deletion.service.js";
 import type { ExportService } from "../features/privacy/export.service.js";
 import type { NotificationDeliveryService } from "../features/notifications/notification.delivery.service.js";
@@ -90,8 +89,6 @@ export interface BuildAppOptions {
   searchRateLimits?: SearchRateLimits | undefined;
   /** Recommending history. Mounted only alongside users, since every surface has a Viewer. */
   discovery?: DiscoveryService | undefined;
-  /** Navigating your own history. Mounted only alongside users. */
-  timeline?: TimelineService | undefined;
   /** Telling somebody something happened. Mounted only alongside users. */
   notifications?: NotificationService | undefined;
   notificationDelivery?: NotificationDeliveryService | undefined;
@@ -131,7 +128,6 @@ export async function buildApp({
   search,
   searchRateLimits,
   discovery,
-  timeline,
   notifications,
   notificationDelivery,
   accountDeletion,
@@ -200,7 +196,6 @@ export async function buildApp({
     moderation,
     search,
     searchRateLimits,
-    timeline,
     discovery,
     notifications,
     notificationDelivery,

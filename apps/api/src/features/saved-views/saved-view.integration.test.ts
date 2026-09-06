@@ -10,10 +10,7 @@ import { connectDatabase, createDatabase, type Database } from "../../lib/databa
 import { buildApp } from "../../server/app.js";
 import { MAILPIT, testAppConfig } from "../../testing/app-config.js";
 import { createTestAuthentication, type TestAuthentication } from "../../testing/authentication.js";
-import { TimelineEligibilityResolver } from "@chronologity/timeline-derivation";
-import { TimelineReadRepository } from "../timeline/timeline.read.repository.js";
 import { TimelineRepository } from "../timeline/timeline.repository.js";
-import { TimelineService } from "../timeline/timeline.service.js";
 import type { TimelineRow } from "@chronologity/timeline-derivation";
 import { UserRepository } from "../users/user.repository.js";
 import { UserService } from "../users/user.service.js";
@@ -32,8 +29,11 @@ import { SavedViewService } from "./saved-view.service.js";
  * - a link hands over a request, and the history behind it is derived for
  *   whoever followed the link — so the sender's eligibility cannot travel.
  *
- * The Timeline is mounted for real, against real ClickHouse, because the last
- * of those is only true if the whole loop is: save, share, open, read.
+ * History is projected into real ClickHouse, because the last of those is only
+ * true if the whole loop is: save, share, open — and the projection is what a
+ * reader would open. The reading half moved to `apps/feed-aggregator` when the
+ * API's Timeline routes were removed (ADR-138), so what is proved here ends at
+ * the handover rather than following it.
  *
  * Requires `pnpm infra:up`.
  */
@@ -76,10 +76,6 @@ describe("saved views", () => {
         database.dataSource,
         new SavedViewRepository(database.dataSource),
         accounts,
-      ),
-      timeline: new TimelineService(
-        new TimelineReadRepository(analytics.client, version),
-        new TimelineEligibilityResolver(database.dataSource),
       ),
     });
   });
@@ -892,15 +888,24 @@ describe("saved views", () => {
       assert.equal("moments" in opened.json(), false, "history travelled with the link");
     });
 
-    it("derives what the recipient may see, not what the sender may", async () => {
-      // Two Moments, one public and one private. The sender saved a view that
-      // covers both. Following their link must not admit the recipient to the
-      // private one — sharing a perspective is not sharing an eligibility.
+    it("hands over a perspective and never the history behind it", async () => {
+      // **What the API still owns, now that reading moved.** A share carries a
+      // context, a stretch of time and a lens — never Moments. That is what
+      // stops a link ever showing somebody history they could not otherwise
+      // open: there is nothing in the response to leak, and the recipient then
+      // reads the context as themselves.
+      //
+      // The other half — that reading it as the recipient applies *their*
+      // eligibility rather than the sender's — was proved here by opening the
+      // sender's Timeline through the API and comparing. Those routes are gone
+      // (ADR-138), and the property belongs to `apps/feed-aggregator`, which
+      // filters every read per Viewer and proves it across its timeline suite
+      // and its authorization matrix. It is not lost; it moved with the reading.
       const sender = await onboard();
       const recipient = await onboard();
 
-      const open = await recorded(sender.userId, 1971);
-      const shut = await recorded(sender.userId, 1972, { visibility: "private" });
+      await recorded(sender.userId, 1971);
+      await recorded(sender.userId, 1972, { visibility: "private" });
 
       const kept = await keep(sender.accessToken, "All of it", {
         context: { type: "person", id: sender.userId },
@@ -914,29 +919,9 @@ describe("saved views", () => {
       });
 
       assert.equal(opened.statusCode, 200, opened.body);
-
-      const theirs = await app.inject({
-        method: "GET",
-        url: `/users/${opened.json().view.context.id as string}/timeline`,
-        headers: authed(recipient.accessToken),
-      });
-      const mine = await app.inject({
-        method: "GET",
-        url: `/users/${sender.userId}/timeline`,
-        headers: authed(sender.accessToken),
-      });
-
-      assert.equal(theirs.statusCode, 200, theirs.body);
-      assert.deepEqual(
-        theirs.json().moments.map((moment: { momentId: string }) => moment.momentId),
-        [open],
-        "the recipient saw the sender's private history through a shared link",
-      );
-      assert.deepEqual(
-        mine.json().moments.map((moment: { momentId: string }) => moment.momentId).sort(),
-        [shut, open].sort(),
-        "the sender could not see their own history, so the comparison proves nothing",
-      );
+      assert.equal(opened.json().view.context.id, sender.userId);
+      assert.equal("moments" in opened.json(), false, "history travelled with the link");
+      assert.equal("momentIds" in opened.json(), false, "history travelled with the link");
     });
   });
 });
