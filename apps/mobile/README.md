@@ -30,19 +30,40 @@ Then press `i` for the iOS simulator (needs Xcode), `a` for an Android emulator
 this app uses — `expo-secure-store`, `expo-crypto`, `expo-linking` — ships in
 Expo Go, so no development build is required yet.
 
+### Configuring it
+
+**`apps/mobile/.env`, not the repository root one.** Every other application
+here reads the root `.env`; this one does not, and a shell that exports the root
+file does not help either — measured, not assumed:
+
+| Where the variables are    | Compiled into the bundle |
+| -------------------------- | ------------------------ |
+| `apps/mobile/.env`         | yes                      |
+| the repository root `.env` | no                       |
+| exported in your shell     | no                       |
+
+Getting this wrong fails at launch with a configuration error naming the missing
+variable, which is the intended behaviour: an address is never safe to guess,
+because a wrong one does not fail — it succeeds against something else.
+
+```sh
+cp apps/mobile/.env.example apps/mobile/.env
+```
+
 ### Which address to use
 
 This is the most common reason a device cannot reach a machine that is plainly
-serving requests. `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_FEED_URL` live in the
-repository root `.env`:
+serving requests:
 
-| Running on       | Host to use                                     |
-| ---------------- | ----------------------------------------------- |
-| iOS simulator    | `localhost` — it shares the host's network      |
-| Android emulator | `10.0.2.2` — the emulator's alias for the host  |
-| Physical device  | your machine's LAN address, e.g. `192.168.1.24` |
+| Running on         | Host to use                                     |
+| ------------------ | ----------------------------------------------- |
+| iOS simulator      | `localhost` — it shares the host's network      |
+| Android emulator   | `10.0.2.2` — the emulator's alias for the host  |
+| Expo Go on a phone | your machine's LAN address, e.g. `192.168.1.24` |
 
-`localhost` on a phone is the phone.
+`localhost` on a phone is the phone. `expo start` prints the address it is
+serving on — `exp://172.20.3.161:8081` or similar — and that host is the one a
+phone can reach, so it is the right one to put in `.env`.
 
 ### Signing in
 
@@ -76,6 +97,24 @@ Deliberately absent, each with the decision that says why: offline support
 need documents that are stable, and these are not yet), a crash and performance
 reporter (`observability.md:1891-1896` leaves the provider open), and biometric
 unlock (ADR-155).
+
+## Two things `expo install --check` will tell you
+
+**`typescript` "should be updated" to `~6.0.3`.** It should not. This workspace
+standardises on TypeScript 7 and every package declares it; `tsc --noEmit`, the
+Metro bundle, and CI all pass on 7. The warning compares against the version
+Expo ships its templates with, and following it would put a second TypeScript in
+the repository to satisfy a check rather than a problem.
+
+**Run it from here**, not from the repository root:
+
+```sh
+pnpm --filter @chronologity/mobile exec expo install --check
+```
+
+From the root it fails with "the module `expo` is not installed", because it is
+not — it belongs to this application. And never use `npm` anywhere in this
+repository: it cannot parse the `workspace:*` protocol pnpm uses.
 
 ## Tests
 
