@@ -25,4 +25,13 @@ module.exports = {
     "node_modules/(?!.*(react-native|@react-native|expo|@expo|@react-navigation|@testing-library|@chronologity|@unimodules|unimodules))",
   ],
   testMatch: ["<rootDir>/src/**/*.test.ts", "<rootDir>/src/**/*.test.tsx"],
+  // Rendering a React Native tree is slower than the five seconds Jest allows
+  // by default, and slower again when Turbo is running this alongside every
+  // other package's suite. A suite that passes alone and times out in CI is a
+  // flake, and the honest fix is to say how long these actually take.
+  testTimeout: 30_000,
+  // Two workers rather than one per core. These suites are memory-heavy — each
+  // loads the React Native module graph — and the contention was what pushed
+  // one of them past its timeout in the first place.
+  maxWorkers: 2,
 };
