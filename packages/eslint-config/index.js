@@ -156,6 +156,17 @@ export const typescript = {
  * `react/react-in-jsx-scope` is off because the modern transform makes the
  * import unnecessary, and `prop-types` because TypeScript already states what a
  * component takes — the same reason `jsdoc/no-types` is an error here.
+ *
+ * **The React version is stated rather than detected.** `version: "detect"`
+ * sends eslint-plugin-react through a code path that calls
+ * `context.getFilename()`, which ESLint 10 removed, and every rule in the
+ * recommended set then fails to load. Saying the version outright avoids the
+ * detection entirely. The cost is that this line has to move when React does,
+ * and the failure mode if it is forgotten is mild: rules calibrated for a
+ * slightly older React, rather than a linter that will not start.
+ *
+ * This is the same shape of problem as the TypeScript pin above, and is handled
+ * the same way — locally, with the reason written down.
  */
 export const reactNative = {
   files: ["**/*.{ts,tsx}"],
@@ -169,7 +180,7 @@ export const reactNative = {
       __DEV__: "readonly",
     },
   },
-  settings: { react: { version: "detect" } },
+  settings: { react: { version: "19.2" } },
   rules: {
     ...react.configs.flat.recommended.rules,
     // The two that catch real defects. A hook behind a condition changes the

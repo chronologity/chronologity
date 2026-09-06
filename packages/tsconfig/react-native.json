@@ -1,13 +1,29 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
   "display": "Chronologity React Native",
-  "_comment": "React Native runtime preset. Added in Phase 11, when apps/mobile became its first real consumer. Extends the base rather than the Node preset: `module: nodenext` and `types: [\"node\"]` describe a runtime this is not, and Metro resolves like a bundler.",
+  "_comment": [
+    "React Native runtime preset. Added in Phase 11, when apps/mobile became its",
+    "first real consumer.",
+    "",
+    "Extends the base rather than the Node preset: `module: nodenext` and",
+    "`types: [\"node\"]` describe a runtime this is not.",
+    "",
+    "The module settings match what Metro actually does, and are not a free",
+    "choice. `customConditions: [\"react-native\"]` is how a package's",
+    "react-native export is selected, and `module: preserve` leaves import",
+    "syntax for the bundler rather than rewriting it. An application extends",
+    "expo/tsconfig.base alongside this one, so a future SDK can add what it",
+    "needs without this preset having to know."
+  ],
   "extends": "./base.json",
   "compilerOptions": {
     "target": "ESNext",
     "lib": ["ESNext", "DOM"],
-    "module": "esnext",
+    "module": "preserve",
     "moduleResolution": "bundler",
+    "customConditions": ["react-native"],
+    "moduleDetection": "force",
+    "esModuleInterop": true,
     "jsx": "react-jsx",
     "allowJs": true,
     "types": []

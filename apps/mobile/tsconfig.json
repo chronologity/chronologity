@@ -1,0 +1,16 @@
+{
+  "_comment": [
+    "Both bases, in this order. Expo's carries what the current SDK needs from",
+    "the compiler and changes with it; Chronologity's carries the strictness",
+    "every package in this repository is held to, and wins where they overlap.",
+    "",
+    "`types` names jest explicitly. The shared base sets it empty because a",
+    "wide-open `types` pulls in whatever happens to be installed, and this",
+    "application is the one that needs a test runner's globals."
+  ],
+  "extends": ["expo/tsconfig.base", "@chronologity/tsconfig/react-native.json"],
+  "compilerOptions": {
+    "types": ["jest"]
+  },
+  "include": ["src/**/*", "index.ts", "App.tsx"]
+}
