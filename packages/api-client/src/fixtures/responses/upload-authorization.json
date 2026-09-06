@@ -1,0 +1,9 @@
+{
+  "uploadId": "b2c9d1e0-4a53-4f18-9c72-6d3e8f1a0b45",
+  "kind": "image",
+  "uploadUrl": "https://storage.chronologity.test/uploads/b2c9d1e0?X-Amz-Signature=abc123",
+  "contentType": "image/jpeg",
+  "uploadUrlExpiresAt": "2026-09-01T11:30:00.000Z",
+  "expiresAt": "2026-09-02T11:15:00.000Z",
+  "maximumByteSize": 26214400
+}

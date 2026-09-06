@@ -1,0 +1,23 @@
+{
+  "notifications": [
+    {
+      "notificationId": "9d4e2b71-3c85-4a06-b7f9-8e1d0c5a2f63",
+      "type": "participation_proposed",
+      "category": "participation",
+      "source": {
+        "type": "participation",
+        "id": "c5a7e912-6b34-4d80-9f21-7a3c8e0b1d54"
+      },
+      "actors": [
+        {
+          "userId": "3f2b7c58-9a41-4d2e-8f6a-1c0b5e7d9a24",
+          "handle": "rowan",
+          "displayName": "Rowan Ellis"
+        }
+      ],
+      "otherActors": 0,
+      "createdAt": "2026-08-30T14:22:09.000Z",
+      "readAt": null
+    }
+  ]
+}

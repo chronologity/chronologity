@@ -1,0 +1,17 @@
+{
+  "results": [
+    {
+      "entityType": "moment",
+      "entityId": "7ea1c1f4-1b1e-4c7b-9d5e-2a4f9c8b1d30",
+      "title": "The last morning at the old house.",
+      "snippet": "The last morning at the <em>old house</em>.",
+      "occurrence": {
+        "start": "2019-06-14T07:20:00.000Z",
+        "end": "2019-06-14T07:20:00.000Z",
+        "precision": "instant"
+      },
+      "matchedOn": ["caption_match"]
+    }
+  ],
+  "total": 1
+}

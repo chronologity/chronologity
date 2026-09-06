@@ -1,0 +1,17 @@
+{
+  "userId": "3f2b7c58-9a41-4d2e-8f6a-1c0b5e7d9a24",
+  "handle": "rowan",
+  "displayName": "Rowan Ellis",
+  "biography": null,
+  "createdAt": "2024-02-09T18:40:33.000Z",
+  "status": "active",
+  "dateOfBirth": "1991-03-22",
+  "preferences": {
+    "autoplayVideos": true,
+    "autoplaySound": true,
+    "locale": "en-GB",
+    "timeZone": "Europe/London",
+    "reducedMotion": false,
+    "timelineIsPublic": true
+  }
+}
