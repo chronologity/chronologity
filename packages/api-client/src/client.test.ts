@@ -3,6 +3,7 @@ import { describe, it } from "vitest";
 import { z } from "zod";
 import { ApiError } from "./api-error.js";
 import { createApiClient } from "./client.js";
+import { TransportError } from "./retry.js";
 
 const jsonResponse = (body: unknown, init: ResponseInit = {}) =>
   new Response(JSON.stringify(body), {
@@ -196,5 +197,156 @@ describe("following a request into the server's logs", () => {
     await client.request({ method: "GET", path: "/a", schema: z.unknown() });
 
     assert.equal(sent, false);
+  });
+});
+
+describe("reaching the API from a runtime with a partial URL implementation", () => {
+  it("builds a request URL without the two-argument URL constructor", async () => {
+    // React Native's `URL` is homemade and cannot take a `localhost` base,
+    // which is every development build. This is the request that used to fail.
+    let sent = "";
+    const client = createApiClient({
+      baseUrl: "http://localhost:3000",
+      fetch: async (input) => {
+        sent = String(input);
+
+        return jsonResponse({});
+      },
+    });
+
+    await client.request({ method: "GET", path: "/moments", schema: z.unknown() });
+
+    assert.equal(sent, "http://localhost:3000/moments");
+  });
+
+  it("keeps a base URL's own path rather than replacing it", async () => {
+    // `new URL("/moments", "https://example.com/v1")` answers
+    // "https://example.com/moments" — the prefix silently dropped, and every
+    // request sent somewhere the API is not.
+    let sent = "";
+    const client = createApiClient({
+      baseUrl: "https://example.com/v1",
+      fetch: async (input) => {
+        sent = String(input);
+
+        return jsonResponse({});
+      },
+    });
+
+    await client.request({ method: "GET", path: "/moments", schema: z.unknown() });
+
+    assert.equal(sent, "https://example.com/v1/moments");
+  });
+
+  it("does not double the slash when the base URL carries one", async () => {
+    let sent = "";
+    const client = createApiClient({
+      baseUrl: "http://api.test/",
+      fetch: async (input) => {
+        sent = String(input);
+
+        return jsonResponse({});
+      },
+    });
+
+    await client.request({ method: "GET", path: "/moments", schema: z.unknown() });
+
+    assert.equal(sent, "http://api.test/moments");
+  });
+
+  it("carries a query string through untouched", async () => {
+    let sent = "";
+    const client = createApiClient({
+      baseUrl: "http://api.test",
+      fetch: async (input) => {
+        sent = String(input);
+
+        return jsonResponse({});
+      },
+    });
+
+    await client.request({ method: "GET", path: "/moments?limit=20", schema: z.unknown() });
+
+    assert.equal(sent, "http://api.test/moments?limit=20");
+  });
+});
+
+describe("cancelling on a runtime without AbortSignal.any", () => {
+  it("still combines the caller's signal with the attempt's deadline", async () => {
+    // `AbortSignal.any` is absent from React Native, and the old code called it
+    // on every request that carried a caller's signal.
+    const present = AbortSignal.any;
+
+    try {
+      // @ts-expect-error - removing a global to stand in for a runtime without it.
+      delete AbortSignal.any;
+
+      const controller = new AbortController();
+      const client = createApiClient({
+        baseUrl: "http://api.test",
+        fetch: async (_input, init) =>
+          await new Promise<Response>((_resolve, reject) => {
+            const inner = init?.signal;
+
+            inner?.addEventListener("abort", () => {
+              reject(new DOMException("aborted", "AbortError"));
+            });
+
+            setTimeout(() => {
+              controller.abort();
+            }, 0);
+          }),
+      });
+
+      await assert.rejects(
+        client.request({
+          method: "GET",
+          path: "/moments",
+          schema: z.unknown(),
+          signal: controller.signal,
+        }),
+        (error: unknown) => error instanceof TransportError && !error.retryable,
+      );
+    } finally {
+      AbortSignal.any = present;
+    }
+  });
+
+  it("passes the deadline straight through when the caller gave no signal", async () => {
+    let received: AbortSignal | undefined;
+    const client = createApiClient({
+      baseUrl: "http://api.test",
+      fetch: async (_input, init) => {
+        received = init?.signal ?? undefined;
+
+        return jsonResponse({});
+      },
+    });
+
+    await client.request({ method: "GET", path: "/a", schema: z.unknown() });
+
+    assert.equal(received?.aborted, false);
+  });
+
+  it("reports an expired deadline as a timeout, not a cancellation", async () => {
+    // The deadline is an AbortController now, so its abort carries no
+    // TimeoutError to recognise. Getting this wrong would make every timeout
+    // unretryable.
+    const client = createApiClient({
+      baseUrl: "http://api.test",
+      timeoutMs: 1,
+      retry: { attempts: 1, baseDelayMs: 0, maxDelayMs: 0 },
+      fetch: async (_input, init) =>
+        await new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("aborted", "AbortError"));
+          });
+        }),
+    });
+
+    await assert.rejects(
+      client.request({ method: "GET", path: "/slow", schema: z.unknown() }),
+      (error: unknown) => error instanceof TransportError && error.retryable,
+    );
   });
 });

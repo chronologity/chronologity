@@ -78,20 +78,30 @@ const REPEATABLE = new Set(["GET", "HEAD", "PUT", "DELETE"]);
  * @param error - What was thrown.
  * @param signal - The caller's own signal, so an abort they asked for is told
  *   apart from a timeout they did not.
+ * @param timedOut - Whether this attempt's own deadline expired. Passed rather
+ *   than inferred because the deadline is enforced with an `AbortController`
+ *   rather than `AbortSignal.timeout`, which React Native does not have — and
+ *   an ordinary abort carries no reason saying which clock ran out.
  * @returns A `TransportError`, or the error unchanged when it is already an
  *   `ApiError` — the server answered, and its answer is the classification.
  */
-export function classify(error: unknown, signal: AbortSignal | undefined): unknown {
+export function classify(
+  error: unknown,
+  signal: AbortSignal | undefined,
+  timedOut = false,
+): unknown {
   if (error instanceof ApiError) {
     return error;
   }
 
   // The caller cancelled. Retrying would be doing work they asked to stop.
+  // Checked before the deadline, because a caller who aborts at the moment one
+  // expires still asked to stop.
   if (signal?.aborted === true) {
     return new TransportError("The request was cancelled", false, error);
   }
 
-  if (error instanceof DOMException && error.name === "TimeoutError") {
+  if (timedOut || (error instanceof DOMException && error.name === "TimeoutError")) {
     return new TransportError("The request timed out", true, error);
   }
 

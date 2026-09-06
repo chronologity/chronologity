@@ -119,15 +119,16 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
       }
 
       for (let attempt = 1; ; attempt += 1) {
+        // A fresh timeout per attempt. Sharing one across retries would mean
+        // the last attempt inherits whatever the first two left of it.
+        const attemptDeadline = deadline(timeoutMs);
+
         try {
-          // A fresh timeout per attempt. Sharing one across retries would mean
-          // the last attempt inherits whatever the first two left of it.
-          const timeout = AbortSignal.timeout(timeoutMs);
-          const response = await fetchImpl(new URL(path, baseUrl), {
+          const response = await fetchImpl(join(baseUrl, path), {
             method,
             headers,
             ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-            signal: signal === undefined ? timeout : AbortSignal.any([signal, timeout]),
+            signal: soonestOf(signal, attemptDeadline.signal),
           });
 
           if (!response.ok) {
@@ -140,7 +141,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 
           return schema.parse(await response.json());
         } catch (thrown) {
-          const error = classify(thrown, signal);
+          const error = classify(thrown, signal, attemptDeadline.expired());
 
           // A schema mismatch is not a transport failure and repeating it would
           // produce the same bytes; `classify` returns it unchanged and
@@ -157,10 +158,110 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
               retry,
             ),
           );
+        } finally {
+          // The timer holds the event loop open otherwise, which in Node keeps
+          // a process alive for the remainder of a timeout nobody is waiting on.
+          attemptDeadline.cancel();
         }
       }
     },
   };
+}
+
+/**
+ * Join a base URL and a path.
+ *
+ * Written out rather than using `new URL(path, baseUrl)`, and the reason is a
+ * runtime rather than a preference. React Native ships a homemade lightweight
+ * `URL` whose documented gaps include being unable to take a `localhost` base —
+ * which is every development build, so the two-argument form fails on the first
+ * request an app ever makes.
+ *
+ * It also fixes a smaller thing the standard form gets wrong here. An absolute
+ * path *replaces* the base's own path, so a client pointed at
+ * `https://example.com/v1` would send every request to `/moments` and none to
+ * `/v1/moments`. A base URL's prefix is part of where the API is.
+ *
+ * @param baseUrl - Where the API is, with or without a trailing slash.
+ * @param path - The route, beginning with a slash.
+ * @returns The absolute URL to request.
+ */
+function join(baseUrl: string, path: string): string {
+  return `${baseUrl.replace(/\/+$/, "")}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+/** One attempt's deadline, and the means to stop it. */
+interface Deadline {
+  readonly signal: AbortSignal;
+  /** Whether the deadline is what aborted. */
+  expired: () => boolean;
+  /** Stop the timer, whether or not it fired. */
+  cancel: () => void;
+}
+
+/**
+ * Start a deadline for one attempt.
+ *
+ * `AbortSignal.timeout` would say this in one line and is absent from React
+ * Native, so it is built from the two primitives that are everywhere.
+ *
+ * @param ms - How long the attempt may take.
+ * @returns The deadline. `cancel` must be called however the attempt ends, or
+ *   the timer keeps the event loop alive for the remainder of a wait nobody is
+ *   waiting on.
+ */
+function deadline(ms: number): Deadline {
+  const controller = new AbortController();
+  let expired = false;
+
+  const timer = setTimeout(() => {
+    expired = true;
+    controller.abort();
+  }, ms);
+
+  return {
+    signal: controller.signal,
+    expired: () => expired,
+    cancel: () => {
+      clearTimeout(timer);
+    },
+  };
+}
+
+/**
+ * A signal that aborts when the first of its inputs does.
+ *
+ * `AbortSignal.any` is the one-line version and React Native does not have it,
+ * so an unguarded call fails on every request where a caller passes a signal of
+ * their own — which is every screen that can be navigated away from.
+ *
+ * @param caller - The caller's signal, where they gave one.
+ * @param timeout - This attempt's deadline.
+ * @returns The deadline alone when there is nothing to combine it with, and
+ *   otherwise a signal following whichever aborts first.
+ */
+function soonestOf(caller: AbortSignal | undefined, timeout: AbortSignal): AbortSignal {
+  if (caller === undefined) {
+    return timeout;
+  }
+
+  const combined = new AbortController();
+
+  for (const one of [caller, timeout]) {
+    // Already aborted signals never fire the event, so the state is read as
+    // well as listened for.
+    if (one.aborted) {
+      combined.abort(one.reason);
+
+      return combined.signal;
+    }
+
+    one.addEventListener("abort", () => {
+      combined.abort(one.reason);
+    });
+  }
+
+  return combined.signal;
 }
 
 /**
