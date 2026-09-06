@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import { z } from "zod";
-import { ApiError, createApiClient } from "./client.js";
+import { ApiError } from "./api-error.js";
+import { createApiClient } from "./client.js";
 
 const jsonResponse = (body: unknown, init: ResponseInit = {}) =>
   new Response(JSON.stringify(body), {
@@ -112,5 +113,88 @@ describe("createApiClient", () => {
     await client.request({ method: "GET", path: "/public", schema: z.unknown() });
 
     assert.equal(header, null);
+  });
+});
+
+describe("a response that carries no body", () => {
+  const empty = () => new Response(null, { status: 204 });
+
+  it("answers a route describing its silence as void", async () => {
+    const client = clientWith(async () => empty());
+
+    const result = await client.request({ method: "DELETE", path: "/a", schema: z.void() });
+
+    assert.equal(result, undefined);
+  });
+
+  it("answers a route describing its silence as null", async () => {
+    // Six routes in this API spell it this way, deleting a Moment among them.
+    // Parsing `undefined` unconditionally threw *after the server had already
+    // succeeded* — the Moment was gone and the caller saw a validation failure.
+    const client = clientWith(async () => empty());
+
+    const result = await client.request({ method: "DELETE", path: "/a", schema: z.null() });
+
+    assert.equal(result, null);
+  });
+
+  it("still refuses a route that documents a body it cannot have", async () => {
+    // The guard against being too permissive: a 204 declaring an object is a
+    // route that is wrong, and quietly returning undefined would hide it.
+    const client = clientWith(async () => empty());
+
+    await assert.rejects(() =>
+      client.request({ method: "DELETE", path: "/a", schema: z.object({ id: z.string() }) }),
+    );
+  });
+});
+
+describe("following a request into the server's logs", () => {
+  it("sends a trace identifier the API will echo", async () => {
+    let header: string | null = null;
+    const client = createApiClient({
+      baseUrl: "http://api.test/",
+      fetch: async (_input, init) => {
+        header = new Headers(init?.headers).get("x-trace-id");
+        return jsonResponse({});
+      },
+      newTraceId: () => "known-trace",
+    });
+
+    await client.request({ method: "GET", path: "/a", schema: z.unknown() });
+
+    assert.equal(header, "known-trace");
+  });
+
+  it("carries a caller's own identifier rather than inventing one", async () => {
+    // A screen already tracing a user action wants the whole action under one
+    // identifier, not one per request it happens to make.
+    let header: string | null = null;
+    const client = clientWith(async (_input, init) => {
+      header = new Headers(init?.headers).get("x-trace-id");
+      return jsonResponse({});
+    });
+
+    await client.request({ method: "GET", path: "/a", schema: z.unknown(), traceId: "mine" });
+
+    assert.equal(header, "mine");
+  });
+
+  it("sends no identifier where the runtime cannot produce one", async () => {
+    // React Native has no global `crypto` without a polyfill. Omitting the
+    // header costs correlation; throwing would cost the request.
+    let sent = true;
+    const client = createApiClient({
+      baseUrl: "http://api.test/",
+      fetch: async (_input, init) => {
+        sent = new Headers(init?.headers).has("x-trace-id");
+        return jsonResponse({});
+      },
+      newTraceId: () => undefined,
+    });
+
+    await client.request({ method: "GET", path: "/a", schema: z.unknown() });
+
+    assert.equal(sent, false);
   });
 });

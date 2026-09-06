@@ -9,8 +9,8 @@
  * timeouts, and mapping the API's stable error envelope onto a thrown error.
  * Server business logic never moves into the client.
  */
+export { ApiError } from "./api-error.js";
 export {
-  ApiError,
   createApiClient,
   type ApiClient,
   type ApiClientOptions,

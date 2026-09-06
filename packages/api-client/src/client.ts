@@ -1,28 +1,6 @@
-import { errorResponseSchema, type ErrorCode, type ErrorResponse } from "@chronologity/contracts";
+import { errorResponseSchema, type ErrorResponse } from "@chronologity/contracts";
+import { ApiError } from "./api-error.js";
 import type { z } from "zod";
-
-/** An error returned by the API in its stable envelope. */
-export class ApiError extends Error {
-  override readonly name = "ApiError";
-  readonly code: ErrorCode;
-  readonly status: number;
-  readonly traceId: string;
-  readonly details: Readonly<Record<string, unknown>> | undefined;
-
-  /**
-   * Build an error from the API's stable envelope.
-   *
-   * @param status - The HTTP status returned.
-   * @param response - The envelope body.
-   */
-  constructor(status: number, response: ErrorResponse) {
-    super(response.message);
-    this.status = status;
-    this.code = response.code;
-    this.traceId = response.traceId;
-    this.details = response.details;
-  }
-}
 
 export interface ApiClientOptions {
   /** Absolute base URL of the API, without a trailing path. */
@@ -37,6 +15,18 @@ export interface ApiClientOptions {
   getAccessToken?: () => string | undefined | Promise<string | undefined>;
   /** Overrides `globalThis.fetch`. Primarily a testing seam. */
   fetch?: typeof globalThis.fetch;
+  /**
+   * Produces the identifier that ties one request to the API's logs.
+   *
+   * The API honours an inbound `x-trace-id` and echoes it back, so sending one
+   * lets a request be followed from here through the server without anybody
+   * correlating by timestamp. Injectable because `crypto.randomUUID` is not
+   * everywhere: React Native has no global `crypto` without a polyfill, and a
+   * client that threw on a missing global would be unusable in the one runtime
+   * this package exists for. Absent, the header is omitted and the server
+   * generates one.
+   */
+  newTraceId?: () => string | undefined;
   /** Per-request timeout in milliseconds. */
   timeoutMs?: number;
 }
@@ -48,6 +38,18 @@ export interface RequestOptions<Schema extends z.ZodType> {
   schema: Schema;
   body?: unknown;
   signal?: AbortSignal;
+  /** Ties this request to whatever the caller is already tracing. */
+  traceId?: string;
+  /**
+   * Whether repeating this request is defined to be the same as making it
+   * once.
+   *
+   * The only way a `POST` is ever retried. Declared per operation rather
+   * than inferred, because nothing about a path says whether repeating it is
+   * safe — `POST /uploads/:id/finalize` is documented idempotent and `POST
+   * /moments` records a second Moment.
+   */
+  idempotent?: boolean;
 }
 
 export interface ApiClient {
@@ -73,6 +75,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     getAccessToken,
     fetch: fetchImpl = globalThis.fetch,
     timeoutMs = DEFAULT_TIMEOUT_MS,
+    newTraceId = defaultTraceId,
   } = options;
 
   return {
@@ -82,9 +85,15 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
       schema,
       body,
       signal,
+      traceId,
     }: RequestOptions<Schema>): Promise<z.infer<Schema>> {
       const token = await getAccessToken?.();
       const headers: Record<string, string> = { accept: "application/json" };
+      const trace = traceId ?? newTraceId();
+
+      if (trace !== undefined) {
+        headers["x-trace-id"] = trace;
+      }
 
       if (token !== undefined) {
         headers.authorization = `Bearer ${token}`;
@@ -106,7 +115,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
       }
 
       if (response.status === 204) {
-        return schema.parse(undefined);
+        return emptyBody(schema);
       }
 
       return schema.parse(await response.json());
@@ -139,4 +148,50 @@ async function toApiError(response: Response): Promise<ApiError> {
   } catch {
     return new ApiError(response.status, fallback);
   }
+}
+
+/**
+ * The value a schema expects when a response carried no body.
+ *
+ * **Both spellings are legitimate and this client must answer either.** A route
+ * describing its empty success as `z.void()` parses `undefined`; one describing
+ * it as `z.null()` parses `null`, and six routes in this API do — deleting a
+ * Moment among them. Parsing `undefined` unconditionally, which is what this did
+ * before anything called it, threw *after the server had already succeeded*: the
+ * Moment was gone and the caller saw a validation failure.
+ *
+ * Fixed here rather than by changing six routes, because neither spelling is
+ * wrong. A client that tolerates only one is the thing that is wrong.
+ *
+ * @param schema - What the route says a 204 carries.
+ * @returns Whichever of `undefined` or `null` the schema accepts.
+ * @throws {z.ZodError} If it accepts neither, which means the route documents a
+ *   body for a status that cannot carry one. The error is the one raised for
+ *   `undefined`, because that is the spelling a reader would have expected.
+ */
+function emptyBody<Schema extends z.ZodType>(schema: Schema): z.infer<Schema> {
+  const asVoid = schema.safeParse(undefined);
+
+  if (asVoid.success) {
+    return asVoid.data;
+  }
+
+  const asNull = schema.safeParse(null);
+
+  if (asNull.success) {
+    return asNull.data;
+  }
+
+  return schema.parse(undefined);
+}
+
+/**
+ * An identifier for one request, where the runtime can produce one.
+ *
+ * @returns A fresh identifier, or undefined where `crypto.randomUUID` is absent
+ *   — in which case the header is omitted and the API generates its own, which
+ *   is a worse experience than correlating and a better one than crashing.
+ */
+function defaultTraceId(): string | undefined {
+  return globalThis.crypto?.randomUUID?.();
 }
